@@ -26,6 +26,8 @@ APK：`.artifacts/yuyi-1.4.0-arm64.apk`，14,802,276字节，SHA-256 `993813e69c
 
 验收后关闭子代理，清除本轮意外中断留下的新包本地夹具URL／模型ID，只恢复测试前未配置状态，不触真实服务或旧包；重新从空白草稿验证后缀并放弃，确认未持久化测试地址。保留新包公开模型副本用于界面体验。
 
+推送后的云端构建补充：首次[Actions运行](https://github.com/ZOUYIQAQ/yuyi/actions/runs/38739729774)在SDK初始化失败，原因是android-actions/setup-android@v3默认安装已下架的tools包，尚未进入项目编译。已对照该动作官方action.yml将packages显式设为platform-tools，保留原有单元、Lint、构建和无模型检查，不跳过失败检查；后续云端执行结果以Actions记录为准。此配置修复不改变上述APK内容。
+
 ## 映声1.3.1追加功能（2026-10-15）
 
 - 应用名与独立包ID保持映声 / `io.github.zouyiqaq.hinome`，versionCode24。图标以用户SVG为源，仅保留彩色、纯色两种样式；默认彩色、渐变插画背景与飘落装饰，开关同时控制花瓣和绿叶、保留头花。原PNG只留作取色参考，不作为可选模式。
