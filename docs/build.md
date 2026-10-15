@@ -66,7 +66,11 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 
 ## 签名与发布前检查
 
-包名为 `io.github.zouyiqaq.yuyi`。当前 Release 构建配置仍引用 `signingConfigs.getByName("debug")`，因此签名取决于构建机器的 keystore；不能把其他机器新生成的 debug key 当作原发行证书。覆盖安装要求相同包名、兼容版本号与相同签名；正式发行前必须确认维护者指定的证书和密钥管理方案。
+包名为 `io.github.zouyiqaq.yuyi`。正式Release使用独立的羽译签名，不再复用Debug证书。默认读取维护者主机的`~/.android/yuyi/release.properties`，可通过环境变量`YUYI_SIGNING_PROPERTIES`指定其他配置文件。配置包含`storeFile`、`storePassword`、`keyAlias`、`keyPassword`；相对密钥路径以配置文件目录为基准。不要把配置或私钥提交到仓库、附加到Release或写入构建日志。
+
+未配置正式签名时，Debug和CI照常构建，Release只生成`app-release-unsigned.apk`；显式指定的配置文件不存在或缺字段时直接报错。发布前必须通过`apksigner verify --print-certs`核对签名。签名配置参考[Android官方签名文档](https://developer.android.com/studio/publish/app-signing)。
+
+首个正式发行版从v1.5.0开始使用这把独立密钥；此前未发布的本机测试包为Debug签名，不能直接覆盖为正式版。本机测试包及数据保持不动。后续正式版必须沿用首发私钥以支持覆盖升级；维护者需要妥善备份整个`~/.android/yuyi/`目录，换机时通过上述配置指定原密钥。
 
 构建后使用已安装 SDK 的 `apksigner` 核对证书，使用 `aapt` 或 `apkanalyzer` 核对包名与版本；与实际目标旧包比较。不要把旧文档的证书指纹或旧上游仓库发行流程作为本 Fork 已验证事实。发布说明、标签和 APK 版本应一致；发布后回读安装包核对哈希。当前客户端不要求上传 `update.json`。
 

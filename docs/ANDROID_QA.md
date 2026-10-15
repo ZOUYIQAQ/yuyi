@@ -1,5 +1,14 @@
 # Android 改造验收记录
 
+## 首个正式Release签名验收（v1.5.0，2026-10-15）
+
+本次按用户明确授权发布首个GitHub正式发行版。现有v1.5.0功能验收继续有效；首发补齐独立签名，Release不再使用Debug证书。签名配置从仓库外文件读取，没有提交私钥或密码。
+
+- `assembleRelease`、`assembleDebug`、`lintDebug`通过，日志`.qa/first-release/build-fixed.log`。首次Kotlin DSL因`java`扩展遮蔽包名而编译失败，改用显式`Properties`导入后通过；原始日志保留。指定不存在的签名配置时按预期失败，没有回退到Debug证书；独立只读审阅未发现实质问题。
+- 首发附件为`yuyi-1.5.0-arm64-v8a.apk`与`SHA256SUMS.txt`。包名`io.github.zouyiqaq.yuyi`，version1.5.0/code26，非debuggable，只有arm64-v8a，无语音权重、测试音频、调试CA或安装APK权限，MIT全文一致。除APK签名和内嵌Git修订元数据外，所有归档条目与此前已验收安装包逐项一致；没有将新签名冒称为模拟器覆盖安装成功。
+- 正式证书为`CN=Yuyi, OU=Android, O=ZOUYIQAQ`，RSA4096，证书SHA-256为`ee704e1245290d82e4c4dce662ef531ec483171c87c4ffa09e9d11b3781b37a8`；APK v2签名验证通过。密钥与配置保存在维护者本机`~/.android/yuyi/`，需妥善备份，后续正式版沿用同一私钥。旧Debug测试包和数据保留，因证书不同不能直接覆盖安装正式版，发行说明注明这一点。
+- 发布附件不包含签名私钥、凭据或模型。最终字节数、哈希、发布源码提交及附件回读结果以GitHub发行记录、`SHA256SUMS.txt`和`.qa/first-release/`证据为准。
+
 ## 羽译1.5.0追加验收（2026-10-15）
 
 本轮只在本机API35/ARM64模拟器`emulator-5580`验收，未操作远程设备。使用羽译独立包`io.github.zouyiqaq.yuyi`，versionCode26；Release覆盖安装保留已有配置、模型和旧包数据。

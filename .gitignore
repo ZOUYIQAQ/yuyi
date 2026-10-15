@@ -17,3 +17,11 @@ app/src/main/assets/models/
 
 # 图标生成器的本地字节码缓存
 __pycache__/
+
+# 正式签名密钥与本地凭据不进入版本控制
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties

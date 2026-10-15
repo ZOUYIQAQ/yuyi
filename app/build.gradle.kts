@@ -1,7 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// 正式密钥留在仓库外；开发与CI无需密钥，未配置时只生成未签名Release。
+val releaseSigningPath = providers.environmentVariable("YUYI_SIGNING_PROPERTIES").orNull
+val releaseSigningFile = file(releaseSigningPath ?: "${System.getProperty("user.home")}/.android/yuyi/release.properties")
+require(releaseSigningPath == null || releaseSigningFile.isFile) { "指定的羽译签名配置不存在" }
+val releaseSigning = Properties().apply {
+    if (releaseSigningFile.isFile) releaseSigningFile.inputStream().use { load(it) }
 }
 
 android {
@@ -21,12 +31,26 @@ android {
     // 模型只从应用私有目录加载，构建时排除历史 assets 模型。
     sourceSets.getByName("main").assets.exclude("models/**")
 
+    signingConfigs {
+        if (releaseSigningFile.isFile) {
+            listOf("storeFile", "storePassword", "keyAlias", "keyPassword").forEach {
+                require(!releaseSigning.getProperty(it).isNullOrBlank()) { "羽译签名配置缺少字段：$it" }
+            }
+            create("yuyiRelease") {
+                storeFile = releaseSigningFile.parentFile.resolve(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("yuyiRelease")
         }
     }
 
