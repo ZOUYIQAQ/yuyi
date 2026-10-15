@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 系统持久化完整资源名称，发布后保留这些名称以兼容后续冷启动。 -->
+    <style name="Theme.Yuyi.Starting.Base" parent="Theme.JpSub">
+        <item name="android:colorBackground">@color/splash_amber</item>
+        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:statusBarColor">?android:colorBackground</item>
+        <item name="android:navigationBarColor">?android:colorBackground</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Ocean" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_ocean</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Ocean.Light" parent="Theme.Yuyi.Starting.Ocean">
+        <item name="android:colorBackground">@color/splash_ocean_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Ocean.Dark" parent="Theme.Yuyi.Starting.Ocean">
+        <item name="android:colorBackground">@color/splash_ocean_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Forest" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_forest</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Forest.Light" parent="Theme.Yuyi.Starting.Forest">
+        <item name="android:colorBackground">@color/splash_forest_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Forest.Dark" parent="Theme.Yuyi.Starting.Forest">
+        <item name="android:colorBackground">@color/splash_forest_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Violet" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_violet</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Violet.Light" parent="Theme.Yuyi.Starting.Violet">
+        <item name="android:colorBackground">@color/splash_violet_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Violet.Dark" parent="Theme.Yuyi.Starting.Violet">
+        <item name="android:colorBackground">@color/splash_violet_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Amber" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_amber</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Amber.Light" parent="Theme.Yuyi.Starting.Amber">
+        <item name="android:colorBackground">@color/splash_amber_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Amber.Dark" parent="Theme.Yuyi.Starting.Amber">
+        <item name="android:colorBackground">@color/splash_amber_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Rose" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_rose</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Rose.Light" parent="Theme.Yuyi.Starting.Rose">
+        <item name="android:colorBackground">@color/splash_rose_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Rose.Dark" parent="Theme.Yuyi.Starting.Rose">
+        <item name="android:colorBackground">@color/splash_rose_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Slate" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_slate</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Slate.Light" parent="Theme.Yuyi.Starting.Slate">
+        <item name="android:colorBackground">@color/splash_slate_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Slate.Dark" parent="Theme.Yuyi.Starting.Slate">
+        <item name="android:colorBackground">@color/splash_slate_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Dynamic" parent="Theme.Yuyi.Starting">
+        <item name="android:colorBackground">@color/splash_dynamic</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Dynamic.Light" parent="Theme.Yuyi.Starting.Dynamic">
+        <item name="android:colorBackground">@color/splash_dynamic_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="Theme.Yuyi.Starting.Dynamic.Dark" parent="Theme.Yuyi.Starting.Dynamic">
+        <item name="android:colorBackground">@color/splash_dynamic_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

@@ -35,13 +35,15 @@ class ModelDownloadWorker(context: Context, parameters: WorkerParameters) : Coro
         try {
             // 重试与取消后的新任务可能短暂重叠，互斥保护共享的固定暂存目录。
             modelLocks.getOrPut(spec.id) { Mutex() }.withLock {
-                currentCoroutineContext().ensureActive()
-                setForeground(foregroundInfo(spec, ModelTaskSnapshot(ModelStatus.QUEUED)))
-                val downloader = ModelDownloader(ModelInstaller(ModelRepository.storageRoot(applicationContext)), OkHttpModelSource())
-                downloader.download(spec) { progress -> report(spec, progress, journal) }
-                val complete = ModelTaskSnapshot(ModelStatus.READY, spec.sizeBytes)
-                journal.write(spec.id, id, complete)
-                Result.success(data(complete))
+                ModelOperationGate.shared.withDownload {
+                    currentCoroutineContext().ensureActive()
+                    setForeground(foregroundInfo(spec, ModelTaskSnapshot(ModelStatus.QUEUED)))
+                    val downloader = ModelDownloader(ModelInstaller(ModelRepository.storageRoot(applicationContext)), OkHttpModelSource())
+                    downloader.download(spec) { progress -> report(spec, progress, journal) }
+                    val complete = ModelTaskSnapshot(ModelStatus.READY, spec.sizeBytes)
+                    journal.write(spec.id, id, complete)
+                    Result.success(data(complete))
+                }
             }
         } catch (error: CancellationException) {
             // 取消由 WorkManager 记录；网络约束中断可重新入队，不能误标永久取消。

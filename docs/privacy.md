@@ -6,7 +6,7 @@
 
 - 播放音频通过 Android `AudioPlaybackCapture` 获取，交由本地 ASR 与 VAD 处理；当前采集流水线不上传或保存原始音频，不读取麦克风音源。
 - APK 不含 ASR/VAD 权重。每个识别模型包各自包含 Silero VAD，需在「模型库」下载、逐文件校验后手动启用，存放在私有 `files/models/<模型标识>/` 下；识别时从本地读取。许可文本另以 APK `assets/licenses/` 随包提供。
-- 「设置 → 使用记录」默认关闭。开启后记录文字、提示词与运行指标，不含原始音频、API Key 或自定义请求头值；文件在应用专属外部目录 `Android/data/io.github.zouyiqaq.hinome/files/logs/`。
+- 「设置 → 使用记录」默认关闭。开启后记录文字、提示词与运行指标，不含原始音频、API Key 或自定义请求头值；文件在应用专属外部目录 `Android/data/io.github.zouyiqaq.yuyi/files/logs/`。
 - 翻译 API Key、自定义请求头值及 Jev Key 使用 Android Keystore 加密保存。应用关闭系统备份；这不意味着设备上的所有设置字段均为加密字段。
 
 ## 联网行为
@@ -18,7 +18,7 @@
 | 测试连接与首次关闭思考参数探测 | 用户配置的翻译服务 | 固定测试文本及提示词、服务凭据，最多尝试 6 种参数，可能计费 |
 | 生成术语 | 用户配置的翻译服务 | 场景、背景及已有术语等生成所需文字，携带该服务凭据 |
 | 开启 Jev 辅助后判断 | 所选 OpenCode Zen、TypeSafe 官方或 OpenRouter Jev 端点 | 断句使用原文；译文检查使用原文与译文，按渠道要求携带 Jev Key，不发送音频 |
-| 关于页手动检查更新 | `api.github.com` | GET `https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest`，获取发行标签；不附带字幕、使用记录或翻译密钥 |
+| 关于页手动检查更新 | `api.github.com` | GET `https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest`，获取发行标签；不附带字幕、使用记录或翻译密钥 |
 | 点击项目、模型来源或许可链接 | 外部浏览器或可处理链接的应用 | 打开对应网页；后续网页联网行为由外部应用和站点处理 |
 | 分享使用记录 | 用户在系统分享面板选择的应用 | 授权该应用读取所选日志文件 |
 

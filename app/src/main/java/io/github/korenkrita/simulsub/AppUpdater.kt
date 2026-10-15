@@ -57,7 +57,7 @@ internal data class UpdateRelease(
         .put("notes", notes).put("apkUrl", apkUrl).put("size", size).put("sha256", sha256).toString()
 
     companion object {
-        const val REPO = "https://github.com/KorenKrita/simul-subtitle"
+        const val REPO = "https://github.com/ZOUYIQAQ/yuyi"
         const val LATEST = "$REPO/releases/latest/download/update.json"
         const val REMIND_INTERVAL = 24 * 60 * 60 * 1000L
         const val MAX_MANIFEST = 128 * 1024
@@ -93,7 +93,7 @@ internal data class UpdateRelease(
             require(code > 0 && name.matches(Regex("[0-9]+(?:\\.[0-9]+){1,3}")))
             require(size in 1..200_000_000 && hash.matches(Regex("[0-9a-f]{64}")))
             // A proxy-supplied manifest cannot point the downloader at an arbitrary site or file.
-            require(url == "$REPO/releases/download/v$name/simul-subtitle-v$name.apk")
+            require(url == "$REPO/releases/download/v$name/yuyi-v$name.apk")
             return UpdateRelease(code, name, j.getString("notes"), url, size, hash)
         }
 
@@ -389,7 +389,7 @@ internal class AppUpdater(private val activity: Activity) {
                         activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
                     } catch (_: Exception) {
                         waitingForPermission = false
-                        error("没有打开安装设置", "请到手机设置里找到「火羽同传」，允许安装未知应用，再回来重试。") { install(release) }
+                        error("没有打开安装设置", "请到手机设置里找到「羽译」，允许安装未知应用，再回来重试。") { install(release) }
                     }
                 }.create())
             return
@@ -406,7 +406,7 @@ internal class AppUpdater(private val activity: Activity) {
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                         prefs.edit().remove("pendingInstall").apply()
                     } catch (_: Exception) {
-                        error("没有打开安装页面", "请确认手机允许「火羽同传」安装应用，然后重试。") { install(release) }
+                        error("没有打开安装页面", "请确认手机允许「羽译」安装应用，然后重试。") { install(release) }
                     }
                 }
             } catch (e: CancellationException) { throw e }

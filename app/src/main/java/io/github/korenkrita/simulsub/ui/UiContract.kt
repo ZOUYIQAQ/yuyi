@@ -1,7 +1,19 @@
 package io.github.korenkrita.simulsub.ui
 
+import io.github.korenkrita.simulsub.icons.LauncherIconChoice
+
+/** 字幕显示策略直接复用核心，预览与实际服务使用同一裁剪规则。 */
+typealias CaptionLimitMode = io.github.korenkrita.simulsub.CaptionLimitMode
+
 /** 页面标识由控制器持有，重建后可恢复当前入口。 */
-enum class UiDestination(val title: String) { LIVE("同传"), MODELS("模型库"), SCENES("场景术语"), SETTINGS("设置") }
+enum class UiDestination(val title: String) { LIVE("同传"), SUBTITLE("字幕"), MODELS("模型库"), SCENES("场景术语"), SETTINGS("设置") }
+
+/** 首次配置只包含不可缺少的权限、翻译服务和识别模型，各步均可跳过。 */
+enum class OnboardingStep { PERMISSIONS, API, MODEL }
+
+/** 引导完成状态来自真实持久化配置，不将草稿或下载中模型视为可用。 */
+data class OnboardingUiState(val step: OnboardingStep = OnboardingStep.PERMISSIONS,
+    val apiReady: Boolean = false, val modelReady: Boolean = false)
 
 /** 主题仅影响应用界面，悬浮字幕的配色独立设置。 */
 enum class UiThemeMode(val title: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
@@ -20,6 +32,7 @@ data class SimulSubUiState(
     val scenes: ScenesUiState = ScenesUiState(),
     val settings: SettingsUiState = SettingsUiState(),
     val message: UiMessage? = null,
+    val onboarding: OnboardingUiState? = null,
 )
 
 /** 权限按钮只派发标识；授权结果由系统回到控制器后重新传入。 */
@@ -45,6 +58,8 @@ data class LiveUiState(
     val sceneId: String = "",
     val sceneOptions: List<UiOption> = emptyList(),
     val finalOnly: Boolean = false,
+    val showOriginal: Boolean = false,
+    val showStats: Boolean = false,
     val permissions: List<PermissionUiState> = emptyList(),
     val captions: List<CaptionUiState> = emptyList(),
     val elapsed: String = "",
@@ -75,10 +90,14 @@ data class ModelUiState(
     val verificationDetail: String = "",
     val sourceUrl: String = "",
     val licenseUrl: String = "",
+    val canDelete: Boolean = false,
+    val deletionScope: String = "",
+    val deleteBlockedReason: String? = null,
 )
 
 /** 模型目录加载失败与目录为空分别呈现，刷新通过回调触发。 */
-data class ModelsUiState(val items: List<ModelUiState> = emptyList(), val loading: Boolean = false, val message: UiMessage? = null, val storageLabel: String = "")
+data class ModelsUiState(val items: List<ModelUiState> = emptyList(), val loading: Boolean = false, val message: UiMessage? = null,
+    val storageLabel: String = "", val deleteConfirmationId: String? = null, val deletingId: String? = null)
 
 /** 场景摘要由真实持久化内容转换，不把预览示例写回场景。 */
 data class SceneUiState(val id: String, val name: String, val background: String, val termCount: Int, val languageLabel: String, val builtin: Boolean = false, val summary: String = "")
@@ -119,6 +138,9 @@ data class TranslationApiUiState(
     val canTest: Boolean = true,
     val message: UiMessage? = null,
     val resolvedUrl: String = "",
+    /** 只有本次真实测试成功的完整地址才可由页面按钮确认应用。 */
+    val suggestedUrl: String = "",
+    val hasUnsavedChanges: Boolean = false,
 )
 
 /** 自定义请求头以稳定标识编辑，合法性与持久化由控制器校验。 */
@@ -136,13 +158,16 @@ data class SubtitleStyleUiState(
     val keepSentences: Int = 3,
     val keepChars: Int = 120,
     val maxLines: Int = 0,
-    val showOriginal: Boolean = true,
-    val showStats: Boolean = true,
+    val showOriginal: Boolean = false,
+    val showStats: Boolean = false,
     val paletteId: String = "",
     val palettes: List<CaptionPaletteUiState> = emptyList(),
     val minTextSp: Float = 10f,
     val maxTextSp: Float = 40f,
     val minWidthFraction: Float = 0.4f,
+    /** 显示句数包含草稿；keepSentences仅用于旧配置迁移，不参与新版保留策略。 */
+    val maxSentences: Int = maxOf(4, keepSentences.coerceIn(1, 10)),
+    val limitMode: CaptionLimitMode = CaptionLimitMode.SENTENCES,
 )
 
 /** 高级设置与旧 Prefs 对齐，Jev 密钥同样使用 null 保留、空串清空的契约。 */
@@ -170,7 +195,10 @@ data class SettingsUiState(
     val subtitle: SubtitleStyleUiState = SubtitleStyleUiState(),
     val theme: UiThemeMode = UiThemeMode.SYSTEM,
     val dynamicColors: Boolean = false,
-    val themeColorId: String = "ocean",
+    val themeColorId: String = ThemePalettes.DEFAULT_ID,
+    val customThemeSeed: Int = ThemePalettes.DEFAULT_CUSTOM_SEED,
+    val launcherIcon: LauncherIconChoice = LauncherIconChoice.DEFAULT,
+    val permissions: List<PermissionUiState> = emptyList(),
     val advanced: AdvancedUiState = AdvancedUiState(),
     val keepLogs: Boolean = false,
     val records: List<UsageRecordUiState> = emptyList(),
@@ -188,6 +216,10 @@ data class SettingsUiState(
  */
 data class SimulSubActions(
     val onNavigate: (UiDestination) -> Unit = {},
+    val onOnboardingNext: () -> Unit = {},
+    val onOnboardingSkip: () -> Unit = {},
+    val onOnboardingBack: () -> Unit = {},
+    val onRestartOnboarding: () -> Unit = {},
     val onStart: () -> Unit = {},
     val onStop: () -> Unit = {},
     val onPermission: (String) -> Unit = {},
@@ -201,8 +233,12 @@ data class SimulSubActions(
     val onDownloadModel: (String) -> Unit = {},
     val onCancelDownload: (String) -> Unit = {},
     val onActivateModel: (String) -> Unit = {},
+    val onRequestDeleteModel: (String) -> Unit = {},
+    val onDismissDeleteModel: () -> Unit = {},
+    val onConfirmDeleteModel: (String) -> Unit = {},
     val onModelSource: (String) -> Unit = {},
     val onModelLicense: (String) -> Unit = {},
+    val onOpenModelBenchmark: () -> Unit = {},
     val onCreateScene: () -> Unit = {},
     val onEditScene: (String) -> Unit = {},
     val onSceneDraftChange: (SceneEditorUiState) -> Unit = {},
@@ -219,10 +255,15 @@ data class SimulSubActions(
     val onRemoveHeader: (String) -> Unit = {},
     val onSaveApi: () -> Unit = {},
     val onTestApi: () -> Unit = {},
+    val onApplyTestedApiUrl: () -> Unit = {},
+    val onKeepApiUrl: () -> Unit = {},
+    val onDiscardApiDraft: () -> Unit = {},
     val onSubtitleStyleChange: (SubtitleStyleUiState) -> Unit = {},
     val onResetOverlayPosition: () -> Unit = {},
     val onThemeChange: (UiThemeMode) -> Unit = {},
     val onThemeColorChange: (String) -> Unit = {},
+    val onCustomThemeColorChange: (Int) -> Unit = {},
+    val onLauncherIconChange: (LauncherIconChoice) -> Unit = {},
     val onDynamicColorsChange: (Boolean) -> Unit = {},
     val onAdvancedChange: (AdvancedUiState) -> Unit = {},
     val onSaveJevKey: () -> Unit = {},
@@ -233,5 +274,6 @@ data class SimulSubActions(
     val onDeleteAllRecords: () -> Unit = {},
     val onCheckUpdate: () -> Unit = {},
     val onOpenRepository: () -> Unit = {},
+    val onOpenUpstreamRepository: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},
 )

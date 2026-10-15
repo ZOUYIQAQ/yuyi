@@ -708,22 +708,26 @@ class Pipeline(
 }
 
 /**
- * What the overlay shows: finished sentences, which never change once shown, and below them one separate draft
- * line for the sentence still being spoken. A draft never replaces or pushes out a final.
- * The oldest final leaves only while there are more than [minFinals] finals AND their Chinese text is longer than
- * [maxChars] code points (drafts and Japanese are not counted).
- * Guards: newer revisions only, nothing after a segment's final, no late drafts of older segments.
+ * 保存不可变定稿和一条独立草稿；Android服务通过setRetention选择互斥的句数或字数模式。
+ * 以下构造参数与setLimits保留历史兼容：定稿超过 [maxFinals] 时淘汰最旧句；
+ * 在最少到最多句数之间，仅当定稿译文超过 [maxChars] 个码点时继续收起旧句。
+ * 快照的最多句数包含草稿，但草稿只挤占显示额度，不销毁已保存的定稿。
+ * 仅接受更新的修订；已定稿或已淘汰的分段不能因迟到事件复活。
  */
-class CaptionBoard(private var minFinals: Int = DEFAULT_SENTENCES, private var maxChars: Int = DEFAULT_CHARS) {
+class CaptionBoard(minFinals: Int = DEFAULT_SENTENCES, maxChars: Int = DEFAULT_CHARS, maxFinals: Int = Int.MAX_VALUE) {
+    private var minFinals = minFinals.coerceAtLeast(1)
+    private var maxChars = maxChars.coerceAtLeast(0)
+    private var maxFinals = maxFinals.coerceAtLeast(this.minFinals)
+    private var retentionMode: CaptionLimitMode? = null
     private val finals = ArrayDeque<Caption>()
     private var draft: Caption? = null
-    /** newest final ever accepted: a removed sentence must not come back */
+    /** 记住最新定稿编号，已移除的句子不能重新出现。 */
     private var lastFinal = Long.MIN_VALUE
 
-    /** @return true if the board changed */
+    /** 接收字幕；内容变化时返回 true。 */
     @Synchronized
     fun accept(c: Caption): Boolean {
-        // a segment at or before the newest final is done: no second final, no late draft, also after it was trimmed
+        // 最新定稿及之前的分段已经结束，即使已裁剪也不接受重复定稿或迟到草稿。
         if (c.segmentId <= lastFinal) return false
         val d = draft
         if (c.isFinal) {
@@ -739,24 +743,59 @@ class CaptionBoard(private var minFinals: Int = DEFAULT_SENTENCES, private var m
         return true
     }
 
-    /** Settings changed while running. @return true if sentences were removed */
+    /** 运行中原子更新限制；省略最多句数时保留当前上限，裁剪或显示内容变化时返回 true。 */
     @Synchronized
-    fun setLimits(sentences: Int, chars: Int): Boolean {
-        minFinals = sentences.coerceAtLeast(1); maxChars = chars.coerceAtLeast(0)
-        return trim()
+    fun setLimits(sentences: Int, chars: Int, max: Int = maxFinals): Boolean {
+        val before = snapshot()
+        minFinals = sentences.coerceAtLeast(1)
+        maxChars = chars.coerceAtLeast(0)
+        maxFinals = max.coerceAtLeast(minFinals)
+        val removed = trim()
+        return removed || before != snapshot()
     }
 
+    /** 新版唯一显示入口：两种策略互斥；旧setLimits只用于兼容历史调用。 */
+    @Synchronized
+    fun setRetention(mode: CaptionLimitMode, sentences: Int, chars: Int): Boolean {
+        val before = snapshot()
+        retentionMode = mode
+        minFinals = if (mode == CaptionLimitMode.SENTENCES) sentences.coerceIn(1, 10) else 1
+        maxFinals = if (mode == CaptionLimitMode.SENTENCES) minFinals else Int.MAX_VALUE
+        maxChars = if (mode == CaptionLimitMode.CHARACTERS) chars.coerceAtLeast(1) else Int.MAX_VALUE
+        val removed = trim()
+        return removed || before != snapshot()
+    }
+
+    /** 旧调用保留历史行为；新版句数只按数量淘汰，字数只按译文码点淘汰。 */
     private fun trim(): Boolean {
         var removed = false
-        while (finals.size > minFinals && finals.sumOf { it.zh.codePointCount(0, it.zh.length) } > maxChars) {
+        if (retentionMode == CaptionLimitMode.CHARACTERS) {
+            // 保留跨过预算边界的完整原始句，快照才能精确截出跨句的最新尾部。
+            var total = finals.sumOf { it.zh.codePointCount(0, it.zh.length).toLong() }
+            while (finals.size > 1) {
+                val first = finals.first().zh
+                val count = first.codePointCount(0, first.length)
+                if (total - count < maxChars) break
+                finals.removeFirst()
+                total -= count
+                removed = true
+            }
+            return removed
+        }
+        while (finals.size > maxFinals ||
+            (finals.size > minFinals && finals.sumOf { it.zh.codePointCount(0, it.zh.length) } > maxChars)) {
             finals.removeFirst(); removed = true
         }
         return removed
     }
 
-    /** finals oldest first, then the draft (if any) */
+    /** 按时间顺序返回最近字幕；仅定稿模式在限句之前排除草稿，不消耗定稿显示额度。 */
     @Synchronized
-    fun snapshot(): List<Caption> = finals.toList() + listOfNotNull(draft)
+    fun snapshot(includeDraft: Boolean = true): List<Caption> {
+        val captions = finals.toList() + if (includeDraft) listOfNotNull(draft) else emptyList()
+        return retentionMode?.let { CaptionRetention.apply(captions, it, maxFinals, maxChars) }
+            ?: captions.takeLast(maxFinals)
+    }
 
     companion object {
         const val DEFAULT_SENTENCES = 2

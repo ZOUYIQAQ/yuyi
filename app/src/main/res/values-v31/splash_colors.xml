@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android12/13的Material3背景计算为中性变体98/6色调，原生资源仅提供邻近的99/10，不能宣称精确相等。 -->
+    <color name="splash_dynamic_light">@android:color/system_neutral2_10</color>
+    <color name="splash_dynamic_dark">@android:color/system_neutral2_900</color>
+</resources>

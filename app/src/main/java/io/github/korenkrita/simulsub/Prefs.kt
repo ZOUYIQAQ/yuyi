@@ -5,8 +5,15 @@ import android.content.Context
 /** Subtitle look, shared by the settings screen (live preview) and the overlay. */
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jpsub", Context.MODE_PRIVATE)
-    // every LLM API request (the session, 测试连接, 生成术语) is made after some Prefs exists
-    init { ByokTranslator.defaultUserAgent = "HinomeSub/${BuildConfig.VERSION_NAME}" }
+    // 会话、测试连接和生成术语均先读取偏好，再发送模型请求。
+    init {
+        ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
+        val range = sentenceRange()
+        if (!sp.contains("maxSentences") || sp.getInt("keepSentences", CaptionBoard.DEFAULT_SENTENCES) != range.first ||
+            sp.getInt("maxSentences", range.last) != range.last) {
+            setSentenceRange(range.first, range.last)
+        }
+    }
 
     /** Chinese caption size in sp */
     var textSp: Float
@@ -43,12 +50,12 @@ class Prefs(ctx: Context) {
 
     /** Show the recognised Japanese above the Chinese line */
     var showJa: Boolean
-        get() = sp.getBoolean("showJa", true)
+        get() = sp.getBoolean("showJa", false)
         set(v) = sp.edit().putBoolean("showJa", v).apply()
 
     /** Show the small timing line under the captions */
     var showStats: Boolean
-        get() = sp.getBoolean("showStats", true)
+        get() = sp.getBoolean("showStats", false)
         set(v) = sp.edit().putBoolean("showStats", v).apply()
 
     /** Overlay position (top-left, px); -1 = default */
@@ -59,13 +66,50 @@ class Prefs(ctx: Context) {
         get() = sp.getInt("overlayY", -1)
         set(v) = sp.edit().putInt("overlayY", v).apply()
 
-    /** Overlay keeps old sentences until there are more than [keepSentences] AND more than [keepChars] characters. */
+    /** 最少保留句数，继续使用旧键；提高最少值时同步扩展最多值。 */
     var keepSentences: Int
-        get() = sp.getInt("keepSentences", CaptionBoard.DEFAULT_SENTENCES)
-        set(v) = sp.edit().putInt("keepSentences", v).apply()
+        get() = sentenceRange().first
+        set(v) = setSentenceRange(v, maxSentences)
+
+    /** 显示最多句数包含草稿，范围为最少句数到十句。 */
+    var maxSentences: Int
+        get() = sentenceRange().last
+        set(v) = setSentenceRange(keepSentences, v)
+
+    /** 从同一份偏好快照读取合法范围；旧版最多值默认四句，且不小于旧最少值。 */
+    fun sentenceRange(): IntRange {
+        val values = sp.all
+        val min = ((values["keepSentences"] as? Int) ?: CaptionBoard.DEFAULT_SENTENCES).coerceIn(1, 10)
+        val max = ((values["maxSentences"] as? Int) ?: 4).coerceIn(min, 10)
+        return min..max
+    }
+
+    /** 一次写入两个端点，监听器不会读到半个新区间；端点冲突时优先保留最少值。 */
+    fun setSentenceRange(minSentences: Int, maxSentences: Int) {
+        val min = minSentences.coerceIn(1, 10)
+        val max = maxSentences.coerceIn(min, 10)
+        sp.edit().putInt("keepSentences", min).putInt("maxSentences", max).apply()
+    }
+
+    /** 新版显示策略默认为句数，旧组合限制不再同时参与显示。 */
+    val captionLimitMode: CaptionLimitMode
+        get() = runCatching { CaptionLimitMode.valueOf(sp.getString("captionLimitMode", null).orEmpty()) }.getOrDefault(CaptionLimitMode.SENTENCES)
+
+    /** 保留旧区间的上限作为新句数值，不再使用区间下限。 */
+    val captionSentenceCount: Int
+        get() = sp.getInt("captionSentenceCount", sentenceRange().last).coerceIn(1, 10)
+
+    /** 同一编辑原子保存模式及两个独立记忆值，切换模式不会丢失另一种设置。 */
+    fun setCaptionRetention(mode: CaptionLimitMode, sentences: Int, chars: Int) {
+        sp.edit().putString("captionLimitMode", mode.name)
+            .putInt("captionSentenceCount", sentences.coerceIn(1, 10))
+            .putInt("keepChars", chars.coerceIn(10, 300)).apply()
+    }
+
+    /** 字数模式下的最多译文字数；旧值保留但不会与句数模式叠加。 */
     var keepChars: Int
-        get() = sp.getInt("keepChars", CaptionBoard.DEFAULT_CHARS)
-        set(v) = sp.edit().putInt("keepChars", v).apply()
+        get() = sp.getInt("keepChars", CaptionBoard.DEFAULT_CHARS).coerceIn(10, 300)
+        set(v) = sp.edit().putInt("keepChars", v.coerceIn(10, 300)).apply()
 
     /** 原文与译文合计的实际显示行数，0不限；只限制显示，不裁掉会话历史。 */
     var maxCaptionLines: Int

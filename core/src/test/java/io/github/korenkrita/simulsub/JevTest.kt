@@ -532,6 +532,17 @@ class JevTest {
         assertTrue(steps[1].result.thinking)
     }
 
+    /** 本地接口返回 405 时，旧探测也必须立即结束，不继续发送其他思考参数。 */
+    @Test
+    fun theLegacyProbeStopsAtAnUnsupportedMethod() {
+        reply = { 405 to "{}" }
+        val steps = mutableListOf<ByokTranslator.Step>()
+        assertNull(byok().probe(steps))
+        assertEquals(1, steps.size)
+        assertEquals(405, steps.single().result.http)
+        assertEquals(1, hits.get())
+    }
+
     @Test
     fun theProbeStopsAtAWrongKeyAndReportsWhenNothingTurnsThinkingOff() {
         reply = { 401 to "{}" }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material3 1.4.0在Android14起直接使用这两个背景资源，与应用background角色一致。 -->
+    <color name="splash_dynamic_light">@android:color/system_background_light</color>
+    <color name="splash_dynamic_dark">@android:color/system_background_dark</color>
+</resources>

@@ -63,6 +63,59 @@ class AppControllerReviewTest {
     /** 释放监听和协程，不清理任何已有文件。 */
     @After fun finish() { instrumentation.runOnMainSync { store.clear() } }
 
+    /** 新安装不落盘保存会话；只有用户主动开启后才保持记录选项。 */
+    @Test fun sessionRecordingIsOffUntilExplicitlyEnabled() {
+        instrumentation.runOnMainSync {
+            assertFalse(prefs.keepLogs)
+            assertFalse(controller.state.value.settings.keepLogs)
+            actions.onKeepLogsChange(true)
+            assertTrue(prefs.keepLogs)
+            assertTrue(controller.state.value.settings.keepLogs)
+            assertTrue(Prefs(application).keepLogs)
+            actions.onKeepLogsChange(false)
+            val restored = AppController(application)
+            store.put("记录默认", restored)
+            assertFalse(Prefs(application).keepLogs)
+            assertFalse(restored.state.value.settings.keepLogs)
+        }
+    }
+
+    /** 未保存标记只反映可持久化字段，放弃恢复已存配置，显式清空密钥也属于更改。 */
+    @Test fun apiDirtyStateTracksEditsSaveAndDiscard() {
+        instrumentation.runOnMainSync {
+            prefs.saveByok("https://example.com/v1", "原模型", "saved-key", "", emptyList())
+            actions.onDiscardApiDraft()
+            assertFalse(controller.state.value.settings.api.hasUnsavedChanges)
+            actions.onApiDraftChange(controller.state.value.settings.api.copy(model = "新模型"))
+            assertTrue(controller.state.value.settings.api.hasUnsavedChanges)
+            assertEquals("原模型", prefs.byokModel)
+            actions.onDiscardApiDraft()
+            assertEquals("原模型", controller.state.value.settings.api.model)
+            assertFalse(controller.state.value.settings.api.hasUnsavedChanges)
+            actions.onApiDraftChange(controller.state.value.settings.api.copy(key = ""))
+            assertTrue(controller.state.value.settings.api.hasUnsavedChanges)
+            actions.onSaveApi()
+            assertNull(prefs.byokKey)
+            assertFalse(controller.state.value.settings.api.hasUnsavedChanges)
+        }
+    }
+
+    /** 自定义色保存精确RGB并退出动态取色，重新创建控制器仍能恢复。 */
+    @Test fun customThemePersistsAndExitsDynamicColors() {
+        instrumentation.runOnMainSync {
+            actions.onDynamicColorsChange(true)
+            actions.onCustomThemeColorChange(0x123456)
+            val state = controller.state.value.settings
+            assertFalse(state.dynamicColors)
+            assertEquals("custom", state.themeColorId)
+            assertEquals(0xFF123456.toInt(), state.customThemeSeed)
+            val restored = AppController(application)
+            store.put("配色恢复", restored)
+            assertEquals(0xFF123456.toInt(), restored.state.value.settings.customThemeSeed)
+            assertEquals("custom", restored.state.value.settings.themeColorId)
+        }
+    }
+
     /** 带密钥的服务切换后必须丢弃草稿，保存不能覆盖新服务的独立密钥。 */
     @Test fun switchingProviderDropsUnsavedKey() {
         instrumentation.runOnMainSync {

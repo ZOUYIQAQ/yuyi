@@ -20,12 +20,892 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/no_backup">
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:resizeableActivity="true">
+        <!-- 键盘由 Compose 内边距避让，禁止系统再平移整个窗口遮住顶栏。 -->
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:resizeableActivity="true"
+            android:theme="@style/Theme.Yuyi.Starting"
+            android:windowSoftInputMode="adjustResize">
+        </activity>
+        <!-- v3入口在覆盖安装后提供可用默认入口，开屏再恢复纯色偏好。 -->
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_artwork_petals"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="true" android:icon="@mipmap/ic_vector_artwork_petals" android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_petals_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_petals_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_artwork_plain"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_artwork_plain" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_artwork_plain_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_artwork_plain_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_sage_petals"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_sage_petals" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_petals_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_petals_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_sage_plain"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_sage_plain" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_sage_plain_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_sage_plain_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_cream_petals"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_cream_petals" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_petals_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_petals_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_cream_plain"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_cream_plain" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_cream_plain_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_cream_plain_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_rose_petals"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_rose_petals" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_petals_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_petals_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_rose_plain"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_rose_plain" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_rose_plain_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_rose_plain_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_ink_petals"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_ink_petals" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_petals_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_petals_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.vector_ink_plain"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_vector_ink_plain" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_amber"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_amber" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_camellia"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_camellia" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_sage"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_sage" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_ocean"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_ocean" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_forest"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_forest" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_violet"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_violet" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_rose"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_rose" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_slate"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_slate" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_cream"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_cream" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name="${applicationId}.launcher.v3.mono_ink_plain_ink"
+            android:targetActivity=".MainActivity" android:exported="true"
+            android:enabled="false" android:icon="@mipmap/ic_mono_ink_plain_ink" android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
         <service
             android:name=".CaptionService"
             android:exported="false"

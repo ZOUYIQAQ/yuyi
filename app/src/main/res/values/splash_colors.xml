@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 ThemePalettes.scheme 的 background 角色一致；修改应用算法时须同步并运行颜色相等测试。 -->
+    <color name="splash_ocean_light">#FFEAEDEF</color>
+    <color name="splash_ocean_dark">#FF131618</color>
+    <color name="splash_ocean">@color/splash_ocean_light</color>
+    <color name="splash_forest_light">#FFEBEEEC</color>
+    <color name="splash_forest_dark">#FF141715</color>
+    <color name="splash_forest">@color/splash_forest_light</color>
+    <color name="splash_violet_light">#FFEEEDF1</color>
+    <color name="splash_violet_dark">#FF17161A</color>
+    <color name="splash_violet">@color/splash_violet_light</color>
+    <color name="splash_amber_light">#FFF8F5F0</color>
+    <color name="splash_amber_dark">#FF21201F</color>
+    <color name="splash_amber">@color/splash_amber_light</color>
+    <color name="splash_rose_light">#FFF1ECED</color>
+    <color name="splash_rose_dark">#FF1A1517</color>
+    <color name="splash_rose">@color/splash_rose_light</color>
+    <color name="splash_slate_light">#FFECEDEE</color>
+    <color name="splash_slate_dark">#FF151617</color>
+    <color name="splash_slate">@color/splash_slate_light</color>
+    <!-- Android12以下动态色与应用一样回退；新版由限定资源覆盖。 -->
+    <color name="splash_dynamic_light">@color/splash_amber_light</color>
+    <color name="splash_dynamic_dark">@color/splash_amber_dark</color>
+    <color name="splash_dynamic">@color/splash_dynamic_light</color>
+</resources>

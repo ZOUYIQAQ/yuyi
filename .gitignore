@@ -14,3 +14,6 @@ app/src/main/assets/models/
 .artifacts/
 .tools/
 .kotlin/
+
+# 图标生成器的本地字节码缓存
+__pycache__/

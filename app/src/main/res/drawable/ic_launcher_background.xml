@@ -1,5 +1,1 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 火羽ひのめ：橙棕短发、留白面部、红色山茶花；仅使用无描边大色块。 -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#F6EBDD" android:pathData="M0,0H108V108H0Z" />
-</vector>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#9AAF87" /></shape>

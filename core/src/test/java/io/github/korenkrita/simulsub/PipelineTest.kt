@@ -1558,8 +1558,82 @@ class PipelineTest {
 }
 
 class CaptionBoardTest {
+    /** 创建指定分段和修订的字幕，避免测试依赖识别或翻译服务。 */
     private fun cap(seg: Long, rev: Int, final: Boolean, zh: String = "z$seg.$rev") =
         Caption(seg, rev, final, "", zh, Timing(0, 0, 0, 0, 0, 0, 0))
+
+    /** 短句未达到字数阈值时，也必须淘汰超出最多句数的旧定稿。 */
+    @Test fun shortSentencesRespectHardMaximum() {
+        val board = CaptionBoard(2, 1000, maxFinals = 4)
+        for (id in 1L..8L) board.accept(cap(id, 1, true, "短句"))
+        assertEquals(listOf(5L, 6L, 7L, 8L), board.snapshot().map { it.segmentId })
+    }
+
+    /** 字数恰好到阈值时保留，超过后在区间内逐句裁剪，至少保留最少句数。 */
+    @Test fun characterThresholdTrimsOnlyAboveMinimumWithinRange() {
+        val board = CaptionBoard(2, 10, maxFinals = 4)
+        for (id in 1L..4L) board.accept(cap(id, 1, true, "😀😀"))
+        assertEquals(4, board.snapshot().size)
+        board.accept(cap(5, 1, true, "字".repeat(6)))
+        assertEquals(listOf(3L, 4L, 5L), board.snapshot().map { it.segmentId })
+        board.accept(cap(6, 1, true, "字".repeat(30)))
+        assertEquals(listOf(5L, 6L), board.snapshot().map { it.segmentId })
+    }
+
+    /** 草稿占显示额度但不销毁定稿，隐藏草稿必须在限句前完成。 */
+    @Test fun draftSharesDisplayMaximumWithoutDestroyingFinals() {
+        val board = CaptionBoard(2, 1000, maxFinals = 3)
+        for (id in 1L..3L) board.accept(cap(id, 1, true))
+        board.accept(cap(4, 1, false))
+        assertEquals(listOf(2L, 3L, 4L), board.snapshot().map { it.segmentId })
+        assertEquals(listOf(1L, 2L, 3L), board.snapshot(includeDraft = false).map { it.segmentId })
+        board.accept(cap(4, 2, true, ""))
+        assertEquals(listOf(1L, 2L, 3L), board.snapshot().map { it.segmentId })
+    }
+
+    /** 上限为一句时实时模式只展示草稿，仅定稿模式仍展示最新定稿。 */
+    @Test fun singleSentenceMaximumHandlesDraftAndFinalOnly() {
+        val board = CaptionBoard(1, 1000, maxFinals = 1)
+        board.accept(cap(1, 1, true))
+        board.accept(cap(2, 1, false))
+        assertEquals(listOf(2L), board.snapshot().map { it.segmentId })
+        assertEquals(listOf(1L), board.snapshot(includeDraft = false).map { it.segmentId })
+    }
+
+    /** 运行中缩小范围立即裁剪，重新放宽或收到迟到事件均不能复活被淘汰的旧句。 */
+    @Test fun shrinkingRangeTrimsImmediatelyAndNeverRevivesRemovedFinals() {
+        val board = CaptionBoard(2, 1000, maxFinals = 6)
+        for (id in 1L..6L) board.accept(cap(id, 1, true))
+        board.accept(cap(7, 1, false))
+        assertTrue(board.setLimits(2, 1000, 3))
+        assertEquals(listOf(5L, 6L, 7L), board.snapshot().map { it.segmentId })
+        assertEquals(listOf(4L, 5L, 6L), board.snapshot(includeDraft = false).map { it.segmentId })
+        assertTrue(board.setLimits(2, 1000, 6))
+        assertFalse(board.accept(cap(1, 2, true)))
+        assertFalse(board.accept(cap(3, 2, false)))
+        assertEquals(listOf(4L, 5L, 6L, 7L), board.snapshot().map { it.segmentId })
+    }
+
+    /** 没有定稿被移除时，缩小范围仍须报告草稿引起的可见内容变化。 */
+    @Test fun shrinkingRangeReportsDraftOnlyDisplayChange() {
+        val board = CaptionBoard(1, 1000, maxFinals = 4)
+        for (id in 1L..3L) board.accept(cap(id, 1, true))
+        board.accept(cap(4, 1, false))
+        assertTrue(board.setLimits(1, 1000, 3))
+        assertEquals(listOf(2L, 3L, 4L), board.snapshot().map { it.segmentId })
+        assertFalse(board.setLimits(1, 1000, 3))
+    }
+
+    /** 旧双参数更新保留显式上限，参数冲突时上限至少等于最少句数。 */
+    @Test fun legacyLimitUpdatesKeepMaximumAndNormalizeConflicts() {
+        val board = CaptionBoard(2, 1000, maxFinals = 3)
+        board.setLimits(2, 1000)
+        for (id in 1L..5L) board.accept(cap(id, 1, true))
+        assertEquals(listOf(3L, 4L, 5L), board.snapshot().map { it.segmentId })
+        board.setLimits(4, 1000, 1)
+        board.accept(cap(6, 1, true))
+        assertEquals(listOf(3L, 4L, 5L, 6L), board.snapshot().map { it.segmentId })
+    }
 
     @Test
     fun revisionsOnlyMoveForward() {

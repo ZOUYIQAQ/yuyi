@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.korenkrita.simulsub.models.*
+import io.github.korenkrita.simulsub.icons.LauncherIcons
 import io.github.korenkrita.simulsub.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,12 +21,22 @@ import java.util.UUID
 class AppController(application: Application) : AndroidViewModel(application) {
     private val prefs = Prefs(application)
     private val models = ModelRepository.get(application)
+    private val launcherIcons = LauncherIcons(application)
     private val appearance = application.getSharedPreferences("appearance", 0)
     private val mutableState = MutableStateFlow(SimulSubUiState())
     val state = mutableState.asStateFlow()
     private var probe: ByokTranslator? = null
     private var probeJob: Job? = null
     private var probeService: ByokService? = null
+    /** 待确认结果绑定整套已测试配置，编辑、保存或重新测试都会使其失效。 */
+    private data class TestedEndpoint(val service: ByokService, val draft: ApiDraftSnapshot,
+        val previouslySaved: ByokService?, val url: String, val variantName: String?)
+    /** 只比较可编辑输入，测试进度与提示变化不使快照失效。 */
+    private data class ApiDraftSnapshot(val url: String, val model: String, val key: String?, val hasSavedKey: Boolean,
+        val userAgent: String, val headers: List<Pair<String, String>>)
+    private var testedEndpoint: TestedEndpoint? = null
+    private var deletingModelId: String? = null
+    private var onboardingStep: OnboardingStep? = if (appearance.getBoolean("onboarding_completed", false)) null else OnboardingStep.PERMISSIONS
     private var generation: Job? = null
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         viewModelScope.launch { refresh() }
@@ -49,6 +60,17 @@ class AppController(application: Application) : AndroidViewModel(application) {
         openUrl: (String) -> Unit,
     ) = SimulSubActions(
         onNavigate = { destination -> mutableState.update { it.copy(destination = destination) } },
+        onOnboardingNext = { advanceOnboarding(false) },
+        onOnboardingSkip = { advanceOnboarding(true) },
+        onOnboardingBack = { onboardingStep = when (onboardingStep) {
+            OnboardingStep.MODEL -> OnboardingStep.API
+            OnboardingStep.API -> OnboardingStep.PERMISSIONS
+            else -> onboardingStep
+        }; refresh() },
+        onRestartOnboarding = {
+            if (CaptionService.running) message("请先停止同传，再重新配置", true)
+            else { onboardingStep = OnboardingStep.PERMISSIONS; refresh() }
+        },
         onStart = { cancelProbe(); start() },
         onStop = { cancelProbe(); CaptionService.stop(getApplication()) },
         onPermission = permission,
@@ -64,6 +86,11 @@ class AppController(application: Application) : AndroidViewModel(application) {
         onRefreshModels = { models.refresh() },
         onDownloadModel = { models.download(it) },
         onCancelDownload = { models.cancel(it) },
+        onRequestDeleteModel = ::requestDeleteModel,
+        onDismissDeleteModel = {
+            if (deletingModelId == null) mutableState.update { it.copy(models = it.models.copy(deleteConfirmationId = null)) }
+        },
+        onConfirmDeleteModel = ::deleteModel,
         onActivateModel = { id ->
             if (CaptionService.running) message("请先停止同传，再切换识别模型", true)
             else {
@@ -74,6 +101,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
         },
         onModelSource = { id -> modelSpec(id)?.files?.firstOrNull()?.sources?.firstOrNull()?.let(openUrl) },
         onModelLicense = { id -> openUrl(if (id.contains("sense")) "https://github.com/QwenAudio/SenseVoice" else "https://github.com/reazon-research/ReazonSpeech") },
+        onOpenModelBenchmark = { openUrl("https://github.com/KorenKrita/simul-subtitle/blob/97e0a49954fc01029468775d3d93e195adbf146f/docs/asr.md") },
         onCreateScene = { editScene(null) },
         onEditScene = { editScene(it) },
         onSceneDraftChange = { editor -> mutableState.update { it.copy(scenes = it.scenes.copy(editor = editor)) } },
@@ -105,14 +133,30 @@ class AppController(application: Application) : AndroidViewModel(application) {
         onRemoveHeader = { id -> cancelProbe(); updateApi { it.copy(headers = it.headers.filterNot { row -> row.id == id }) } },
         onSaveApi = { saveApi() },
         onTestApi = ::testApi,
+        onApplyTestedApiUrl = ::applyTestedApiUrl,
+        onKeepApiUrl = {
+            testedEndpoint = null
+            updateApi { it.copy(suggestedUrl = "", message = UiMessage("已保留原服务地址")) }
+        },
+        onDiscardApiDraft = { cancelProbe(); updateApi { savedApi() } },
         onSubtitleStyleChange = ::saveStyle,
         onResetOverlayPosition = { prefs.overlayX = -1; prefs.overlayY = -1; message("字幕位置将在下次启动同传时恢复默认") },
         onThemeColorChange = { id ->
-            if (ThemePalettes.entries.any { it.id == id }) appearance.edit().putString("color", id).putBoolean("dynamic", false).apply()
-            refresh()
+            if (id == "custom" || ThemePalettes.entries.any { it.id == id }) appearance.edit().putString("color", id).putBoolean("dynamic", false).apply()
+            updateLauncherTheme(); refresh()
         },
-        onThemeChange = { prefs.theme = when (it) { UiThemeMode.SYSTEM -> "system"; UiThemeMode.LIGHT -> "light"; UiThemeMode.DARK -> "dark" }; refresh() },
-        onDynamicColorsChange = { appearance.edit().putBoolean("dynamic", it).apply(); refresh() },
+        onCustomThemeColorChange = { seed ->
+            appearance.edit().putInt("custom_color", seed or 0xFF000000.toInt())
+                .putString("color", "custom").putBoolean("dynamic", false).apply()
+            updateLauncherTheme(); refresh()
+        },
+        onLauncherIconChange = { choice ->
+            runCatching { launcherIcons.apply(choice) }
+                .onSuccess { refresh(); message("桌面图标已更新，启动器可能需要片刻刷新") }
+                .onFailure { message("图标未能切换，已保留原设置", true) }
+        },
+        onThemeChange = { prefs.theme = when (it) { UiThemeMode.SYSTEM -> "system"; UiThemeMode.LIGHT -> "light"; UiThemeMode.DARK -> "dark" }; updateLauncherTheme(); refresh() },
+        onDynamicColorsChange = { appearance.edit().putBoolean("dynamic", it).apply(); updateLauncherTheme(); refresh() },
         onAdvancedChange = ::saveAdvanced,
         onSaveJevKey = { saveJevKey() },
         onKeepLogsChange = { prefs.keepLogs = it; refresh() },
@@ -126,11 +170,46 @@ class AppController(application: Application) : AndroidViewModel(application) {
         onDeleteAllRecords = ::deleteAllRecords,
         onCheckUpdate = ::checkUpdate,
         onOpenRepository = { openUrl(REPOSITORY) },
+        onOpenUpstreamRepository = { openUrl("https://github.com/KorenKrita/simul-subtitle") },
         onDismissMessage = { mutableState.update { it.copy(message = null) } },
     )
 
+    /** 开屏和返回前台时恢复真实入口，同时更新界面中的图标偏好。 */
+    fun restoreLauncherIcon() {
+        runCatching { launcherIcons.reconcile() }
+            .onFailure { message("桌面图标暂时无法恢复，可在外观中重新选择", true) }
+        refresh()
+    }
+
+    /** 主题操作才同步自动纯色，字幕刷新不触发系统组件切换。 */
+    private fun updateLauncherTheme() {
+        runCatching { launcherIcons.syncTheme() }
+            .onFailure { message("桌面图标颜色暂未更新，可在外观中重新保存", true) }
+    }
+
     /** 接收系统授权状态，只展示系统实际授予的结果。 */
     fun setPermissions(value: List<PermissionUiState>) { permissions = value; refresh() }
+
+    /** 引导不会隐式保存或下载；未准备好可明确跳过，最后一步结束后不再自动出现。 */
+    private fun advanceOnboarding(skip: Boolean) {
+        val step = onboardingStep ?: return
+        val ready = when (step) {
+            OnboardingStep.PERMISSIONS -> permissions.filter { it.required }.all { it.granted }
+            OnboardingStep.API -> prefs.byokReady && !state.value.settings.api.hasUnsavedChanges
+            OnboardingStep.MODEL -> models.selectedPaths() != null
+        }
+        if (!skip && !ready) return
+        onboardingStep = when (step) {
+            OnboardingStep.PERMISSIONS -> OnboardingStep.API
+            OnboardingStep.API -> OnboardingStep.MODEL
+            OnboardingStep.MODEL -> null
+        }
+        if (onboardingStep == null) {
+            appearance.edit().putBoolean("onboarding_completed", true).apply()
+            mutableState.update { it.copy(destination = UiDestination.LIVE) }
+        }
+        refresh()
+    }
 
     /** 给界面发布具体操作结果。 */
     fun message(text: String, error: Boolean = false) { mutableState.update { it.copy(message = UiMessage(text, error)) } }
@@ -138,11 +217,39 @@ class AppController(application: Application) : AndroidViewModel(application) {
     /** 取得固定目录内的模型，拒绝来自页面的未知标识。 */
     private fun modelSpec(id: String): ModelSpec? = models.state.value.entries.firstOrNull { it.spec.id == id }?.spec
 
+    /** 先展示真实模型范围与后果，未经页面确认不派发磁盘删除。 */
+    private fun requestDeleteModel(id: String) {
+        val item = state.value.models.items.firstOrNull { it.id == id } ?: return
+        if (!item.canDelete) { message(item.deleteBlockedReason ?: "当前模型不可删除", true); return }
+        mutableState.update { it.copy(models = it.models.copy(deleteConfirmationId = id, message = null)) }
+    }
+
+    /** 用户确认后异步删除，仓库再次核对运行与下载状态，结果始终重新映射真实磁盘状态。 */
+    private fun deleteModel(id: String) {
+        if (deletingModelId != null || state.value.models.deleteConfirmationId != id) return
+        deletingModelId = id
+        refresh()
+        viewModelScope.launch {
+            try {
+                val result = models.delete(id)
+                mutableState.update { it.copy(models = it.models.copy(
+                    deleteConfirmationId = if (result.deleted) null else id,
+                    message = UiMessage(if (result.deleted) "模型已删除，需要时可重新下载并启用" else result.error ?: "模型删除失败", !result.deleted),
+                )) }
+            } finally {
+                deletingModelId = null
+                refresh()
+            }
+        }
+    }
+
     /** 更新持久化状态，保持用户尚未保存的 API 和场景草稿。 */
     private fun refresh() {
         val library = models.state.value
+        val modelWorkBusy = library.entries.any { it.status in listOf(ModelStatus.QUEUED, ModelStatus.DOWNLOADING, ModelStatus.VERIFYING) }
         val session = CaptionService.state.value
         if (probe != null && (session.running || prefs.byokService() != probeService)) cancelProbe()
+        if (testedEndpoint != null && (session.running || prefs.byokService() != testedEndpoint?.previouslySaved)) cancelProbe()
         val selected = library.entries.firstOrNull { it.spec.id == library.selectedId && it.status == ModelStatus.READY }
         val scenes = prefs.scenes
         val sourceLanguages = if (selected?.spec?.kind == ModelKind.SENSEVOICE) Lang.entries.toList() else listOf(Lang.JA, Lang.EN)
@@ -156,6 +263,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
         }
         mutableState.update { old ->
             old.copy(
+                onboarding = onboardingStep?.let { OnboardingUiState(it, prefs.byokReady, selected != null) },
                 live = old.live.copy(
                     running = session.running,
                     canStart = ready && permissions.none { it.required && !it.granted },
@@ -175,16 +283,23 @@ class AppController(application: Application) : AndroidViewModel(application) {
                     sceneId = prefs.scene.id,
                     sceneOptions = scenes.map { UiOption(it.id, it.label) },
                     finalOnly = prefs.finalOnly,
+                    showOriginal = prefs.showJa,
+                    showStats = prefs.showStats,
                     permissions = permissions,
                     captions = session.captions.map { CaptionUiState("${it.segmentId}", it.ja, it.zh, !it.isFinal, "识别 ${it.timing.asrMs} 毫秒 · 翻译 ${it.timing.mtMs} 毫秒") },
                 ),
-                models = old.models.copy(items = library.entries.map { entry -> modelUi(entry, library.selectedId, session.running) }),
+                models = old.models.copy(items = library.entries.map { entry -> modelUi(entry, library.selectedId, session.running, modelWorkBusy, deletingModelId ?: library.deletingId) },
+                    deletingId = deletingModelId ?: library.deletingId),
                 scenes = old.scenes.copy(items = scenes.map { SceneUiState(it.id, it.label, it.background.orEmpty(), it.terms.size, it.termsLang.zh, it.builtin, it.summary(prefs.targetLang)) }, selectedId = prefs.scene.id),
                 settings = old.settings.copy(
-                    api = old.settings.api.copy(canTest = !session.running && !old.settings.api.testing),
+                    api = old.settings.api.copy(canTest = !session.running && !old.settings.api.testing,
+                        hasUnsavedChanges = isApiDirty(old.settings.api)),
                     theme = when (prefs.theme) { "dark" -> UiThemeMode.DARK; "light" -> UiThemeMode.LIGHT; else -> UiThemeMode.SYSTEM },
                     dynamicColors = appearance.getBoolean("dynamic", false),
-                    themeColorId = appearance.getString("color", "ocean") ?: "ocean",
+                    themeColorId = appearance.getString("color", ThemePalettes.DEFAULT_ID) ?: ThemePalettes.DEFAULT_ID,
+                    customThemeSeed = appearance.getInt("custom_color", ThemePalettes.DEFAULT_CUSTOM_SEED),
+                    launcherIcon = launcherIcons.current,
+                    permissions = permissions,
                     subtitle = styleState(),
                     keepLogs = prefs.keepLogs,
                     advanced = old.settings.advanced.copy(
@@ -203,7 +318,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
     }
 
     /** 将后台状态映射为明确的安装、校验、错误和可执行操作。 */
-    private fun modelUi(entry: ModelEntry, selectedId: String?, running: Boolean): ModelUiState {
+    private fun modelUi(entry: ModelEntry, selectedId: String?, running: Boolean, workBusy: Boolean, deletingId: String?): ModelUiState {
         val status = when (entry.status) {
             ModelStatus.NOT_INSTALLED -> ModelUiStatus.NOT_INSTALLED
             ModelStatus.QUEUED, ModelStatus.DOWNLOADING -> ModelUiStatus.DOWNLOADING
@@ -213,7 +328,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
             ModelStatus.CANCELLED -> ModelUiStatus.CANCELLED
         }
         return ModelUiState(
-            id = entry.spec.id, name = entry.spec.name, description = if (entry.spec.kind == ModelKind.REAZON) "轻量日英识别，适合日语视频与日常后台使用。" else "中英日韩粤语识别，可识别更多语言，内存占用较高。",
+            id = entry.spec.id, name = entry.spec.name, description = if (entry.spec.kind == ModelKind.REAZON) "日英双语，下载体积较小，适合日语视频与直播。" else "中英日韩粤五语言，支持标点与数字规整，下载体积较大。",
             languages = entry.spec.languages.joinToString("、"), sizeLabel = size(entry.spec.sizeBytes),
             license = (if (entry.spec.kind == ModelKind.SENSEVOICE) "FunASR 模型协议 v1.1" else "ReazonSpeech 上游 Apache-2.0") + " · VAD：MIT", sourceLabel = entry.source?.let { android.net.Uri.parse(it).host }.orEmpty().ifBlank { "优先国内源，失败时切换备用源" },
             status = status, progress = if (entry.status == ModelStatus.QUEUED) null else entry.progress,
@@ -223,6 +338,14 @@ class AppController(application: Application) : AndroidViewModel(application) {
             canActivate = entry.status == ModelStatus.READY && entry.spec.id != selectedId && !running,
             verificationDetail = "逐文件核对完整大小与 SHA-256，校验通过后才能启用。" + if (running) "切换模型前请停止同传。" else "",
             sourceUrl = entry.spec.files.firstOrNull()?.sources?.firstOrNull().orEmpty(),
+            canDelete = entry.hasLocalFiles && !running && !workBusy && deletingId == null,
+            deletionScope = if (entry.hasLocalFiles) models.deletionScope(entry.spec.id) else "",
+            deleteBlockedReason = when {
+                running -> "请先停止同传再删除模型"
+                workBusy -> "下载或校验结束后可删除模型"
+                deletingId != null -> "正在删除模型，请稍候"
+                else -> null
+            },
         )
     }
 
@@ -240,7 +363,18 @@ class AppController(application: Application) : AndroidViewModel(application) {
 
     /** 更新 API 草稿，不触发网络或改动已保存配置。 */
     private fun updateApi(change: (TranslationApiUiState) -> TranslationApiUiState) {
-        mutableState.update { it.copy(settings = it.settings.copy(api = change(it.settings.api))) }
+        mutableState.update {
+            val draft = change(it.settings.api)
+            it.copy(settings = it.settings.copy(api = draft.copy(hasUnsavedChanges = isApiDirty(draft))))
+        }
+    }
+
+    /** 只比较真正会保存的字段，输入框的空密钥与保留已存密钥遵循各自语义。 */
+    private fun isApiDirty(draft: TranslationApiUiState): Boolean {
+        val effectiveKey = draft.key?.trim() ?: if (draft.hasSavedKey) prefs.byokKey.orEmpty() else ""
+        return draft.url.trim() != prefs.byokUrl.trim() || draft.model.trim() != prefs.byokModel.trim() ||
+            effectiveKey != prefs.byokKey.orEmpty() || draft.userAgent.trim() != prefs.byokUserAgent ||
+            draft.headers.map { it.name.trim() to it.value } != prefs.byokHeaders
     }
 
     /** 按预设使用的完整聊天端点比较地址，换路径清空旧凭据，等价地址保留。 */
@@ -256,6 +390,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
                 hasSavedKey = if (endpointChanged) false else draft.hasSavedKey,
                 headers = if (endpointChanged) emptyList() else draft.headers,
                 userAgent = if (endpointChanged) "" else draft.userAgent,
+                suggestedUrl = "",
                 message = if (endpointChanged) UiMessage("服务地址已变更，请填写对应密钥；旧密钥和请求头不会带入。") else draft.message,
             )
         }
@@ -276,65 +411,98 @@ class AppController(application: Application) : AndroidViewModel(application) {
         return true
     }
 
-    /** 在后台验证用户填写的服务，沿用原有关闭思考参数探测与取消机制。 */
+    /** 提取本次草稿快照，保留密钥的明确填写、清空和保留三种状态。 */
+    private fun apiSnapshot(draft: TranslationApiUiState) = ApiDraftSnapshot(draft.url.trim(), draft.model.trim(),
+        draft.key, draft.hasSavedKey, draft.userAgent.trim(), draft.headers.map { it.name.trim() to it.value })
+
+    /** 用临时配置测试，不保存草稿或探测结果；只有用户确认才写入设置。 */
     private fun testApi() {
-        if (CaptionService.running || probe != null || !saveApi()) return
-        val service = prefs.byokService() ?: return
+        if (CaptionService.running || probe != null) return
+        val draft = apiSnapshot(state.value.settings.api)
+        val (error, url) = ByokTranslator.chatUrl(draft.url)
+        val problem = error ?: if (draft.model.isBlank()) "请填写模型 ID" else ByokService.badAdvanced(draft.userAgent, draft.headers)
+        if (problem != null || url == null) { updateApi { it.copy(message = UiMessage(problem ?: "翻译地址无效", true)) }; return }
+        cancelProbe()
+        val previous = prefs.byokService()
+        val key = draft.key?.trim() ?: if (draft.hasSavedKey) prefs.byokKey.orEmpty() else ""
+        val service = ByokService(url, draft.model, key, draft.userAgent, draft.headers)
         val translator = ByokTranslator(service, byokSystem(prefs.scene, prefs.sourceLang, prefs.targetLang), null, maxTokens = mtMaxTokens(prefs.targetLang))
         probe = translator
-        probeService = service
-        updateApi { it.copy(testing = true, canTest = false, message = UiMessage("正在测试连接与关闭思考参数，最多 6 次请求，服务商可能计费。")) }
+        probeService = previous
+        updateApi { it.copy(testing = true, canTest = false, suggestedUrl = "", message = UiMessage("正在测试草稿地址与关闭思考参数，最多 2 个同源地址、12 次请求，服务商可能计费；不会自动保存。")) }
         probeJob = viewModelScope.launch {
-            val outcome = withContext(Dispatchers.IO) {
-                runCatching {
-                    val steps = mutableListOf<ByokTranslator.Step>()
-                    val variant = translator.probe(steps)
-                    when {
-                        variant != null -> variant.name to UiMessage("连接可用，已保存关闭思考参数：${variant.label}")
-                        translator.exhausted(steps) -> ByokTranslator.NONE_WORKED to UiMessage("连接可用，但未能关闭思考，字幕延迟可能较大")
-                        else -> null to UiMessage(steps.lastOrNull()?.result?.let { ByokTranslator.why(it) } ?: "服务没有回应", true)
-                    }
-                }.getOrElse { null to UiMessage("连接测试失败，请检查服务配置后重试", true) }
-            }
+            val outcome = withContext(Dispatchers.IO) { runCatching { translator.probeConnection(draft.url) }.getOrNull() }
             if (probe === translator) {
-                if (CaptionService.running || prefs.byokService() != service) { cancelProbe(); return@launch }
+                if (CaptionService.running || prefs.byokService() != previous || apiSnapshot(state.value.settings.api) != draft) {
+                    cancelProbe(); return@launch
+                }
                 probe = null
                 probeService = null
                 probeJob = null
-                outcome.first?.let { prefs.setByokVariant(service.url, service.model, it) }
-                updateApi { it.copy(testing = false, canTest = true, message = outcome.second) }
+                val testedUrl = outcome?.url
+                if (testedUrl == null) {
+                    updateApi { it.copy(testing = false, canTest = true, suggestedUrl = "", message = UiMessage(
+                        outcome?.lastResult?.let { result -> ByokTranslator.why(result) }
+                            ?: outcome?.error ?: "连接测试失败，请检查服务配置后重试", true)) }
+                } else {
+                    testedEndpoint = TestedEndpoint(service, draft, previous, testedUrl, outcome.variantName)
+                    val notice = if (outcome.variantName == ByokTranslator.NONE_WORKED)
+                        "连接可用，但未能关闭思考，字幕延迟可能较大" else "连接测试通过"
+                    updateApi { it.copy(testing = false, canTest = true, suggestedUrl = testedUrl,
+                        message = UiMessage("$notice；可在下方替换并保存，不操作即保持原配置。")) }
+                }
             }
         }
     }
 
+    /** 只保存仍对应当前草稿的成功结果，保留本次真实测试的凭据，不重新请求网络。 */
+    private fun applyTestedApiUrl() {
+        val tested = testedEndpoint ?: return
+        if (CaptionService.running || probe != null || prefs.byokService() != tested.previouslySaved ||
+            apiSnapshot(state.value.settings.api) != tested.draft || state.value.settings.api.suggestedUrl != tested.url) {
+            cancelProbe()
+            updateApi { it.copy(message = UiMessage("配置已变更或同传正在运行，请停止后重新测试", true)) }
+            return
+        }
+        testedEndpoint = null
+        prefs.saveByok(tested.url, tested.service.model, tested.service.key, tested.service.userAgent, tested.service.headers)
+        tested.variantName?.let { prefs.setByokVariant(tested.url, tested.service.model, it) }
+        updateApi { savedApi().copy(message = UiMessage("已替换并保存测试通过的地址")) }
+        refresh()
+    }
+
     /** 先使旧结果失效并复位界面，再终止网络和协程；已发送的请求无法撤回。 */
     private fun cancelProbe() {
+        testedEndpoint = null
         val translator = probe
         probe = null
         probeService = null
         val job = probeJob
         probeJob = null
-        updateApi { it.copy(testing = false, canTest = !CaptionService.running, message = if (it.testing) UiMessage("连接测试已取消") else it.message) }
+        updateApi { it.copy(testing = false, canTest = !CaptionService.running, suggestedUrl = "", message = if (it.testing) UiMessage("连接测试已取消") else it.message) }
         translator?.cancel()
         job?.cancel()
     }
 
     /** 提取与悬浮字幕相同的样式配置。 */
-    private fun styleState() = SubtitleStyleUiState(
-        textSp = prefs.textSp, backgroundAlpha = prefs.bgAlpha, widthFraction = prefs.widthFrac,
-        heightFraction = prefs.heightFrac, keepSentences = prefs.keepSentences, keepChars = prefs.keepChars, maxLines = prefs.maxCaptionLines,
-        showOriginal = prefs.showJa, showStats = prefs.showStats, paletteId = prefs.palette,
-        minTextSp = CaptionOverlayView.MIN_SP, maxTextSp = CaptionOverlayView.MAX_SP,
-        palettes = CaptionOverlayView.PALETTES.map { CaptionPaletteUiState(it.id, it.label, it.zh, it.bg, it.ja) },
-    )
+    private fun styleState(): SubtitleStyleUiState {
+        val range = prefs.sentenceRange()
+        return SubtitleStyleUiState(
+            textSp = prefs.textSp, backgroundAlpha = prefs.bgAlpha, widthFraction = prefs.widthFrac,
+            heightFraction = prefs.heightFrac, keepSentences = range.first, maxSentences = prefs.captionSentenceCount,
+            keepChars = prefs.keepChars.coerceIn(10, 300), maxLines = 0, limitMode = prefs.captionLimitMode,
+            showOriginal = prefs.showJa, showStats = prefs.showStats, paletteId = prefs.palette,
+            minTextSp = CaptionOverlayView.MIN_SP, maxTextSp = CaptionOverlayView.MAX_SP,
+            palettes = CaptionOverlayView.PALETTES.map { CaptionPaletteUiState(it.id, it.label, it.zh, it.bg, it.ja) },
+        )
+    }
 
     /** 修改字幕样式立即持久化，服务通过原有监听同步变化。 */
     private fun saveStyle(style: SubtitleStyleUiState) {
         prefs.setStyle(style.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), style.backgroundAlpha.coerceIn(0f, 1f))
         prefs.widthFrac = style.widthFraction.coerceIn(Prefs.MIN_WIDTH, 1f)
         prefs.heightFrac = style.heightFraction.coerceIn(0f, CaptionService.MAX_CAPTION_FRAC)
-        prefs.maxCaptionLines = style.maxLines
-        prefs.keepSentences = style.keepSentences.coerceIn(1, 10); prefs.keepChars = style.keepChars.coerceIn(0, 1000)
+        prefs.setCaptionRetention(style.limitMode, style.maxSentences, style.keepChars)
         prefs.showJa = style.showOriginal; prefs.showStats = style.showStats; prefs.palette = style.paletteId
         refresh()
     }
@@ -466,7 +634,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val text = withContext(Dispatchers.IO) {
                 runCatching {
-                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest").build()
+                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest").build()
                     okhttp3.OkHttpClient.Builder().callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
                         if (response.code == 404) "此 Fork 还没有发布安装包，当前版本 ${BuildConfig.VERSION_NAME}"
                         else if (!response.isSuccessful) "检查失败：HTTP ${response.code}，可在项目页面查看版本"
@@ -481,5 +649,5 @@ class AppController(application: Application) : AndroidViewModel(application) {
     /** 销毁控制器时取消探测，避免离开应用后继续发送连接测试请求。 */
     override fun onCleared() { prefs.unlisten(prefListener); cancelProbe(); generation?.cancel(); super.onCleared() }
 
-    companion object { const val REPOSITORY = "https://github.com/ZOUYIQAQ/simul-subtitle" }
+    companion object { const val REPOSITORY = "https://github.com/ZOUYIQAQ/yuyi" }
 }

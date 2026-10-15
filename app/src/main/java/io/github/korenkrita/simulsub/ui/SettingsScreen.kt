@@ -2,54 +2,95 @@ package io.github.korenkrita.simulsub.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
-import android.os.Build
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.*
 
-/** 分区导航属于展示状态，所有设置草稿和保存结果继续由控制器提供。 */
-private enum class SettingsSection(val title: String) {
-    API("翻译 API"), SUBTITLE("字幕样式"), APPEARANCE("外观"), ADVANCED("高级设置"), RECORDS("使用记录"), ABOUT("关于")
+/** 设置入口与详情使用独立页面，返回路径由顶栏和系统返回统一处理。 */
+internal enum class SettingsSection(val title: String, val detail: String) {
+    API("翻译 API", "服务预设、地址与连接测试"),
+    SUBTITLE("字幕样式", "显示句数、文字和浮窗尺寸"),
+    APPEARANCE("外观", "主题模式、配色与动态取色"),
+    PERMISSIONS("系统权限", "录音、悬浮字幕与通知授权"),
+    ADVANCED("高级设置", "上下文与在线辅助"),
+    RECORDS("使用记录", "保存、分享与清理文字记录"),
+    ABOUT("关于", "Fork来源、原作者与许可")
 }
 
-/** 设置使用可横向滚动的分区标签，宽屏把说明与操作区分开。 */
-@OptIn(ExperimentalMaterial3Api::class)
+/** 设置首页以官方列表项和填充卡片分组，详情不再堆叠横向标签。 */
 @Composable
-internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean) {
-    var selectedName by rememberSaveable { mutableStateOf(SettingsSection.API.name) }
-    val selected = SettingsSection.valueOf(selectedName)
-    val navigation: @Composable () -> Unit = {
-        SecondaryScrollableTabRow(
-            selectedTabIndex = selected.ordinal, edgePadding = 0.dp,
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            SettingsSection.entries.forEach { section ->
-                Tab(selected = selected == section, onClick = { selectedName = section.name },
-                    text = { Text(section.title) }, modifier = Modifier.heightIn(min = 48.dp))
-            }
+internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean,
+    selected: SettingsSection? = null, finalOnly: Boolean = false, onSelect: (SettingsSection) -> Unit = {}) {
+    androidx.compose.animation.AnimatedContent(
+        targetState = selected,
+        transitionSpec = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) togetherWith
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(100)) },
+        label = "设置页面切换",
+    ) { page ->
+        when (page) {
+            null -> SettingsHome(wide, actions, onSelect)
+            SettingsSection.API -> TranslationApiSettings(state.api, sessionBusy, actions, wide, null)
+            SettingsSection.SUBTITLE -> SubtitleSettings(state.subtitle, actions, wide, null, finalOnly)
+            SettingsSection.APPEARANCE -> AppearanceSettings(state, actions, wide, null)
+            SettingsSection.PERMISSIONS -> PermissionsSettings(state.permissions, actions, wide)
+            SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, null)
+            SettingsSection.RECORDS -> UsageRecords(state, actions, wide, null)
+            SettingsSection.ABOUT -> AboutSettings(state, actions, wide, null)
         }
     }
-    key(selected) {
-        when (selected) {
-            SettingsSection.API -> TranslationApiSettings(state.api, sessionBusy, actions, wide, navigation)
-            SettingsSection.SUBTITLE -> SubtitleSettings(state.subtitle, actions, wide, navigation)
-            SettingsSection.APPEARANCE -> AppearanceSettings(state, actions, wide, navigation)
-            SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, navigation)
-            SettingsSection.RECORDS -> UsageRecords(state, actions, wide, navigation)
-            SettingsSection.ABOUT -> AboutSettings(state, actions, wide, navigation)
-        }
-    }
+}
+
+/** 设置入口保留简短说明，整行触控和官方水波纹可直接进入对应详情。 */
+@Composable
+private fun SettingsHome(wide: Boolean, actions: SimulSubActions, onSelect: (SettingsSection) -> Unit) {
+    PageColumns(wide, first = {
+        item { SectionHeading("字幕与翻译") }
+        item { SettingsCard(padding = 4.dp, spacing = 0.dp) {
+            SettingsEntry(SettingsSection.API, Icons.Outlined.Translate, onSelect)
+            SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
+            SettingsLink("模型库", "下载、启用与删除离线识别模型", Icons.AutoMirrored.Outlined.LibraryBooks) { actions.onNavigate(UiDestination.MODELS) }
+            SettingsLink("场景与术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
+        } }
+        item { SectionHeading("个性化") }
+        item { SettingsCard(padding = 4.dp, spacing = 0.dp) { SettingsEntry(SettingsSection.APPEARANCE, Icons.Outlined.Palette, onSelect) } }
+    }, second = {
+        item { SectionHeading("应用") }
+        item { SettingsCard(padding = 4.dp, spacing = 0.dp) {
+            SettingsEntry(SettingsSection.PERMISSIONS, Icons.Outlined.Security, onSelect)
+            SettingsLink("首次配置引导", "重新检查使用前的必要配置", Icons.Outlined.AutoFixHigh, actions.onRestartOnboarding)
+            SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.Tune, onSelect)
+            SettingsEntry(SettingsSection.RECORDS, Icons.Outlined.History, onSelect)
+            SettingsEntry(SettingsSection.ABOUT, Icons.Outlined.Info, onSelect)
+        } }
+    })
+}
+
+/** 官方列表组件提供清晰的标题、图标与点击反馈，说明允许完整换行。 */
+@Composable
+private fun SettingsEntry(section: SettingsSection, icon: androidx.compose.ui.graphics.vector.ImageVector, onSelect: (SettingsSection) -> Unit) {
+    ListItem(
+        headlineContent = { Text(section.title) }, supportingContent = { Text(section.detail) },
+        leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null) },
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        modifier = Modifier.fillMaxWidth().clickable { onSelect(section) }.heightIn(min = 76.dp),
+    )
 }
 
 /** 先选服务再编辑连接信息，附加请求参数默认收起，保存与测试始终明确。 */
 @Composable
-private fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean, navigation: @Composable () -> Unit) {
+internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean, navigation: (@Composable () -> Unit)?, onboarding: Boolean = false) {
     val editable = !api.testing && !api.saving
     var advancedOpen by rememberSaveable { mutableStateOf(api.headers.isNotEmpty() || api.userAgent.isNotEmpty()) }
     PageColumns(wide, header = navigation, first = {
@@ -66,83 +107,88 @@ private fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Bool
         }
     }, second = {
         item("api-form") {
-            OutlinedCard(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("连接信息", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTPS 基础地址或完整聊天接口地址，均可编辑。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTPS 基础地址或完整聊天接口地址，均可编辑。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     KeyEditor(api.key, api.hasSavedKey, editable) { actions.onApiDraftChange(api.copy(key = it)) }
                     if (api.testing || api.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
                     ActionRow {
                         Button(onClick = actions.onSaveApi, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (api.saving) "正在保存…" else "保存翻译配置") }
-                        OutlinedButton(onClick = actions.onTestApi, enabled = editable && api.canTest && !sessionBusy, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (api.testing) "正在测试…" else "测试连接") }
+                        FilledTonalButton(onClick = actions.onTestApi, enabled = editable && api.canTest && !sessionBusy, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (api.testing) "正在测试…" else "测试连接") }
                     }
-                    SupportingText("测试会先保存并发送少量请求，服务商可能计费。")
+                    SupportingText("测试只发送当前草稿，不自动保存。服务商可能计费；不点击替换就保持原配置。")
+                    if (api.suggestedUrl.isNotBlank()) {
+                        HorizontalDivider()
+                        Text("发现可用地址，是否替换？", style = MaterialTheme.typography.titleMedium)
+                        SupportingText(api.suggestedUrl)
+                        SupportingText("仅点击替换才保存；不操作就保留原地址。已测试的模型、密钥与请求参数会保留。")
+                        ActionRow {
+                            Button(onClick = actions.onApplyTestedApiUrl, enabled = editable && !sessionBusy,
+                                modifier = Modifier.heightIn(min = 48.dp)) { Text("替换并保存") }
+                            TextButton(onClick = actions.onKeepApiUrl, enabled = editable,
+                                modifier = Modifier.heightIn(min = 48.dp)) { Text("保持原地址") }
+                        }
+                    }
                 }
             }
         }
-        item("api-advanced-toggle") {
+        if (!onboarding) item("api-advanced-toggle") {
             TextButton(onClick = { advancedOpen = !advancedOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(if (advancedOpen) "收起附加请求参数" else "附加请求参数（可选）")
             }
         }
-        if (advancedOpen) {
+        if (advancedOpen && !onboarding) {
             item("api-advanced") {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     SectionHeading("附加请求参数", "一般无需填写。修改后需再次保存翻译配置。")
                     if (api.resolvedUrl.isNotEmpty()) SupportingText("实际请求地址：${api.resolvedUrl}")
-                    OutlinedTextField(value = api.userAgent, onValueChange = { actions.onApiDraftChange(api.copy(userAgent = it)) }, label = { Text("User-Agent（可选）") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.userAgent, onValueChange = { actions.onApiDraftChange(api.copy(userAgent = it)) }, label = { Text("User-Agent（可选）") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                 }
             }
             items(api.headers, key = { "header:${it.id}" }) { header ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = header.name, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(name = value) else it })) }, label = { Text("请求头名称") }, enabled = editable, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = header.value, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(value = value) else it })) }, label = { Text("请求头值") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = header.name, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(name = value) else it })) }, label = { Text("请求头名称") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = header.value, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(value = value) else it })) }, label = { Text("请求头值") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     TextButton(onClick = { actions.onRemoveHeader(header.id) }, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text("移除此请求头") }
                 }
             }
             item("api-add-header") {
-                OutlinedButton(onClick = actions.onAddHeader, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text("添加请求头") }
+                FilledTonalButton(onClick = actions.onAddHeader, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text("添加请求头") }
             }
         }
     })
-}
-
-/** 应用主题与字幕主题分开设置，动态色在旧系统由主题层安全回退。 */
-@Composable
-private fun AppearanceSettings(state: SettingsUiState, actions: SimulSubActions, wide: Boolean, navigation: @Composable () -> Unit) {
-    PageColumns(wide, header = navigation, first = { item { SectionHeading("界面外观", "选择浅色、深色或跟随系统。悬浮字幕的颜色在「字幕样式」中设置。") } }, second = {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OptionPicker("应用主题", state.theme.name, UiThemeMode.entries.map { UiOption(it.name, it.title) }) { name -> actions.onThemeChange(UiThemeMode.valueOf(name)) }
-                SectionHeading("主题配色", "选择喜欢的配色，浅色和深色会自动采用对应色调。")
-                ThemePalettePicker(state, actions)
-                ToggleSetting("动态取色", if (Build.VERSION.SDK_INT >= 31) "使用系统壁纸生成配色，选择手动主题色可退出动态取色。" else "需要 Android 12 或更高版本；当前系统使用所选手动配色。", state.dynamicColors,
-                    enabled = Build.VERSION.SDK_INT >= 31, onChange = actions.onDynamicColorsChange)
-            }
-        }
-    })
-}
-
-/** 色块只作预览，完整中文标签与选中状态确保颜色不是唯一识别线索。 */
-@Composable
-private fun ThemePalettePicker(state: SettingsUiState, actions: SimulSubActions) {
-    ActionRow {
-        ThemePalettes.entries.forEach { palette ->
-            FilterChip(
-                selected = !state.dynamicColors && state.themeColorId == palette.id,
-                onClick = { actions.onThemeColorChange(palette.id) },
-                label = { Text(palette.title) },
-                leadingIcon = { Box(Modifier.size(20.dp).background(Color(palette.seed), CircleShape)) },
-                modifier = Modifier.heightIn(min = 48.dp),
-            )
-        }
-    }
 }
 
 /** 展示真实使用记录，删除必须先确认，正在写入的记录不允许分享或删除。 */
 @Composable
-private fun UsageRecords(state: SettingsUiState, actions: SimulSubActions, wide: Boolean, navigation: @Composable () -> Unit) {
+private fun UsageRecords(state: SettingsUiState, actions: SimulSubActions, wide: Boolean, navigation: (@Composable () -> Unit)?) {
     var pendingId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingTitle by rememberSaveable { mutableStateOf("") }
     var clearAll by rememberSaveable { mutableStateOf(false) }
@@ -150,8 +196,8 @@ private fun UsageRecords(state: SettingsUiState, actions: SimulSubActions, wide:
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SectionHeading("使用记录", "记录保存在本机，可通过系统分享给其他应用，也可删除不再需要的记录。")
-                ToggleSetting("保存会话记录", "开启后记录后续会话的原文、译文与诊断信息；分享前请检查内容。", state.keepLogs, onChange = actions.onKeepLogsChange)
-                OutlinedButton(onClick = actions.onRefreshRecords, enabled = !state.recordsLoading, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (state.recordsLoading) "正在读取…" else "刷新记录") }
+                ToggleSetting("保存会话记录", "默认关闭。只有主动开启后才保存后续会话的原文、译文与诊断信息。", state.keepLogs, onChange = actions.onKeepLogsChange)
+                FilledTonalButton(onClick = actions.onRefreshRecords, enabled = !state.recordsLoading, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (state.recordsLoading) "正在读取…" else "刷新记录") }
                 TextButton(onClick = { clearAll = true }, enabled = !state.recordsLoading && state.records.any { !it.active }, modifier = Modifier.heightIn(min = 48.dp)) { Text("清空使用记录") }
                 if (state.recordsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.recordsMessage?.let { MessagePanel(it) }
@@ -165,7 +211,7 @@ private fun UsageRecords(state: SettingsUiState, actions: SimulSubActions, wide:
                 SupportingText(record.timeLabel)
                 SupportingText(record.detail)
                 ActionRow {
-                    OutlinedButton(onClick = { actions.onShareRecord(record.id) }, enabled = !record.sharing && !record.active, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (record.sharing) "正在准备分享…" else "分享记录") }
+                    FilledTonalButton(onClick = { actions.onShareRecord(record.id) }, enabled = !record.sharing && !record.active, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (record.sharing) "正在准备分享…" else "分享记录") }
                     TextButton(onClick = { pendingId = record.id; pendingTitle = record.title }, enabled = !record.active && !record.sharing && !state.recordsLoading, modifier = Modifier.heightIn(min = 48.dp)) { Text("删除记录") }
                 }
                 HorizontalDivider()
@@ -193,27 +239,31 @@ private fun UsageRecords(state: SettingsUiState, actions: SimulSubActions, wide:
     }
 }
 
-/** 关于页面保留版本、仓库与更新入口，检查结果不由界面伪造。 */
+/** 管理入口与设置详情共用列表样式，点击反馈和触控高度保持一致。 */
 @Composable
-private fun AboutSettings(state: SettingsUiState, actions: SimulSubActions, wide: Boolean, navigation: @Composable () -> Unit) {
-    PageColumns(wide, header = navigation, first = {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionHeading("火羽同传", "在设备上识别正在播放的声音，使用自己的翻译服务显示字幕。")
-                Text(if (state.version.isEmpty()) "版本信息待加载" else "版本 ${state.version}", style = MaterialTheme.typography.titleMedium)
-                SupportingText("为观看火羽ひのめ的直播而制作，图标取自她的橙棕短发、留白面部与红色山茶花。")
-                SupportingText("识别模型单独下载，模型来源与许可可在模型库中查看。")
+private fun SettingsLink(title: String, detail: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    ListItem(headlineContent = { Text(title) }, supportingContent = { Text(detail) },
+        leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null) },
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 76.dp))
+}
+
+/** 权限设置始终可查看，首页只保留尚未完成的必需授权。 */
+@Composable
+private fun PermissionsSettings(permissions: List<PermissionUiState>, actions: SimulSubActions, wide: Boolean) {
+    PageColumns(false, first = {
+        item { SectionHeading("系统权限", "屏幕共享会在每次开始同传时由系统询问。") }
+        items(permissions, key = { it.id }) { permission ->
+            SettingsCard {
+                Text(permission.title, style = MaterialTheme.typography.titleMedium)
+                SupportingText(permission.description)
+                Text(if (permission.granted) "已允许" else if (permission.required) "使用同传前需要允许" else "可选权限",
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                FilledTonalButton(onClick = { actions.onPermission(permission.id) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(if (permission.granted) "查看系统设置" else "去允许")
+                }
             }
         }
-    }, second = {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionHeading("项目与更新")
-                OutlinedButton(onClick = actions.onOpenRepository, modifier = Modifier.heightIn(min = 48.dp)) { Text("打开项目仓库") }
-                Button(onClick = actions.onCheckUpdate, enabled = !state.checkingUpdate, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (state.checkingUpdate) "正在检查…" else "检查更新") }
-                if (state.checkingUpdate) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (state.updateMessage.isNotEmpty()) MessagePanel(UiMessage(state.updateMessage))
-            }
-        }
-    })
+    }, second = {})
 }

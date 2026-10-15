@@ -5,6 +5,32 @@ import java.io.File
 /** 识别引擎类型，由集成层据此创建对应的 sherpa 配置。 */
 enum class ModelKind { REAZON, SENSEVOICE }
 
+/** 固定版本模型的简短特点与同条件识别结果；错误率保留原口径，不换算为准确率。 */
+internal data class ModelComparison(
+    val introduction: String,
+    val japaneseErrorRate: String,
+    val englishErrorRate: String,
+    val japaneseDecodeMs: Int,
+    val englishDecodeMs: Int,
+)
+
+/** 比较资料不参与下载、校验或引擎配置，数值来自现有固定版本评测记录。 */
+internal object ModelComparisons {
+    private val entries = mapOf(
+        "reazonspeech" to ModelComparison(
+            "电视节目语音训练的小模型，体积小、识别快，适合日语；英语表现较弱。",
+            "8.48%", "22.66%", 93, 71,
+        ),
+        "sensevoice" to ModelComparison(
+            "支持中英日韩粤五种语言，日语和英语识别效果较好，体积较大。",
+            "7.52%", "8.33%", 203, 157,
+        ),
+    )
+
+    /** 未收录的模型沿用自身介绍，不虚构比较数据。 */
+    operator fun get(id: String): ModelComparison? = entries[id]
+}
+
 /** 下载和安装状态；只有 READY 允许启用。 */
 enum class ModelStatus { NOT_INSTALLED, QUEUED, DOWNLOADING, VERIFYING, READY, FAILED, CANCELLED }
 
@@ -46,10 +72,11 @@ data class ModelEntry(
     val totalBytes: Long = spec.sizeBytes,
     val error: String? = null,
     val source: String? = null,
+    val hasLocalFiles: Boolean = false,
 )
 
 /** 模型库快照；恢复校验完成前 selectedId 保持为空。 */
-data class ModelLibraryState(val entries: List<ModelEntry>, val selectedId: String? = null)
+data class ModelLibraryState(val entries: List<ModelEntry>, val selectedId: String? = null, val deletingId: String? = null)
 
 /** 完整校验后的模型目录，包含 asr 文件与 vad/silero_vad.onnx。 */
 data class ModelPaths(val spec: ModelSpec, val directory: File)

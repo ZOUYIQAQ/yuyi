@@ -40,6 +40,8 @@
         <item name="materialButtonOutlinedStyle">@style/Widget.JpSub.Segment</item>
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.JpSub.Dialog</item>
     </style>
+    <!-- 首安装直接使用默认山茶背景，Android12起单独指定透明启动图标。 -->
+    <style name="Theme.Yuyi.Starting" parent="Theme.Yuyi.Starting.Base" />
     <style name="ThemeOverlay.JpSub.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorSurface">@color/card</item>
         <item name="colorSurfaceContainerHigh">@color/card</item>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只有跟随系统的主题引用这些别名，手动明暗始终引用固定颜色。 -->
+    <color name="splash_ocean">@color/splash_ocean_dark</color>
+    <color name="splash_forest">@color/splash_forest_dark</color>
+    <color name="splash_violet">@color/splash_violet_dark</color>
+    <color name="splash_amber">@color/splash_amber_dark</color>
+    <color name="splash_rose">@color/splash_rose_dark</color>
+    <color name="splash_slate">@color/splash_slate_dark</color>
+    <color name="splash_dynamic">@color/splash_dynamic_dark</color>
+</resources>

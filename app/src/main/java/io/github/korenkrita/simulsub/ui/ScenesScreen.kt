@@ -1,6 +1,5 @@
 package io.github.korenkrita.simulsub.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -15,7 +14,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
-/** 手机按列表与编辑区顺序进入，宽屏并排展示；当前场景以文字和边框共同标识。 */
+/** 手机按列表与编辑区顺序进入，宽屏并排展示；当前场景以文字和色调共同标识。 */
 @Composable
 internal fun ScenesScreen(state: ScenesUiState, actions: SimulSubActions, wide: Boolean) {
     val editor = state.editor
@@ -25,17 +24,16 @@ internal fun ScenesScreen(state: ScenesUiState, actions: SimulSubActions, wide: 
             item("scenes-heading") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionHeading("内容场景", "保存内容背景与固定译法，术语在目标语言匹配时使用。")
-                    Button(onClick = actions.onCreateScene, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text("新建场景") }
+                    Button(onClick = actions.onCreateScene, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text("新建场景") }
                     state.message?.let { MessagePanel(it) }
                 }
             }
             if (state.items.isEmpty()) item("scenes-empty") { SupportingText("暂无场景。新建一个场景，写下内容背景与常用术语。") }
             items(state.items, key = { "scene:${it.id}" }) { scene ->
                 val selected = scene.id == state.selectedId
-                OutlinedCard(
+                Card(
                     modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
-                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                    colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
                 ) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(scene.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
@@ -45,8 +43,8 @@ internal fun ScenesScreen(state: ScenesUiState, actions: SimulSubActions, wide: 
                         if (scene.summary.isNotEmpty()) SupportingText(scene.summary)
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         ActionRow {
-                            if (!selected) FilledTonalButton(onClick = { actions.onSelectScene(scene.id) }, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text("使用此场景") }
-                            OutlinedButton(onClick = { actions.onEditScene(scene.id) }, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text("编辑场景") }
+                            if (!selected) FilledTonalButton(onClick = { actions.onSelectScene(scene.id) }, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text("使用此场景") }
+                            FilledTonalButton(onClick = { actions.onEditScene(scene.id) }, enabled = editor?.let { !it.generating && !it.saving } ?: true, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text("编辑场景") }
                         }
                     }
                 }
@@ -74,27 +72,46 @@ private fun LazyListScope.sceneEditorItems(editor: SceneEditorUiState, actions: 
     item("editor:${editor.id}:heading") {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeading(if (existing) "编辑场景" else "新建场景")
-            OutlinedTextField(value = editor.name, onValueChange = { actions.onSceneDraftChange(editor.copy(name = it)) }, label = { Text("场景名称") }, enabled = enabled, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = editor.background, onValueChange = { actions.onSceneDraftChange(editor.copy(background = it)) }, label = { Text("内容背景") }, supportingText = { Text("写下题材、角色、专有名词或希望保持的语气。") }, enabled = enabled, minLines = 3, modifier = Modifier.fillMaxWidth())
+            TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.name, onValueChange = { actions.onSceneDraftChange(editor.copy(name = it)) }, label = { Text("场景名称") }, enabled = enabled, modifier = Modifier.fillMaxWidth())
+            TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.background, onValueChange = { actions.onSceneDraftChange(editor.copy(background = it)) }, label = { Text("内容背景") }, supportingText = { Text("写下题材、角色、专有名词或希望保持的语气。") }, enabled = enabled, minLines = 3, modifier = Modifier.fillMaxWidth())
             OptionPicker("术语译文语言", editor.termsLanguageId, editor.languageOptions, enabled) { actions.onSceneDraftChange(editor.copy(termsLanguageId = it)) }
             editor.message?.let { MessagePanel(it) }
             SectionHeading("固定译法", "原文写视频里出现的词，译文写希望采用的说法。")
         }
     }
     itemsIndexed(editor.terms, key = { _, term -> "term:${term.id}" }) { index, term ->
-        OutlinedCard(
+        Card(
             shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("术语 ${index + 1}", style = MaterialTheme.typography.labelLarge)
-                OutlinedTextField(
+                TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
                     value = term.original,
                     onValueChange = { value -> actions.onSceneDraftChange(editor.copy(terms = editor.terms.map { if (it.id == term.id) it.copy(original = value) else it })) },
                     label = { Text("术语原文") }, enabled = enabled, modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
                     value = term.translated,
                     onValueChange = { value -> actions.onSceneDraftChange(editor.copy(terms = editor.terms.map { if (it.id == term.id) it.copy(translated = value) else it })) },
                     label = { Text("指定译法") }, enabled = enabled, modifier = Modifier.fillMaxWidth(),
@@ -106,17 +123,22 @@ private fun LazyListScope.sceneEditorItems(editor: SceneEditorUiState, actions: 
     item("editor:${editor.id}:generation") {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (editor.terms.isEmpty()) SupportingText("还没有术语，可以手动添加或使用已保存的翻译服务生成。")
-            OutlinedButton(onClick = actions.onAddTerm, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("添加术语") }
+            FilledTonalButton(onClick = actions.onAddTerm, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("添加术语") }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SectionHeading("生成常用术语", "使用已保存的翻译服务生成，只追加新术语。")
-            OutlinedTextField(value = editor.generationCount, onValueChange = { actions.onSceneDraftChange(editor.copy(generationCount = it)) }, label = { Text("最多生成条数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = enabled, modifier = Modifier.fillMaxWidth())
-            OutlinedButton(onClick = actions.onGenerateTerms, enabled = enabled && editor.canGenerate, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (editor.generating) "正在生成…" else "生成术语") }
+            TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.generationCount, onValueChange = { actions.onSceneDraftChange(editor.copy(generationCount = it)) }, label = { Text("最多生成条数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = enabled, modifier = Modifier.fillMaxWidth())
+            FilledTonalButton(onClick = actions.onGenerateTerms, enabled = enabled && editor.canGenerate, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (editor.generating) "正在生成…" else "生成术语") }
             if (!editor.canGenerate && !editor.generating) SupportingText("请先保存翻译服务配置，并填写场景名称或背景。")
             if (editor.generating || editor.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ActionRow {
-                Button(onClick = actions.onSaveScene, enabled = enabled, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (editor.saving) "正在保存…" else "保存场景") }
-                OutlinedButton(onClick = actions.onCloseSceneEditor, enabled = enabled, shape = MaterialTheme.shapes.small, modifier = Modifier.heightIn(min = 48.dp)) { Text("关闭编辑") }
+                Button(onClick = actions.onSaveScene, enabled = enabled, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (editor.saving) "正在保存…" else "保存场景") }
+                FilledTonalButton(onClick = actions.onCloseSceneEditor, enabled = enabled, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text("关闭编辑") }
             }
             if (existing) SceneDestructiveActions(editor, enabled, actions)
         }

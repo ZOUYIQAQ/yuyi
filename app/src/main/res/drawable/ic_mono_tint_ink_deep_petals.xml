@@ -1,0 +1,1 @@
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_mono_petals_pixels" android:gravity="fill" android:filter="true" android:tint="#655D59" android:tintMode="src_in" />

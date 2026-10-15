@@ -15,7 +15,7 @@ APK **不包含**任何识别模型与 VAD 模型：`sherpa-onnx` 运行时库�
 
 | 项 | 实现 |
 |---|---|
-| 存储位置 | 应用私有内部目录 `files/models/<模型标识>/`（`ModelRepository.storageRoot`）：`asr/` 放识别文件，`vad/silero_vad.onnx` 放静音检测模型 |
+| 存储位置 | 应用私有内部目录 `files/models/<模型标识>/installed/`（根目录由`ModelRepository.storageRoot`提供）：`asr/` 放识别文件，`vad/silero_vad.onnx` 放静音检测模型 |
 | 打包方式 | ASR/VAD 权重不使用 `assets` 打包；许可文本作为 APK 的 `assets/licenses/` 随包，权重在卸载时随应用数据清除 |
 | 校验后启用 | 每个文件都带固定的字节数与 SHA-256，先校验再落盘，成功后仍需用户手动启用，校验不通过不可启用；取消或失败不会留下可用的半成品 |
 | 会话内固定 | 开始字幕后整个会话从同一个已校验目录读取模型，过程中不切换模型 |
@@ -79,3 +79,11 @@ APK **不包含**任何识别模型与 VAD 模型：`sherpa-onnx` 运行时库�
 ## 后续可探索方向
 
 - 针对纯日语观看场景，评估是否可切换或可选加载纯日语模型 [reazonspeech-k2-v2](https://huggingface.co/reazon-research/reazonspeech-k2-v2)，验证能否消除日语被误识为英语单词的情况（待实测）。
+
+## 在模型页选择与删除（羽译1.4.0）
+
+日语或英语节目优先按存储空间选择：ReazonSpeech双语量化包约74.1MiB，SenseVoice五语言量化包约229.1MiB。Reazon输出较朴素，SenseVoice支持标点与数字规整。需要中文、韩语或粤语原声时选择SenseVoice；看日语直播可先试较小的Reazon，再在同一设备、同一音源比较效果。两包均含静音检测模型，下载大小不是内存需求；不能据此断言手机上的耗时、耗电或准确率排名。来源：[Reazon双语导出模型](https://huggingface.co/csukuangfj/reazonspeech-k2-v2-ja-en)、[SenseVoice官方说明](https://github.com/QwenAudio/SenseVoice)。
+
+模型卡片可删除已下载模型及该模型的临时文件，删除前确认名称与固定文件范围；不影响其他模型、翻译配置、场景或记录。删除使用中的模型会停用它，需要重新下载、校验和手动启用；同传、下载或校验期间不能删除。删除失败会显示错误并重新核对磁盘状态。
+
+模型页已将上述日语CER、英语WER、解码中位数与RTF直接列在各模型卡片中，使用[上游固定版本的评测记录](https://github.com/KorenKrita/simul-subtitle/blob/97e0a49954fc01029468775d3d93e195adbf146f/docs/asr.md)。Reazon不覆盖中文、韩语和粤语；SenseVoice覆盖这三种语言，但当前没有该导出版本的同条件历史结果，页面明确标为暂无数据，不能据此推算翻译准确率。

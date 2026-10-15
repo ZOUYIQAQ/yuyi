@@ -8,7 +8,7 @@
 
 | 平台 | 日志目录路径 | 文件命名格式 |
 |---|---|---|
-| **Android** | `Android/data/io.github.zouyiqaq.hinome/files/logs/` | `session-YYYYMMDD-HHMMSS.jsonl` |
+| **Android** | `Android/data/io.github.zouyiqaq.yuyi/files/logs/` | `session-YYYYMMDD-HHMMSS.jsonl` |
 
 桌面端目录仅属于上游历史实现，当前不构建或分发桌面客户端。
 

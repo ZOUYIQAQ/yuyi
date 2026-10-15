@@ -468,6 +468,7 @@ class ByokTranslator(
     private val firstContentMs: Long = FIRST_CONTENT_MS,
 ) : Mt {
     private val calls = Calls(deadlineMs)
+    @Volatile private var cancelled = false
     private val url = service.url
     private val model = service.model
     /** masked out of every reply: the key and the extra header values (a header may carry a key too) */
@@ -475,7 +476,8 @@ class ByokTranslator(
 
     override fun translate(prompt: String): MtResult? = call(prompt, variant, firstContentMs)
 
-    private fun call(user: String, v: ThinkingOff?, firstMs: Long): MtResult {
+    /** 使用当前会话的请求管理器调用指定接口，默认沿用已保存的地址。 */
+    private fun call(user: String, v: ThinkingOff?, firstMs: Long, endpoint: String = service.url): MtResult {
         val body = Json.encode(mapOf(
             "model" to model,
             "messages" to listOf(mapOf("role" to "system", "content" to system), mapOf("role" to "user", "content" to user)),
@@ -486,7 +488,7 @@ class ByokTranslator(
         // of an earlier, abandoned call must not touch the next one)
         // the URL was checked by chatUrl; anything OkHttp still refuses is a failed call, never a crash
         val r = try {
-            calls.post(url, body, service.requestHeaders(),
+            calls.post(endpoint, body, service.requestHeaders(),
                 firstContentMs = firstMs, isContent = { hasAnswer(it, seen) }, isEnd = SseStream::isDone)
         } catch (e: IllegalArgumentException) { HttpResult(0, null, 0, "bad url") }
         // The key is in a header, not the body, but a service may echo it anywhere (split over chunks, inside
@@ -527,13 +529,50 @@ class ByokTranslator(
         return s.replace("</think>", "").isNotBlank()
     }
 
-    override fun cancel() = calls.cancel()
+    /** 终止当前实例及所有后续思考参数、后缀候选的请求。 */
+    override fun cancel() { cancelled = true; calls.cancel() }
 
     /** One way to ask for no thinking; [params] are added to the request body. */
     class ThinkingOff(val name: String, val label: String, val params: Map<String, Any>)
 
     /** One probe step: which variant, what came back. */
     class Step(val variant: ThinkingOff, val result: MtResult)
+
+    /** 成功时提供实际完整地址和开关名；失败时地址为空，保留最后结果与可读原因。 */
+    data class ConnectionProbeResult(val url: String?, val variantName: String?, val lastResult: MtResult?, val error: String? = null)
+
+    /**
+     * 仅探测输入地址的同源后缀，不改动已保存配置。仅 404/405 换后缀，每址最多六次请求。
+     * 成功包含所有开关均仍思考的情况，此时 [ConnectionProbeResult.variantName] 为 [NONE_WORKED]。
+     * 与 [probe] 共用 [calls]，所以 [cancel] 仍为终止操作。
+     */
+    fun probeConnection(input: String): ConnectionProbeResult = probeConnection(input) { endpoint, v ->
+        call(byokUser(PROBE_TEXT), v, deadlineMs, endpoint)
+    }
+
+    /** 注入单次请求以便离线验证候选选择，生产入口始终复用同一 Calls。 */
+    internal fun probeConnection(input: String, request: (String, ThinkingOff) -> MtResult): ConnectionProbeResult {
+        val (error, candidates) = chatCandidates(input)
+        if (error != null) return ConnectionProbeResult(null, null, null, error)
+        var last: MtResult? = null
+        for (endpoint in candidates) {
+            val steps = mutableListOf<Step>()
+            val found = probeAt(endpoint, steps, stopOnFailure = true, request = request)
+            last = steps.lastOrNull()?.result
+            if (cancelled || last?.error == "cancelled") {
+                val stopped = if (last?.error == "cancelled") last else
+                    MtResult("", 'f', null, null, request = last?.request, http = 0, error = "cancelled")
+                return ConnectionProbeResult(null, null, stopped, "已取消连接测试")
+            }
+            if (last != null && connectionInterrupted(last)) break
+            if (found != null || exhausted(steps)) {
+                return ConnectionProbeResult(endpoint, found?.name ?: NONE_WORKED, last)
+            }
+            if (last?.http != 404 && last?.http != 405) break
+        }
+        val reason = if (last?.error?.startsWith("deadline") == true) "连接测试超时" else last?.let(::why) ?: "没有完成连接测试"
+        return ConnectionProbeResult(null, null, last, reason)
+    }
 
     /**
      * Tries [THINKING_OFF] in order with a short test sentence until one ends normally with an answer and without
@@ -543,16 +582,25 @@ class ByokTranslator(
      * cutoff: a slow first answer is not a wrong switch). Stops early when the service fails for a reason no switch
      * changes (wrong key, unknown model, rate limit, not reachable).
      */
-    fun probe(steps: MutableList<Step>): ThinkingOff? {
+    fun probe(steps: MutableList<Step>): ThinkingOff? = probeAt(url, steps)
+
+    /** 复用六种思考开关；连接测试额外在超时或服务故障时立即停止。 */
+    private fun probeAt(endpoint: String, steps: MutableList<Step>, stopOnFailure: Boolean = false,
+                        request: (String, ThinkingOff) -> MtResult = { target, v -> call(byokUser(PROBE_TEXT), v, deadlineMs, target) }): ThinkingOff? {
         for (v in THINKING_OFF) {
-            val r = call(byokUser(PROBE_TEXT), v, deadlineMs)
+            val r = if (cancelled) MtResult("", 'f', null, null, http = 0, error = "cancelled") else request(endpoint, v)
             steps += Step(v, r)
-            if (r.error == "cancelled") return null
+            if (cancelled || r.error == "cancelled") return null
+            if (stopOnFailure && connectionInterrupted(r)) return null
             if (r.stop == 'e' && r.text.isNotEmpty() && !r.thinking) return v
             if (fatal(r)) return null
         }
         return null
     }
+
+    /** 即使已收到 404/405 响应头，读取超时仍需立即停止，不能继续后缀候选。 */
+    private fun connectionInterrupted(r: MtResult) = (r.http ?: 0) in 500..599 ||
+        r.error?.startsWith("deadline") == true || r.error?.startsWith("no content") == true
 
     /**
      * After [probe] returned null: true when every switch got a conclusive answer (a full answer that still thought, or
@@ -569,7 +617,8 @@ class ByokTranslator(
         r.error == "unfinished thinking"
     // wrong key / no access / unknown model or path / rate limited / not reachable: no switch changes that
     // (a timeout is not among them: thinking can make an answer slow)
-    private fun fatal(r: MtResult) = r.http in listOf(401, 403, 404, 429) || (r.http == 0 && r.error?.startsWith("deadline") != true)
+    /** 这些故障无法靠思考参数修复，404/405 交给连接探测决定是否更换后缀。 */
+    private fun fatal(r: MtResult) = r.http in listOf(401, 403, 404, 405, 429) || (r.http == 0 && r.error?.startsWith("deadline") != true)
 
     companion object {
         const val PROBE_TEXT = "こんにちは、今日もよろしくお願いします。"
@@ -614,11 +663,7 @@ class ByokTranslator(
         )
         fun variant(name: String?) = THINKING_OFF.firstOrNull { it.name == name }
 
-        /**
-         * The chat completions URL for what the user typed: https only (the key must not travel in clear text), no
-         * user info, query or fragment; a path ending in /v1 (or /v1/chat/completions) is used as is, otherwise /v1 is
-         * added. Returns (error text, null) or (null, url).
-         */
+        /** 只接受 HTTPS 且不带认证信息、查询或片段；完整接口路径保留，基础地址默认补 v1。返回错误或完整地址。 */
         fun chatUrl(input: String): Pair<String?, String?> {
             val s = input.trim()
             if (s.isEmpty()) return "还没填地址" to null
@@ -628,13 +673,25 @@ class ByokTranslator(
             if (u.rawUserInfo != null || u.rawQuery != null || u.rawFragment != null) return "地址里不要带用户名、?参数 或 #" to null
             if (u.port == 0 || u.port > 65535) return "端口号不对" to null
             var path = (u.rawPath ?: "").trimEnd('/')
-            path = path.removeSuffix("/chat/completions")
-            if (!path.endsWith("/v1")) path += "/v1"
+            if (!path.endsWith("/chat/completions")) {
+                if (!path.endsWith("/v1")) path += "/v1"
+                path += "/chat/completions"
+            }
             val port = if (u.port > 0) ":${u.port}" else ""
-            val out = "https://${u.host.lowercase()}$port$path/chat/completions"
+            val out = "https://${u.host.lowercase()}$port$path"
             // what OkHttp will be given: it must accept it too (IPv6 brackets, odd characters, ...)
             if (okhttp3.HttpUrl.Companion.run { out.toHttpUrlOrNull() } == null) return "地址格式不对" to null
             return null to out
+        }
+
+        /** 返回错误或最多两个去重的同源候选：先含 v1，再不含 v1；显式完整接口只使用原址。 */
+        fun chatCandidates(input: String): Pair<String?, List<String>> {
+            val (error, first) = chatUrl(input)
+            if (error != null || first == null) return error to emptyList()
+            val path = java.net.URI(input.trim()).rawPath.orEmpty().trimEnd('/')
+            if (path.endsWith("/chat/completions")) return null to listOf(first)
+            val second = first.removeSuffix("/v1/chat/completions") + "/chat/completions"
+            return null to listOf(first, second).distinct()
         }
     }
 }

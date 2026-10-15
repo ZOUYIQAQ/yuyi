@@ -9,7 +9,7 @@ import org.junit.Test
 
 class AppUpdaterTest {
     private val release = UpdateRelease(4, "0.4", "## 新功能\n\n- **更新**更方便\n- [说明](https://example.com)",
-        "${UpdateRelease.REPO}/releases/download/v0.4/simul-subtitle-v0.4.apk", 13_000_000, "a".repeat(64))
+        "${UpdateRelease.REPO}/releases/download/v0.4/yuyi-v0.4.apk", 13_000_000, "a".repeat(64))
 
     @Test fun manifestRoundTrip() {
         assertEquals(release, UpdateRelease.parse(release.json()))

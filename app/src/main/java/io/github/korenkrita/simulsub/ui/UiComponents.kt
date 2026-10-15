@@ -9,6 +9,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.*
+import androidx.compose.animation.animateContentSize
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -109,50 +111,53 @@ internal fun ToggleSetting(title: String, detail: String, checked: Boolean, enab
     }
 }
 
-/** 选项通过对话框滚动展示，长标签与大字号不受单行下拉框约束。 */
+/** 选择入口用官方列表项，展开为原生Material底部面板，选择后播放收起动画。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OptionPicker(title: String, selectedId: String, options: List<UiOption>, enabled: Boolean = true, onSelect: (String) -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val selected = options.firstOrNull { it.id == selectedId }
-    Surface(
-        onClick = { expanded = true }, enabled = enabled && options.isNotEmpty(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).semantics { stateDescription = selected?.label ?: "暂无选项" },
-    ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(selected?.label ?: selectedId.ifEmpty { "暂无选项" }, style = MaterialTheme.typography.bodyLarge)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    Surface(onClick = { expanded = true }, enabled = enabled && options.isNotEmpty(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).semantics { stateDescription = selected?.label ?: "暂无选项" }) {
+        ListItem(
+            headlineContent = { Text(selected?.label ?: selectedId.ifEmpty { "暂无选项" }, style = MaterialTheme.typography.bodyLarge) },
+            overlineContent = { Text(title, style = MaterialTheme.typography.labelMedium) },
+            trailingContent = { Icon(Icons.Outlined.ExpandMore, null) },
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        )
+    }
+    if (expanded && enabled) ModalBottomSheet(onDismissRequest = { expanded = false }, sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                items(options, key = { it.id }) { option ->
+                    ListItem(
+                        headlineContent = { Text(option.label) },
+                        supportingContent = option.description.takeIf { it.isNotEmpty() }?.let { { Text(it) } },
+                        leadingContent = { RadioButton(selected = option.id == selectedId, onClick = null) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                            .clickable(role = Role.RadioButton) {
+                                onSelect(option.id)
+                                scope.launch { sheetState.hide(); expanded = false }
+                            }.semantics { this.selected = option.id == selectedId },
+                    )
+                }
             }
-            Icon(Icons.Outlined.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-    if (expanded && enabled) {
-        AlertDialog(
-            onDismissRequest = { expanded = false }, title = { Text(title) },
-            text = {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
-                    items(options, key = { it.id }) { option ->
-                        Row(
-                            Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                                .clickable(role = Role.RadioButton) { expanded = false; onSelect(option.id) }
-                                .semantics { this.selected = option.id == selectedId }
-                                .padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = option.id == selectedId, onClick = null)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(option.label, style = MaterialTheme.typography.bodyLarge)
-                                if (option.description.isNotEmpty()) SupportingText(option.description)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { expanded = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消") } },
-        )
+}
+
+/** 官方填充卡片统一设置分组的圆角、间距和内容尺寸变化。 */
+@Composable
+internal fun SettingsCard(padding: androidx.compose.ui.unit.Dp = 20.dp, spacing: androidx.compose.ui.unit.Dp = 16.dp, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth().animateContentSize(), shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(padding), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
     }
 }
 
@@ -179,7 +184,12 @@ internal fun ActionRow(content: @Composable () -> Unit) {
 @Composable
 internal fun KeyEditor(value: String?, saved: Boolean, enabled: Boolean, onChange: (String?) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
+        TextField(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
             value = value.orEmpty(), onValueChange = { onChange(it) }, enabled = enabled,
             label = { Text("API 密钥") },
             supportingText = { Text(if (value == null && saved) "已保存密钥；不输入则保留。" else if (value == "" && saved) "保存后将清空密钥。" else "如服务需要密钥，在这里填写；使用 Android Keystore 加密保存在本机。") },

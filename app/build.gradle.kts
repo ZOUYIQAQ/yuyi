@@ -9,12 +9,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.zouyiqaq.hinome"
+        applicationId = "io.github.zouyiqaq.yuyi"
         minSdk = 29 // AudioPlaybackCapture
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 22
-        versionName = "1.2.1"
+        versionCode = 25
+        versionName = "1.4.0"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -51,7 +51,7 @@ dependencies {
     implementation(project(":core"))
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")

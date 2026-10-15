@@ -1,12 +1,14 @@
-# 火羽同传 · HinomeSub
+# 羽译 · Yuyi
 
-[简体中文](README.md) · [Documentation (Chinese)](docs/README.md) · [Releases](https://github.com/ZOUYIQAQ/simul-subtitle/releases)
+[简体中文](README.md) · [Documentation (Chinese)](docs/README.md) · [Releases](https://github.com/ZOUYIQAQ/yuyi/releases)
 
-An Android subtitle fork inspired by 火羽ひのめ, with a flat geometric portrait icon featuring solid copper hair, a featureless face and a red camellia. Package `io.github.zouyiqaq.hinome` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+**Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
 
-Icon design is a provisional draft and will be revised.
+An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**, current version **1.4.0**. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
 
-![HinomeSub icon](docs/images/icon.png)
+The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
+
+![Yuyi icon](docs/images/icon.png)
 
 Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
 
@@ -14,8 +16,8 @@ Android floating subtitles for audio playing on your device. Speech recognition 
 
 Requires **Android 10 (API 29)+ and arm64-v8a**.
 
-1. Open **模型库 (Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
-2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. **测试连接 (Test connection)** saves the form first and sends requests that may incur charges.
+1. Open **设置 → 模型库 (Settings → Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
+2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
 3. On **同传 (Live)**, select source/target languages and a scene, grant the requested permissions and system capture authorization, then start subtitles.
 
 Capture depends on the source app, DRM, Android version and device implementation. Compatibility with every player or video is not guaranteed. Capture is not isolated by process: other eligible apps playing audio at the same time may also be transcribed.
@@ -38,9 +40,23 @@ Capture depends on the source app, DRM, Android version and device implementatio
 |---|---|---|
 | ![Tablet live](docs/images/screens/tablet-home.png) | ![Tablet models](docs/images/screens/tablet-models.png) | ![Tablet settings](docs/images/screens/tablet-settings.png) |
 
-Screenshots were captured on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The actual overlay uses real audio capture and offline recognition with a fixed local translation fixture. Layout references [FlClash](https://github.com/chen08209/FlClash), implemented using native Compose Material 3.
+| Settings home | Subtitle retention | About |
+|---|---|---|
+| ![Settings home](docs/images/screens/settings.png) | ![Subtitle retention](docs/images/screens/sentence-range.png) | ![About](docs/images/screens/about.png) |
 
-Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings preview is a sample; the actual overlay is shown separately above.
+| Landscape preview (original-size crop) | Icon colors | Custom theme color |
+|---|---|---|
+| ![Landscape preview](docs/images/screens/subtitle-landscape.png) | ![Icon colors](docs/images/screens/icon-colors.png) | ![Custom theme color](docs/images/screens/custom-color.png) |
+
+| Character retention | Scene editor with fixed back button |
+|---|---|
+| ![Character retention](docs/images/screens/character-limit.png) | ![Scene editor](docs/images/screens/scene-editor.png) |
+
+Current interface screenshots show Yuyi 1.4.0 on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The actual overlay was also captured in this iteration using real audio capture and offline recognition with a fixed local translation fixture; it does not demonstrate cloud translation quality.
+
+Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
+
+Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings home groups entries and each row opens a detail page (translation API, subtitle style, appearance, permissions, advanced, usage records, about), model management, or scene management; the top bar and system back handle returning. The settings preview is a sample; the actual overlay is shown separately above.
 
 ## Recognition and translation
 
@@ -51,13 +67,15 @@ Compact windows use bottom navigation; wider windows use a navigation rail and a
 
 The APK contains no ASR or VAD weights. Packages are downloaded to private app storage and checked against fixed sizes and SHA-256 hashes. Activation is manual; stop a running session before switching models. License texts ship in the APK under `assets/licenses/`, rather than being downloaded alongside model files. See [ASR](docs/asr.md) and [model sources](docs/MODEL_SOURCES.md).
 
-Translation presets include DeepSeek official (`https://api.deepseek.com/v1`, `deepseek-flash`), SiliconFlow (`https://api.siliconflow.cn/v1`, `deepseek-ai/DeepSeek-V4-Flash`) and OpenRouter (`https://openrouter.ai/api/v1`, model ID must be entered). Presets only fill an editable draft: they neither save nor send requests. Switching presets across endpoints clears the draft's old key, custom headers and User-Agent. Custom mode preserves the form. Defaults were checked against official documentation on **2026-10-15** and may change; this is not verification of a user's paid API access. Sources and protocol details: [Translation](docs/translation.md).
+Translation presets include DeepSeek official (`https://api.deepseek.com/v1`, `deepseek-flash`), SiliconFlow (`https://api.siliconflow.cn/v1`, `deepseek-ai/DeepSeek-V4-Flash`) and OpenRouter (`https://openrouter.ai/api/v1`, model ID must be entered). Presets only fill an editable draft: they neither save nor send requests. Connection tests never save the draft automatically: **Replace and save** explicitly applies a successful full endpoint; leaving with unsaved edits asks for confirmation. Switching presets across endpoints clears the draft's old key, custom headers and User-Agent. Custom mode preserves the form. Defaults were checked against official documentation on **2026-10-15** and may change; this is not verification of a user's paid API access. Sources and protocol details: [Translation](docs/translation.md).
+
+New installations start with **Camellia (山茶)**, sampled from the icon: orange-brown, cream, camellia red and sage green. On the Live page, the primary action stays above navigation while content scrolls: at least 72dp tall on phones and limited to 480dp on tablets. The same position becomes Stop while running.
 
 ## Settings and controls
 
-- **场景术语 (Scenes and terms)** is a separate navigation destination for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
-- **设置 → 字幕样式 (Subtitle style)** controls colors, text size, opacity, source text, timings, width, height and retained sentences. **最多显示行数 (Maximum displayed lines)** accepts 0 (unlimited) or 1–20, counting wrapped source and translated lines together and keeping the newest lines. Timing/status text is excluded. The 40% screen-height cap and fixed height still apply, with the stricter limit winning. This affects display only, not session history or prompt context.
-- **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Warm Sand, Rose and Slate palettes, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
+- **场景术语 (Scenes and terms)** is under Settings for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
+- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy: sentence count (default, 1–10 including a live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). Line limits and combined sentence/character thresholds are no longer applied. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Outside the finalized-caption background, a fixed transparent live-draft slot prevents bottom-position jitter when drafts appear or disappear. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
+- **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Camellia, Rose and Slate palettes, arbitrary RGB hex input and HSV sliders, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
 - **设置 → 高级设置 (Advanced)** contains translation context, join deduplication and optional Jev sentence/translation checks. Jev is off by default and sends text to a third-party service when enabled.
 - **设置 → 使用记录 (Usage records)** is off by default. Finished text logs can be shared, individually deleted after confirmation or cleared after confirmation. Active logs cannot be shared or deleted.
 
@@ -65,8 +83,22 @@ Tap the floating subtitles to reveal controls, drag to move, or resize from the 
 
 ## Updates and development
 
-**设置 → 关于 → 检查更新 (About → Check updates)** reads only this fork's [latest release endpoint](https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest) and displays its tag. **打开项目仓库 (Open repository)** opens the project page for manual review/download. There is no automatic checking, in-app APK download/install, update proxy fallback or skipped-version preference in the current flow.
+**设置 → 关于 → 检查更新 (About → Check updates)** reads only this fork's [latest release endpoint](https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest) and displays its tag. **打开本 Fork 仓库 (Open fork repository)** opens the project page for manual review/download. There is no automatic checking, in-app APK download/install, update proxy fallback or skipped-version preference in the current flow.
 
 See [Build](docs/build.md) for `:core` and `:app`. macOS/Windows builds are no longer distributed. More: [Architecture](docs/architecture.md), [Privacy](docs/privacy.md), [Logs](docs/logs.md), [Jev](docs/jev.md).
 
 Application code: [MIT](LICENSE). Thanks to [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ReazonSpeech](https://github.com/reazon-research/ReazonSpeech), [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) and [Silero VAD](https://github.com/snakers4/silero-vad). Models and dependencies retain their own licenses; Jev is an optional cloud service.
+
+The three main destinations are Live, Subtitles, and Settings. Model and scene management are inside Settings, with shortcuts on Live. First launch guides only permissions, the translation API, and model download/activation; every step can be skipped and the guide can be reopened from Settings. The home screen hides granted permissions and no longer displays in-memory session text. Session files are created only after recording is explicitly enabled.
+
+| 首次权限配置 | 翻译 API 配置 | 下载启用模型 |
+|---|---|---|
+| ![权限引导](docs/images/screens/onboarding-permissions.png) | ![API引导](docs/images/screens/onboarding-api.png) | ![模型引导](docs/images/screens/onboarding-model.png) |
+
+| 模型删除确认 | 可用地址确认 | 未保存退出确认 |
+|---|---|---|
+| ![模型删除](docs/images/screens/model-delete.png) | ![地址确认](docs/images/screens/api-endpoint.png) | ![退出确认](docs/images/screens/api-unsaved.png) |
+
+| 暖色冷启动 | 深色冷启动 |
+|---|---|
+| ![暖色启动](docs/images/screens/startup-warm.png) | ![深色启动](docs/images/screens/startup-dark.png) |

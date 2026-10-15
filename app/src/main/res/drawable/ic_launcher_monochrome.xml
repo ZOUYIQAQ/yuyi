@@ -1,6 +1,1 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 火羽ひのめ：橙棕短发、留白面部、红色山茶花；仅使用无描边大色块。 -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M30,65 L30,44 C30,30 40,22 52,22 C62,21 70,27 74,35 C78,39 79,44 79,49 L78,67 L68,78 L74,94 L35,94 L40,77 L32,69 Z M41,40 Q44,43 48,43 L49,36 Q51,42 54,44 L61,44 L62,36 Q65,40 68,42 L68,52 C68,59 63,65 55,71 C47,66 42,59 41,52 Z" />
-    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M33,37 C28,35 28,31 32,28 C31,24 35,23 39,25 C43,22 47,24 48,28 C53,30 51,34 48,36 C48,41 44,42 40,40 C36,43 32,41 33,37 Z M31,35 L34,35 L32,59 L29,72 L26,77 L29,52 Z" />
-</vector>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_mono_petals_pixels" android:gravity="fill" android:filter="true" />

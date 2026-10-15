@@ -2,6 +2,9 @@ package io.github.korenkrita.simulsub
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
@@ -12,13 +15,13 @@ class AppIdentityDeviceTest {
     /** 系统安装包、启动入口和两个文件分享入口均属于独立应用。 */
     @Test fun installedIdentityAndProvidersAreIndependent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val expected = "io.github.zouyiqaq.hinome"
+        val expected = "io.github.zouyiqaq.yuyi"
         assertEquals(expected, context.packageName)
         val pm = context.packageManager
-        assertEquals("火羽同传", pm.getApplicationLabel(context.applicationInfo).toString())
+        assertEquals("羽译", pm.getApplicationLabel(context.applicationInfo).toString())
         val launch = requireNotNull(pm.getLaunchIntentForPackage(expected))
         assertEquals(expected, launch.component?.packageName)
-        assertEquals("io.github.korenkrita.simulsub.MainActivity", launch.component?.className)
+        assertEquals("io.github.korenkrita.simulsub.MainActivity", pm.getActivityInfo(requireNotNull(launch.component), 0).targetActivity)
         for (suffix in listOf("logs", "updates")) {
             val provider = requireNotNull(pm.resolveContentProvider("$expected.$suffix", 0))
             assertEquals(expected, provider.packageName)
@@ -28,10 +31,10 @@ class AppIdentityDeviceTest {
         assertTrue(context.filesDir.absolutePath.contains(expected))
     }
 
-    /** 由Android实际加载自适应图标，确认原生矢量可绘制并留存视觉验收图。 */
+    /** 由Android实际加载新矢量图标，并验证单色主题层存在且可绘制。 */
     @Test fun launcherIconRendersOnDevice() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val icon = context.packageManager.getApplicationIcon(context.applicationInfo)
+        val icon = context.packageManager.getActivityIcon(requireNotNull(context.packageManager.getLaunchIntentForPackage(context.packageName)?.component))
         val bitmap = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
         icon.setBounds(0, 0, 512, 512)
         icon.draw(Canvas(bitmap))
@@ -40,5 +43,18 @@ class AppIdentityDeviceTest {
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
         bitmap.recycle()
+        if (Build.VERSION.SDK_INT >= 33) {
+            assertTrue("启动器图标应使用自适应资源", icon is AdaptiveIconDrawable)
+            val mono = requireNotNull((icon as AdaptiveIconDrawable).monochrome) { "缺少单色主题图标" }
+            val themed = AdaptiveIconDrawable(ColorDrawable(android.graphics.Color.rgb(243, 223, 206)), mono)
+            mono.setTint(android.graphics.Color.rgb(111, 78, 45))
+            val themedBitmap = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
+            themed.setBounds(0, 0, 512, 512)
+            themed.draw(Canvas(themedBitmap))
+            File(context.getExternalFilesDir(null), "yuyi-themed-icon.png").outputStream().use {
+                themedBitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            themedBitmap.recycle()
+        }
     }
 }

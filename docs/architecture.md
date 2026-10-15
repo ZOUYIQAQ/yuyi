@@ -89,18 +89,42 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 
 ## 页面、设置与显示边界
 
-`ui/UiContract.kt` 定义同传、模型库、场景术语、设置四个导航入口。Compose UI 交还业务动作给 `AppController`，不在页面中下载模型、操作文件或请求翻译。翻译 API 的草稿、保存与测试相互分开；`TranslationPresets.kt` 仅填写草稿，跨端点应用预设清空草稿凭据、请求头与 User-Agent。
+`ui/UiContract.kt` 定义同传、字幕、设置三个主导航及模型库、场景术语两个设置内详情入口。Compose UI 交还业务动作给 `AppController`，不在页面中下载模型、操作文件或请求翻译。翻译 API 的草稿、保存与测试相互分开；`TranslationPresets.kt` 仅填写草稿，跨端点应用预设清空草稿凭据、请求头与 User-Agent。
 
-设置分为翻译 API、字幕样式、外观、高级设置、使用记录、关于。上下文由 `Pipeline.PREVIOUS_SENTENCES = 2` 与 `MAX_PREVIOUS_SENTENCES = 5` 控制，窗口内容是非空定稿原文；不由字幕可见行数决定。
+设置首页按字幕与翻译、个性化、应用分组，详情通过顶栏或系统返回回到来源；包括翻译API、字幕样式、外观、系统权限、高级设置、使用记录、关于，并提供模型库、场景管理和重新运行首次引导入口。关于页首屏声明 Android Fork 与原作者 KorenKrita，MIT 全文随 APK 提供，离线可读。所有仓库外链交给 MainActivity 的异常保护路径。上下文由 `Pipeline.PREVIOUS_SENTENCES = 2` 与 `MAX_PREVIOUS_SENTENCES = 5` 控制，窗口内容是非空定稿原文；不由字幕可见行数决定。
 
-`CaptionOverlayView` 同时用于实际浮窗与设置示例。最多显示行数为 0（不限）或 1–20，按实际排版合计原文与译文行，保留最新行；耗时与状态不计入。仍受 `CaptionService.MAX_CAPTION_FRAC = 0.4` 与固定高度限制，取更严格值。此设置不改变流水线历史、日志或翻译上下文。
+`CaptionBoard.setRetention()`是新版服务的唯一显示策略入口。`CaptionLimitMode`互斥选择句数或译文字数，默认句数。句数包含实时草稿，字数按译文Unicode码点计算，超长单句的快照仅保留最新尾部。只裁剪显示快照，不改原始定稿、日志或翻译上下文。旧区间接口保留作历史兼容与迁移，新句数从旧区间上限迁移；captionLimitMode、captionSentenceCount和keepChars在同一次偏好编辑中保存。
 
-`ThemePalettes.kt` 提供海蓝、松绿、鸢尾、暖砂、蔷薇、岩灰六种配色；Android 12 起可用动态色，旧系统回退手动配色。浅深模式独立选择，应用主题不改字幕配色。
+`CaptionOverlayView`用于实际浮窗与设置预览，实际服务不再使用手动行数上限；仅保留屏高40%和用户固定高度等物理约束。新安装默认showJa=false、showStats=false，显式保存的用户开关仍保留。设置预览是页面内可拖动面板，可切横屏/竖屏画幅，持续接收样式变化；离开设置页面销毁，不启动录音、模型或真正字幕服务。
+
+`ThemePalettes.kt` 提供海蓝、松绿、鸢尾、山茶、蔷薇、岩灰六种配色；Android 12 起可用动态色，旧系统回退手动配色。新安装默认取自图标原图的山茶（amber），已有手动选择保留，动态取色默认关闭。浅深模式独立选择，应用主题不改字幕配色。
 
 模型包各带 VAD，下载校验后需手动启用，运行会话内固定模型。许可文本在 APK `assets/licenses/`，权重在应用私有 `files/models/`，两者分开。
 
 ## 当前更新入口
 
-`AppController.checkUpdate()` 仅在用户点击时 GET `https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest`，15 秒总超时；成功显示 `tag_name`，404 提示尚未发行，其他错误显示失败信息。它不比较版本号，不下载 `update.json` 或 APK。另一个「打开项目仓库」动作通过外部应用打开 `https://github.com/ZOUYIQAQ/simul-subtitle`。
+`AppController.checkUpdate()` 仅在用户点击时 GET `https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest`，15 秒总超时；成功显示 `tag_name`，404 提示尚未发行，其他错误显示失败信息。它不比较版本号，不下载 `update.json` 或 APK。另一个「打开本 Fork 仓库」动作通过外部应用打开 `https://github.com/ZOUYIQAQ/yuyi`。
 
 旧更新类、权限或 Provider 的保留不代表当前 UI 接通自动更新；当前没有自动检查、代理回退下载、应用内安装或跳过版本偏好。
+
+
+### 自定义主题与桌面图标
+
+自定义颜色以不透明RGB种子保存到appearance.custom_color，保存时将color设为custom并退出动态取色，浅深色角色仍由Material官方算法生成。调色对话框只保存草稿，确认才派发，取消不写入。默认山茶使用原图发色D38569、花色E24E37、奶油FAF0E2和鼠尾草绿9AAF87。
+
+LauncherIconChoice表示矢量彩色/纯色、背景、飘落装饰和纯色配色。资源生成器从用户SVG生成有限资源组合，飘落开关同时控制花瓣与绿叶，头花不受影响；LauncherIcons仅启停本包ActivityAlias并持久化选择，MainActivity仍为同一个业务入口。API33以上批量更新，旧系统先启用再关闭；写入失败恢复前态。图标对话框预览加载真实AdaptiveIconDrawable，不自行绘制近似图。
+
+深色山茶主题仅降低橙棕与山茶红强调色的饱和度，保留色相来源，文字与容器色仍由官方算法生成；浅色图中取色方案保留。场景编辑的返回入口固定于Scaffold顶栏，滚动表单和键盘不改变其位置。
+
+纯色图标采用10种预设色，自动匹配当前手动、自定义或动态主题的官方主色角色（Lab最近色）；手动色不会跟随主题变更。每色按背景使用官方深浅角色，110个Launcher入口共用2张透明轮廓。choice、follow_theme、resolved_tone独立保存，v3入口用于安全迁移旧已禁用的默认别名。
+
+### 羽译1.4.0的模型与字幕窗口约束
+
+- 模型删除在正式确认后运行，后台重查WorkManager与运行租约。下载、校验、模型租约和删除共用互斥闸门；停止按钮释放页面运行状态后，租约仍持续到管线与ASR/VAD彻底释放。删除被确认后全程不可取消，最终重扫与闸门释放必定执行，旧任务终态不会复活已删除模型。
+- 实时草稿单独放在黑框下方的透明兄弟区域，预留通常为两行译文加可选一行原文，与当前草稿是否存在无关。正式黑框自动伸缩时以底边为锚向上展开；拖动、旋转与resize同步更新定位。实际服务和设置预览使用相同原生视图。
+- 窗口高度较小时统一核算正式正文、诊断、内部边距与外部草稿预算；低横屏或大字号会减少草稿可见行及原文预留，优先保留可读的最新译文，不用裁断窗口或扩大黑底冒充外部预留。
+- API测试使用临时草稿，不写入Prefs；建议绑定草稿及原存配置快照，只有显式「替换并保存」才提交。未保存退出确认由统一根导航处理。
+
+首次引导状态由AppController持有，依次为PERMISSIONS、API、MODEL；最后继续或跳过写入appearance.onboarding_completed。导航层复用API未保存确认，模型步骤仅提供下载、取消和启用；不提前申请一次性的MediaProjection授权。模型库和场景列表保存进入来源，顶栏和系统返回使用同一动作。首页移除内存字幕预览，必要权限全部授予后不渲染权限分区。
+
+系统启动页独立使用透明人物与飘落装饰，SplashTheme在Activity首帧前同步应用背景，并在Android12+用官方setSplashScreenTheme登记下次冷启动主题。六预设的浅深背景与应用完全一致；任意自定义种子的系统启动底色取最近的预设，Activity首帧为精确颜色。Android12/13动态色使用相近系统中性色，Android14+与Material3同用system_background。Android10/11最早启动底色仍使用默认山茶并跟随系统明暗。参考[官方SplashScreen API](https://developer.android.com/reference/android/window/SplashScreen#setSplashScreenTheme(int))。

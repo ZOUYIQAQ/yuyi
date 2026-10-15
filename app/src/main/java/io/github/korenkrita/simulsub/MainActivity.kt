@@ -14,15 +14,23 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import io.github.korenkrita.simulsub.models.ModelRepository
 import io.github.korenkrita.simulsub.ui.PermissionUiState
 import io.github.korenkrita.simulsub.ui.SimulSubApp
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** 安卓入口只处理系统能力，页面由 Compose 渲染，业务状态保留在 ViewModel。 */
 class MainActivity : ComponentActivity() {
     private lateinit var controller: AppController
+    private lateinit var splashTheme: SplashTheme
     private var continueAfterAudioPermission = false
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -43,9 +51,14 @@ class MainActivity : ComponentActivity() {
 
     /** 创建页面，使用系统边缘到边缘布局，窗口变化时由 Compose 自动重排。 */
     override fun onCreate(savedInstanceState: Bundle?) {
+        splashTheme = SplashTheme(this)
+        splashTheme.prepare()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         controller = ViewModelProvider(this)[AppController::class.java]
+        splashTheme.synchronize(SplashTheme.Appearance.from(controller.state.value.settings))
+        observeSplashTheme()
+        controller.restoreLauncherIcon()
         refreshPermissions()
         setContent {
             val state = controller.state.collectAsStateWithLifecycle().value
@@ -56,7 +69,20 @@ class MainActivity : ComponentActivity() {
     /** 从系统权限页返回时重新读取实际状态。 */
     override fun onResume() {
         super.onResume()
-        if (::controller.isInitialized) refreshPermissions()
+        if (::controller.isInitialized) { controller.restoreLauncherIcon(); refreshPermissions() }
+        if (::splashTheme.isInitialized && ::controller.isInitialized) {
+            splashTheme.synchronize(SplashTheme.Appearance.from(controller.state.value.settings))
+        }
+    }
+
+    /** 只观察既有主题输入，设置变化后立即更新下次启动背景，离开页面后停止收集。 */
+    private fun observeSplashTheme() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                controller.state.map { SplashTheme.Appearance.from(it.settings) }.distinctUntilChanged()
+                    .collect { splashTheme.synchronize(it) }
+            }
+        }
     }
 
     /** 读取必要授权，通知权限为可选，拒绝后仍可手动使用字幕。 */
@@ -68,12 +94,27 @@ class MainActivity : ComponentActivity() {
         ))
     }
 
-    /** 所有系统授权均由明确的用户操作发起。 */
+    /** 用户点击后申请权限；已授权的音频和通知打开应用详情，悬浮字幕始终打开专项设置。 */
     private fun requestPermission(id: String) {
-        when (id) {
-            "audio" -> permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-            "overlay" -> overlayLauncher.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            "notifications" -> if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+        val permission = when (id) {
+            "audio" -> Manifest.permission.RECORD_AUDIO
+            "notifications" -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null
+            else -> null
+        }
+        if (id == "overlay") {
+            overlayLauncher.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        if (id != "audio" && id != "notifications") return
+        val requests = getSharedPreferences("permission_requests", MODE_PRIVATE)
+        val granted = permission == null || checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        val permanentlyDenied = permission != null && requests.getBoolean(id, false) && !shouldShowRequestPermissionRationale(permission)
+        if (granted || permanentlyDenied) {
+            continueAfterAudioPermission = false
+            overlayLauncher.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        } else if (permission != null) {
+            requests.edit().putBoolean(id, true).apply()
+            permissionLauncher.launch(arrayOf(permission))
         }
     }
 
@@ -84,7 +125,7 @@ class MainActivity : ComponentActivity() {
         if (!Prefs(this).byokReady) { controller.message("请先保存翻译服务地址和模型 ID", true); return }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             continueAfterAudioPermission = true
-            permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+            requestPermission("audio")
             return
         }
         if (!Settings.canDrawOverlays(this)) { requestPermission("overlay"); return }

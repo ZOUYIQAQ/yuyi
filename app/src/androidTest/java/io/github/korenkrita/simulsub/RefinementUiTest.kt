@@ -21,6 +21,7 @@ class RefinementUiTest {
             onApiDraftChange = { api -> state = state.copy(settings = state.settings.copy(api = api)) },
             onSaveApi = { saves++ },
         )) }
+        compose.onNodeWithText("翻译 API").performClick()
         compose.onNodeWithText("服务预设").performScrollTo().performClick()
         compose.onNodeWithText("DeepSeek 官方").performClick()
         compose.onNodeWithText("模型 ID").performScrollTo().performTextReplacement("我修改的模型")
@@ -32,7 +33,7 @@ class RefinementUiTest {
         }
     }
 
-    /** 行数选择与真实预览接收同一设置，外观色块派发可持久化的主题ID。 */
+    /** 句数选择与真实预览接收同一设置，外观色块派发可持久化的主题ID。 */
     @Test fun captionLimitAndColorControlsDispatch() {
         var state by mutableStateOf(SimulSubUiState(destination = UiDestination.SETTINGS))
         compose.setContent { SimulSubApp(state, SimulSubActions(
@@ -40,13 +41,15 @@ class RefinementUiTest {
             onThemeColorChange = { id -> state = state.copy(settings = state.settings.copy(themeColorId = id, dynamicColors = false)) },
         )) }
         compose.onNodeWithText("字幕样式").performScrollTo().performClick()
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("最多显示行数"))
-        compose.onNodeWithText("最多显示行数").performClick()
-        compose.onNodeWithText("最多 3 行").performClick()
-        compose.runOnIdle { assertEquals(3, state.settings.subtitle.maxLines) }
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.onNodeWithContentDescription("暂时收起字幕预览").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("显示句数"))
+        compose.onNodeWithText("显示句数").performClick()
+        compose.onNodeWithText("3 句").performClick()
+        compose.runOnIdle { assertEquals(3, state.settings.subtitle.maxSentences) }
+        compose.onNodeWithContentDescription("返回设置").performClick()
         compose.onNodeWithText("外观").performScrollTo().performClick()
-        compose.onNodeWithText("松绿").performScrollTo().performClick().assertIsSelected()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("松绿"))
+        compose.onNodeWithText("松绿").performClick().assertIsSelected()
         compose.runOnIdle { assertEquals("forest", state.settings.themeColorId) }
     }
 }

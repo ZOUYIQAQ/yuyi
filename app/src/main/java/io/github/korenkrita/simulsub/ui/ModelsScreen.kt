@@ -1,6 +1,8 @@
 package io.github.korenkrita.simulsub.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -14,11 +16,17 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import io.github.korenkrita.simulsub.models.ModelComparison
+import io.github.korenkrita.simulsub.models.ModelComparisons
 import kotlin.math.roundToInt
 
 /** 模型目录居中限宽，宽屏把同一行模型按内容区逐段对齐，手机保持完整单列。 */
 @Composable
 internal fun ModelsScreen(state: ModelsUiState, actions: SimulSubActions, wide: Boolean) {
+    val confirmation = state.items.firstOrNull { it.id == state.deleteConfirmationId }
+    if (confirmation != null) {
+        ModelDeleteConfirmation(confirmation, state.deletingId == confirmation.id, actions)
+    }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val columns = if (wide && maxWidth >= 760.dp) 2 else 1
         LazyColumn(
@@ -59,7 +67,7 @@ private fun ModelItem(model: ModelUiState, actions: SimulSubActions) {
 
 /**
  * 每段先以实际列宽测量，再使用两卡中的最大段高共同排版。
- * 标题、状态、简介、语言、大小、进度、操作和详情均不依赖固定高度或省略号；
+ * 标题、状态、简介、属性、参考数据、进度、操作和详情均不依赖固定高度或省略号；
  * 背景最后按总高度测量，确保下载失败、长文本和大字号下卡片仍等高。
  */
 @Composable
@@ -107,19 +115,23 @@ private fun ModelCardRow(models: List<ModelUiState>, actions: SimulSubActions) {
 @Composable
 private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column: Int) {
     var details by rememberSaveable(model.id) { mutableStateOf(false) }
+    val comparison = ModelComparisons[model.id]
     ModelSection(column, 0) {
         Text(model.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth().semantics { heading() })
     }
     ModelSection(column, 1) { ModelStatus(model) }
-    ModelSection(column, 2) { Text(model.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth()) }
+    ModelSection(column, 2) {
+        Text(comparison?.introduction ?: model.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
+    }
     ModelSection(column, 3) {
         ModelMetadata("识别语言", model.languages)
     }
     ModelSection(column, 4) {
         ModelMetadata("模型大小", model.sizeLabel)
     }
-    ModelSection(column, 5) { ModelProgress(model) }
-    ModelSection(column, 6) {
+    ModelSection(column, 5) { comparison?.let { ModelBenchmark(it) } }
+    ModelSection(column, 6) { ModelProgress(model) }
+    ModelSection(column, 7) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ActionRow {
@@ -127,7 +139,7 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
                     onClick = { actions.onDownloadModel(model.id) }, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text(if (model.status == ModelUiStatus.FAILED || model.status == ModelUiStatus.CANCELLED) "重试下载" else "下载模型") }
-                if (model.canCancel) OutlinedButton(
+                if (model.canCancel) FilledTonalButton(
                     onClick = { actions.onCancelDownload(model.id) }, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("取消下载") }
@@ -137,13 +149,20 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
                 ) { Text("启用模型") }
                 if (!model.canDownload && !model.canCancel && !model.canActivate) {
                     Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
-                        SupportingText(if (model.status == ModelUiStatus.ACTIVE) "正在用于同传" else model.status.title)
+                        SupportingText(if (model.status == ModelUiStatus.ACTIVE) "当前选中模型" else model.status.title)
                     }
                 }
+                if (model.deletionScope.isNotBlank()) TextButton(
+                    onClick = { actions.onRequestDeleteModel(model.id) },
+                    enabled = model.canDelete,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "删除${model.name}" },
+                ) { Text("删除模型") }
             }
+            model.deleteBlockedReason?.takeIf { model.deletionScope.isNotBlank() && it.isNotBlank() }?.let { SupportingText(it) }
         }
     }
-    ModelSection(column, 7) {
+    ModelSection(column, 8) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(if (details) "收起模型详情" else "来源、许可与完整性")
@@ -151,13 +170,63 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
             if (details) {
                 SupportingText("来源：${model.sourceLabel}\n许可：${model.license}")
                 if (model.verificationDetail.isNotEmpty()) SupportingText(model.verificationDetail)
+                if (comparison != null) {
+                    SupportingText("评测条件：FLEURS（日语650句、英语647句），Mac M4 Pro，2线程，int8，sherpa-onnx 1.13.8。整句离线解码，音频首尾各补0.3秒静音。")
+                    SupportingText("日语为字错误率，英语为词错误率；参考耗时为单句解码中位数。")
+                }
                 ActionRow {
                     if (model.sourceUrl.isNotEmpty()) TextButton(onClick = { actions.onModelSource(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看下载来源") }
                     if (model.license.isNotBlank() || model.licenseUrl.isNotEmpty()) TextButton(onClick = { actions.onModelLicense(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看许可") }
+                    TextButton(onClick = actions.onOpenModelBenchmark, modifier = Modifier.heightIn(min = 48.dp)) { Text("评测来源与条件") }
                 }
             }
         }
     }
+}
+
+/** 主卡仅保留易懂的错误率和参考耗时，参考设备紧跟耗时以避免误认为手机延迟。 */
+@Composable
+private fun ModelBenchmark(comparison: ModelComparison) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ModelMetadata("日语识别错误率", comparison.japaneseErrorRate)
+        ModelMetadata("英语识别错误率", comparison.englishErrorRate)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            ModelMetadata("参考识别耗时（日/英）", "${comparison.japaneseDecodeMs} / ${comparison.englishDecodeMs} ms")
+            Text("参考设备：Mac M4 Pro", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** 页面内的正式确认必须展示模型、固定文件范围和停用后果，取消不派发删除。 */
+@Composable
+private fun ModelDeleteConfirmation(model: ModelUiState, deleting: Boolean, actions: SimulSubActions) {
+    AlertDialog(
+        onDismissRequest = { if (!deleting) actions.onDismissDeleteModel() },
+        title = { Text("删除${model.name}？") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("将删除 ${model.name} 的以下文件范围：")
+                Text(model.deletionScope, style = MaterialTheme.typography.bodySmall)
+                Text("删除会停用此模型；如果它是当前选中模型，将清空选择，不会自动切换到其他模型。再次使用需要重新下载。")
+                Text("下载、校验或同传运行期间不能删除。其他模型、应用设置和使用记录会保留。")
+                model.deleteBlockedReason?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                model.error?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
+                if (deleting) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { actions.onConfirmDeleteModel(model.id) }, enabled = model.canDelete && !deleting,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                Text(if (deleting) "正在删除…" else "确认删除")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = actions.onDismissDeleteModel, enabled = !deleting) { Text("取消") }
+        },
+    )
 }
 
 /** 属性使用固定标签列与可换行值列，缩短手机卡片且保留跨卡对齐。 */
@@ -165,15 +234,15 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
 private fun ModelMetadata(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(0.32f))
-        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.68f))
+            modifier = Modifier.weight(0.58f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.42f))
     }
 }
 
 /** 每个内容段只产生一个测量节点，并为跨列读屏指定稳定阅读次序。 */
 @Composable
 private fun ModelSection(column: Int, section: Int, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().semantics { isTraversalGroup = true; traversalIndex = (column * 8 + section).toFloat() }) { content() }
+    Box(Modifier.fillMaxWidth().semantics { isTraversalGroup = true; traversalIndex = (column * 9 + section).toFloat() }) { content() }
 }
 
 /** 状态使用文字和主题色共同表达，下载状态变化以礼貌方式播报。 */

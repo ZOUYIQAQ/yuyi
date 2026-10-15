@@ -1,5 +1,7 @@
 package io.github.korenkrita.simulsub
 
+import android.content.Intent
+import androidx.lifecycle.Lifecycle
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -7,6 +9,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import org.junit.Rule
 import androidx.test.core.app.ActivityScenario
@@ -32,23 +35,34 @@ class CapturePipelineDeviceTest {
         val headers = prefs.byokHeaders
         val agent = prefs.byokUserAgent
         val keepLogs = prefs.keepLogs
+        val recordRoot = context.getExternalFilesDir(null)
+        val recordsBefore = recordRoot?.let { SessionLog.list(it).map { file -> file.name }.toSet() }.orEmpty()
         val jev = prefs.jevOn
         val jevCheck = prefs.jevCheck
+        val previousLimit = Triple(prefs.captionLimitMode, prefs.captionSentenceCount, prefs.keepChars)
+        val previousDisplay = prefs.showJa to prefs.showStats
         val url = "https://10.0.2.2:18443/v1/chat/completions"
         var track: AudioTrack? = null
         try {
             prefs.saveByok(url, "本地链路验收", "", "", emptyList())
             prefs.setByokVariant(url, "本地链路验收", "none")
-            prefs.keepLogs = true
+            prefs.keepLogs = false
             prefs.jevOn = false
             prefs.jevCheck = false
+            prefs.setCaptionRetention(CaptionLimitMode.SENTENCES, 4, 100)
+            prefs.showJa = false
+            prefs.showStats = false
             val repository = ModelRepository.get(context)
             waitUntil("模型库恢复", 30_000) { repository.selectedPaths() != null }
-            ActivityScenario.launch(MainActivity::class.java).use {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 compose.onNodeWithText("开始同传").performClick()
                 Log.i("系统链路验收", "请在专用模拟器确认本次捕获整个屏幕；不操作任何远程设备")
                 waitUntil("系统捕获授权", 90_000) { CaptionService.running }
-                Thread.sleep(4_000)
+                // 模型冷启动可能超过四秒，必须等录音成功后的空状态再播放样例。
+                waitUntil("录音实际就绪", 30_000) {
+                    val snapshot = CaptionService.state.value
+                    snapshot.running && snapshot.status.isEmpty()
+                }
                 val wav = instrumentation.context.assets.open("ja.wav").use { input -> input.readBytes() }
                 val pcm = pcmData(wav)
                 track = AudioTrack.Builder()
@@ -65,12 +79,32 @@ class CapturePipelineDeviceTest {
                 }
                 val snapshot = CaptionService.state.value
                 snapshot.captions.forEach { caption -> Log.i("系统链路验收", "捕获原文：${caption.ja}；受控译文：${caption.zh}") }
+                val full = snapshot.captions.last { it.isFinal }
+                assertTrue("链路译文必须长于字数测试上限", full.zh.codePointCount(0, full.zh.length) > 10)
+                prefs.setCaptionRetention(CaptionLimitMode.CHARACTERS, 1, 10)
+                waitUntil("运行中切换字数显示", 5_000) {
+                    CaptionService.state.value.captions.lastOrNull()?.let { shown ->
+                        shown.zh.codePointCount(0, shown.zh.length) == 10 && full.zh.endsWith(shown.zh) && shown.ja == full.ja
+                    } == true
+                }
+                prefs.setCaptionRetention(CaptionLimitMode.SENTENCES, 4, 100)
+                waitUntil("切回句数恢复完整定稿", 5_000) {
+                    CaptionService.state.value.captions.any { it.segmentId == full.segmentId && it.zh == full.zh }
+                }
+                // 产品启动同传后主动退到后台；截图前显式切回本应用，避免截到旧包或其他应用。
+                context.startActivity(Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                scenario.moveToState(Lifecycle.State.RESUMED)
+                compose.waitForIdle()
+                compose.onNodeWithText("停止同传").assertIsDisplayed()
                 instrumentation.waitForIdleSync()
                 Thread.sleep(350)
                 val screenshot = File(context.getExternalFilesDir(null), "capture-pipeline.png")
                 screenshot.outputStream().use { output -> instrumentation.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG, 100, output) }
                 Log.i("系统链路验收", "真实系统捕获→VAD→ASR→HTTPS流式翻译夹具→悬浮字幕已通过；截图：${screenshot.path}")
             }
+            assertEquals("关闭记录的真实会话不能创建日志文件", recordsBefore,
+                recordRoot?.let { SessionLog.list(it).map { file -> file.name }.toSet() }.orEmpty())
         } finally {
             track?.stop(); track?.release()
             CaptionService.stop(context)
@@ -82,6 +116,9 @@ class CapturePipelineDeviceTest {
             prefs.keepLogs = keepLogs
             prefs.jevOn = jev
             prefs.jevCheck = jevCheck
+            prefs.setCaptionRetention(previousLimit.first, previousLimit.second, previousLimit.third)
+            prefs.showJa = previousDisplay.first
+            prefs.showStats = previousDisplay.second
         }
     }
 

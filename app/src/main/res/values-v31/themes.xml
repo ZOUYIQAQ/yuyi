@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 整页背景继承所选主题，人物与花瓣保持透明彩色，桌面图标独立保留。 -->
+    <style name="Theme.Yuyi.Starting" parent="Theme.Yuyi.Starting.Base">
+        <item name="android:windowSplashScreenBackground">?android:colorBackground</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_portrait</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+    </style>
+</resources>

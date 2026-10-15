@@ -74,6 +74,56 @@ class UiLayoutAlignmentTest {
         compose.onNodeWithText("启用模型").assertHeightIsAtLeast(48.dp)
     }
 
+    /** 两个正式模型的短介绍与基本属性逐段对齐，耗时紧贴设备说明且没有术语长文。 */
+    @Test fun builtInModelsShowAlignedConciseComparison() {
+        val reazon = model("reazonspeech", "ReazonSpeech", "旧介绍", "日语、英语", "74.1 MiB")
+        val sense = model("sensevoice", "SenseVoice Small", "旧介绍", "中文、英语、日语、韩语、粤语", "229.1 MiB")
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                SimulSubTheme(SettingsUiState()) {
+                    Box(Modifier.requiredWidth(1040.dp).fillMaxHeight()) {
+                        ModelsScreen(ModelsUiState(items = listOf(reazon, sense)), SimulSubActions(), wide = true)
+                    }
+                }
+            }
+        }
+        assertAligned("电视节目语音训练的小模型，体积小、识别快，适合日语；英语表现较弱。",
+            "支持中英日韩粤五种语言，日语和英语识别效果较好，体积较大。")
+        listOf("识别语言", "模型大小", "日语识别错误率", "英语识别错误率", "参考识别耗时（日/英）", "参考设备：Mac M4 Pro").forEach {
+            assertRepeatedAligned(it)
+        }
+        assertAligned("8.48%", "7.52%")
+        assertAligned("22.66%", "8.33%")
+        assertAligned("93 / 71 ms", "203 / 157 ms")
+        assertRepeatedAligned("下载模型")
+        compose.onNodeWithText("上游历史", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("实时率 RTF").assertDoesNotExist()
+        compose.onNodeWithText("并非安卓实测", substring = true).assertDoesNotExist()
+    }
+
+    /** 手机两倍字号下真实属性名称和值完整换行，仍可滚动到下载与详情入口。 */
+    @Test fun builtInComparisonRemainsCompleteAtDoubleFontSize() {
+        var requested: String? = null
+        val item = model("sensevoice", "SenseVoice Small", "旧介绍", "中文、英语、日语、韩语、粤语", "229.1 MiB")
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                SimulSubTheme(SettingsUiState()) {
+                    Box(Modifier.requiredWidth(320.dp).fillMaxHeight()) {
+                        ModelsScreen(ModelsUiState(items = listOf(item)),
+                            SimulSubActions(onDownloadModel = { requested = it }), wide = false)
+                    }
+                }
+            }
+        }
+        listOf("日语识别错误率", "英语识别错误率", "参考识别耗时（日/英）", "203 / 157 ms", "参考设备：Mac M4 Pro").forEach {
+            compose.onNodeWithText(it).performScrollTo()
+            assertFullText(it)
+        }
+        compose.onNodeWithText("下载模型").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("sensevoice", requested) }
+        compose.onNodeWithText("来源、许可与完整性").performScrollTo().assertIsDisplayed()
+    }
+
     /** 窄屏即使收到宽屏标记也退回单列，大字号长文无省略且操作可滚动到达。 */
     @Test fun narrowLargeTextRemainsCompleteAndActionable() {
         var requested: String? = null
