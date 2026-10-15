@@ -199,8 +199,9 @@ private fun AboutSettings(state: SettingsUiState, actions: SimulSubActions, wide
     PageColumns(wide, header = navigation, first = {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionHeading("同传字幕", "在设备上识别正在播放的声音，使用自己的翻译服务显示字幕。")
+                SectionHeading("火羽同传", "在设备上识别正在播放的声音，使用自己的翻译服务显示字幕。")
                 Text(if (state.version.isEmpty()) "版本信息待加载" else "版本 ${state.version}", style = MaterialTheme.typography.titleMedium)
+                SupportingText("为观看火羽ひのめ的直播而制作，图标取自她的橙棕短发、留白面部与红色山茶花。")
                 SupportingText("识别模型单独下载，模型来源与许可可在模型库中查看。")
             }
         }

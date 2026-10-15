@@ -1,11 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108">
-<defs><linearGradient id="g" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
-<stop offset="0" stop-color="#5B5BF7"/><stop offset="0.55" stop-color="#8B5CF6"/><stop offset="1" stop-color="#EC4899"/></linearGradient>
-<clipPath id="c"><rect width="108" height="108" rx="24"/></clipPath></defs>
-<g clip-path="url(#c)"><rect width="108" height="108" fill="url(#g)"/></g>
-<path fill="#FFFFFF" d="M36,30h36a10,10 0 0,1 10,10v22a10,10 0 0,1 -10,10h-18l-10,9v-9h-8a10,10 0 0,1 -10,-10v-22a10,10 0 0,1 10,-10z"/>
-<path fill="#6D5DF6" d="M38,44h3v8h-3zM44,40h3v16h-3zM50,43h3v10h-3z"/>
-<path fill="#EC4899" d="M58,43h14a2,2 0 0,1 0,4h-14a2,2 0 0,1 0,-4z"/>
-<path fill="#B4ACFA" d="M58,50h10a2,2 0 0,1 0,4h-10a2,2 0 0,1 0,-4z"/>
-<path fill="#8B5CF6" d="M38,61h34a2,2 0 0,1 0,4h-34a2,2 0 0,1 0,-4z"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="18 18 72 72">
+<path fill="#F6EBDD" d="M0,0H108V108H0Z"/>
+<path fill="#BB7B60" d="M30,65 L30,44 C30,30 40,22 52,22 C62,21 70,27 74,35 C78,39 79,44 79,49 L78,67 L72,75 L64,72 L40,75 L32,69 Z"/>
+<path fill="#FFFDF8" d="M45,72 L55,76 L65,72 C74,77 79,84 82,94 L27,94 C31,83 36,76 45,72 Z"/>
+<path fill="#FFF0DA" d="M49,68 L60,68 L60,75 L55,79 L49,75 Z"/>
+<path fill="#FFF0DA" d="M41,40 Q44,43 48,43 L49,36 Q51,42 54,44 L61,44 L62,36 Q65,40 68,42 L68,52 C68,59 63,65 55,71 C47,66 42,59 41,52 Z"/>
+<path fill="#D5A080" d="M30,44 C30,30 40,22 52,22 C62,21 70,27 74,35 L74,58 L68,66 L68,42 Q65,40 62,36 L61,44 L54,44 Q51,42 49,36 L48,43 Q44,43 41,40 L41,52 L36,68 L32,72 L30,65 Z"/>
+<path fill="#C63D40" d="M31,35 L34,35 L32,59 L29,72 L26,77 L29,52 Z M36,35 L39,35 L37,63 L34,70 L35,52 Z"/>
+<path fill="#C63D40" d="M33,37 C28,35 28,31 32,28 C31,24 35,23 39,25 C43,22 47,24 48,28 C53,30 51,34 48,36 C48,41 44,42 40,40 C36,43 32,41 33,37 Z"/>
+<path fill="#EF7752" d="M32,31 C32,27 35,26 39,28 C43,25 47,27 47,31 C49,34 45,37 41,36 C37,38 33,36 32,31 Z"/>
+<path fill="#C63D40" d="M37,32 C37,29 41,28 43,31 C46,32 43,35 40,35 L37,34 Z"/>
+<path fill="#C63D40" d="M53,77 L44,74 L44,85 L53,81 L55,85 L58,81 L66,85 L66,74 L57,77 Z"/>
+<path fill="#E8BC69" d="M53,76 L57,76 L58,80 L55,83 L52,80 Z"/>
 </svg>

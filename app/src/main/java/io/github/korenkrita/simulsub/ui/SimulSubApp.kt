@@ -42,7 +42,7 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
                             modifier = Modifier.width(railWidth).fillMaxHeight().verticalScroll(rememberScrollState()),
                             windowInsets = WindowInsets(0, 0, 0, 0),
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            header = { if (showRailHeader) Text("同传字幕", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 20.dp)) },
+                            header = { if (showRailHeader) Text("火羽同传", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 20.dp)) },
                         ) {
                             UiDestination.entries.forEach { destination ->
                                 NavigationRailItem(

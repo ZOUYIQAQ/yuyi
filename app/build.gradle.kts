@@ -9,12 +9,12 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.korenkrita.simulsub"
+        applicationId = "io.github.zouyiqaq.hinome"
         minSdk = 29 // AudioPlaybackCapture
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 21
-        versionName = "1.2.0"
+        versionCode = 22
+        versionName = "1.2.1"
         ndk { abiFilters += "arm64-v8a" }
     }
 

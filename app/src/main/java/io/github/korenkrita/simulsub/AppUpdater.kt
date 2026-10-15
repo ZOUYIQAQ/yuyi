@@ -389,7 +389,7 @@ internal class AppUpdater(private val activity: Activity) {
                         activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
                     } catch (_: Exception) {
                         waitingForPermission = false
-                        error("没有打开安装设置", "请到手机设置里找到「同传字幕」，允许安装未知应用，再回来重试。") { install(release) }
+                        error("没有打开安装设置", "请到手机设置里找到「火羽同传」，允许安装未知应用，再回来重试。") { install(release) }
                     }
                 }.create())
             return
@@ -406,7 +406,7 @@ internal class AppUpdater(private val activity: Activity) {
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                         prefs.edit().remove("pendingInstall").apply()
                     } catch (_: Exception) {
-                        error("没有打开安装页面", "请确认手机允许「同传字幕」安装应用，然后重试。") { install(release) }
+                        error("没有打开安装页面", "请确认手机允许「火羽同传」安装应用，然后重试。") { install(release) }
                     }
                 }
             } catch (e: CancellationException) { throw e }

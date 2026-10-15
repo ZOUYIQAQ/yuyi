@@ -1,6 +1,12 @@
-# SimulSub · 同传字幕
+# 火羽同传 · HinomeSub
 
 [简体中文](README.md) · [Documentation (Chinese)](docs/README.md) · [Releases](https://github.com/ZOUYIQAQ/simul-subtitle/releases)
+
+An Android subtitle fork inspired by 火羽ひのめ, with a flat geometric portrait icon featuring solid copper hair, a featureless face and a red camellia. Package `io.github.zouyiqaq.hinome` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+
+Icon design is a provisional draft and will be revised.
+
+![HinomeSub icon](docs/images/icon.png)
 
 Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
 

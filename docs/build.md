@@ -65,6 +65,12 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 
 ## 签名与发布前检查
 
-包名为 `io.github.korenkrita.simulsub`。当前 Release 构建配置仍引用 `signingConfigs.getByName("debug")`，因此签名取决于构建机器的 keystore；不能把其他机器新生成的 debug key 当作原发行证书。覆盖安装要求相同包名、兼容版本号与相同签名；正式发行前必须确认维护者指定的证书和密钥管理方案。
+包名为 `io.github.zouyiqaq.hinome`。当前 Release 构建配置仍引用 `signingConfigs.getByName("debug")`，因此签名取决于构建机器的 keystore；不能把其他机器新生成的 debug key 当作原发行证书。覆盖安装要求相同包名、兼容版本号与相同签名；正式发行前必须确认维护者指定的证书和密钥管理方案。
 
 构建后使用已安装 SDK 的 `apksigner` 核对证书，使用 `aapt` 或 `apkanalyzer` 核对包名与版本；与实际目标旧包比较。不要把旧文档的证书指纹或旧上游仓库发行流程作为本 Fork 已验证事实。发布说明、标签和 APK 版本应一致；发布后回读安装包核对哈希。当前客户端不要求上传 `update.json`。
+
+## 火羽同传身份与图标
+
+当前应用名为火羽同传，应用ID为`io.github.zouyiqaq.hinome`，可与原版`io.github.korenkrita.simulsub`共存；两者的数据、模型目录、权限、通知与后台任务由系统分别管理。新包不会自动读取旧包模型或密钥，需要重新配置。内部Kotlin命名空间暂保留上游名称以兼容共享核心与原生库，它不是系统安装包ID。两个FileProvider与WorkManager的authority使用应用ID生成。
+
+图标以火羽ひのめ为参考，由前发与侧发两块铜色、无五官的收窄面部、红色山茶花与蝴蝶结构成；均为无描边填色路径，不使用渐变或投影。`tools/generate-icon.py`为矢量源定义，同步生成Android前景、背景、单色主题图与`docs/images/icon.svg`。直接运行只需Python标准库；可选`--preview-dir .qa/branding`导出PNG和裁切/小尺寸预览，需要cairosvg与Pillow（本机可通过`DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib`定位Cairo）。

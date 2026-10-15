@@ -6,7 +6,7 @@ import android.content.Context
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jpsub", Context.MODE_PRIVATE)
     // every LLM API request (the session, 测试连接, 生成术语) is made after some Prefs exists
-    init { ByokTranslator.defaultUserAgent = "SimulSub/${BuildConfig.VERSION_NAME}" }
+    init { ByokTranslator.defaultUserAgent = "HinomeSub/${BuildConfig.VERSION_NAME}" }
 
     /** Chinese caption size in sp */
     var textSp: Float

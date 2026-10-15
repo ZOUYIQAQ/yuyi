@@ -6,7 +6,7 @@
 
 - 播放音频通过 Android `AudioPlaybackCapture` 获取，交由本地 ASR 与 VAD 处理；当前采集流水线不上传或保存原始音频，不读取麦克风音源。
 - APK 不含 ASR/VAD 权重。每个识别模型包各自包含 Silero VAD，需在「模型库」下载、逐文件校验后手动启用，存放在私有 `files/models/<模型标识>/` 下；识别时从本地读取。许可文本另以 APK `assets/licenses/` 随包提供。
-- 「设置 → 使用记录」默认关闭。开启后记录文字、提示词与运行指标，不含原始音频、API Key 或自定义请求头值；文件在应用专属外部目录 `Android/data/io.github.korenkrita.simulsub/files/logs/`。
+- 「设置 → 使用记录」默认关闭。开启后记录文字、提示词与运行指标，不含原始音频、API Key 或自定义请求头值；文件在应用专属外部目录 `Android/data/io.github.zouyiqaq.hinome/files/logs/`。
 - 翻译 API Key、自定义请求头值及 Jev Key 使用 Android Keystore 加密保存。应用关闭系统备份；这不意味着设备上的所有设置字段均为加密字段。
 
 ## 联网行为

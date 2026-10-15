@@ -2,6 +2,16 @@
 
 本记录对应工作分支 `codex/android-material-models`。所有设备命令显式指定本地 `emulator-5580`，没有操作已连接的远程设备。
 
+## 火羽同传1.2.1身份改造（2026-10-15）
+
+- 用户已批准本次本地提交，暂不推送或发布。应用名「火羽同传」，应用ID `io.github.zouyiqaq.hinome`，versionCode22；内部Kotlin命名空间保留共享核心兼容，不影响系统共存。
+- 本机API35模拟器已同时安装新包1.2.1与旧包名1.2.0，分别使用`/data/user/0/io.github.zouyiqaq.hinome`与`/data/user/0/io.github.korenkrita.simulsub`。新应用的启动入口、logs/updates两个FileProvider归属及图标加载通过真实设备检查。未将旧包二进制冒称为未修改的上游原版。
+- 新应用下33项设备回归通过，`.qa/branding/device-tests.log`；最终资源下2项身份与图标检查再次通过，`.qa/branding/final-identity-tests-debug.log`。设备测试使用debug变体，Release另行安装与启动检查。
+- core198/app33单元测试、Debug/AndroidTest/Release及Lint构建通过，见`.qa/branding/build.log`与`final-build.log`；包内没有ONNX/TFLite权重、测试音频或调试CA，签名检查通过。
+- 新APK `.artifacts/hinome-subtitle-1.2.1-arm64.apk`，14,145,206字节，SHA-256 `9c8f5e9fbcf9d225148225e3e788a1911729159983b7889cd39b4893867fb56a`，使用本机验收签名。
+- 图标仅为暂用矢量草稿，用户尚未认可并已暂停图标设计；本次保留源文件和当前资源，不能视作最终视觉验收通过。
+- 实际运行与测试位于本机Android SDK创建的`simul_phone`（API35/ARM64），ADB明确指定`emulator-5580`。此前采用无窗口模式；为便于用户操作，改为可见窗口，保留应用与数据。旧版截图记录仍对应各自版本。
+
 ## 本轮1.2.0验收状态（2026-10-15，完成）
 
 本轮API预设、真实字幕行数上限、主题色、页面美化、文档截图与桌面物理删除已完成。用户已批准纳入本次本地提交，暂不推送或发布。

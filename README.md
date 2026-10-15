@@ -1,6 +1,12 @@
-# 同传字幕 · SimulSub
+# 火羽同传 · HinomeSub
 
 [English](README.en.md) · [技术文档](docs/README.md) · [项目与发行版](https://github.com/ZOUYIQAQ/simul-subtitle/releases)
+
+以火羽ひのめ为灵感制作的安卓同传字幕 Fork，图标以无描边几何色块重绘她的橙棕短发、留白面部与红色山茶花。应用包名为 `io.github.zouyiqaq.hinome`，可与原版 `io.github.korenkrita.simulsub` 同时安装，数据与权限分别管理。
+
+图标目前为暂用草稿，设计尚未定稿。
+
+![火羽同传图标](docs/images/icon.png)
 
 在 Android 上识别正在播放的声音，通过你自己的翻译 API 显示悬浮字幕。语音识别与静音检测在设备本地运行，翻译服务接收文字。支持手机和平板；仓库只保留 Android 产品及其共享核心。
 
