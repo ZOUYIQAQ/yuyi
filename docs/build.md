@@ -1,259 +1,70 @@
 # 构建与开发
 
-## 模块划分
+## 当前构建范围
 
-仓库包含三个 Gradle 模块：
+`settings.gradle.kts` 只包含 `:core` 与 `:app`：前者为纯 Kotlin 分句、翻译和会话流水线，后者为 Android Compose UI、控制器、采集服务、模型库与浮窗。桌面客户端、macOS/Windows采集与打包工具、桌面测试和Windows工作流已移除。`gradlew.bat`保留供Windows开发机编译Android使用。
 
-| 模块 | 说明 |
-|---|---|
-| `:core` | 不依赖 Android SDK 的跨平台核心（分句状态机、识别与翻译流水线、翻译提示词与 BYOK 客户端、Jev 判断、会话日志、运行状态），由手机端与桌面端共用 |
-| `:app` | Android 客户端（界面、悬浮窗、前台采集服务、Keystore 加密、应用内检查更新） |
-| `:desktop` | 桌面客户端（Compose Desktop，macOS 与 Windows 共用一套界面与悬浮窗代码，配合 `tools/` 下的原生音频采集子进程） |
+## 环境与命令
 
----
-
-## Android 编译与单元测试
-
-### 环境要求
-
-- **JDK 17**
-- **Android SDK**：`platforms;android-35`、`build-tools;34.0.0`（`minSdk 29`，仅构建 `arm64-v8a`）
-- **无需 NDK**：Android 端没有自建原生 C/C++ 代码，语音识别直接使用 `sherpa-onnx` AAR 内预编译好的 `.so` 库。
-
-### 拉取依赖与构建
+- JDK 17、Android SDK Platform 35（`compileSdk` / `targetSdk` 35）。
+- `minSdk` 29，仅打包 `arm64-v8a`。
+- 无需自行编译原生库；使用 sherpa-onnx 1.13.8 预编译 AAR。当前 Android CI 安装 `build-tools;35.0.0`。
 
 ```bash
-git clone https://github.com/KorenKrita/simul-subtitle
+git clone https://github.com/ZOUYIQAQ/simul-subtitle
 cd simul-subtitle
-
-# 下载 sherpa-onnx AAR 到 app/libs，下载离线识别模型到 models/ 并复制进 app/src/main/assets/models
+source tools/android-env.sh
 ./setup.sh
-
-export JAVA_HOME=<jdk17> ANDROID_HOME=~/Library/Android/sdk
-./gradlew -q :app:compileDebugUnitTestKotlin :app:assembleRelease
+./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+./gradlew :app:assembleRelease
 ```
 
-- **代理配置**：需要代理时可使用 `HTTPS_PROXY=... ./setup.sh`，以及 `./gradlew -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890 ...`。
-- **构建产物**：Release APK 位于 `app/build/outputs/apk/release/app-release.apk`（约 90 MB，其中约 78 MB 识别模型不压缩存放，原生库压缩存放并在安装时解压）。
-- **运行单元测试**：上面的 `assembleRelease` 仅编译测试代码而不执行；如需运行全部单元测试：
-  ```bash
-  ./gradlew :core:test :app:testDebugUnitTest
-  ```
+`tools/android-env.sh` 只改变当前 shell：优先沿用有效 `JAVA_HOME`，否则尝试 Homebrew openjdk@17；SDK 默认 `$HOME/Library/Android/sdk`，沿用已设置的 SDK 路径；追加存在的命令目录。它不修改用户 shell 配置，需要用 `source` 加载。
 
----
+`setup.sh` 仅下载运行时 `app/libs/sherpa-onnx-static-link-onnxruntime-1.13.8.aar`，固定大小 **38,691,998 字节**，SHA-256 为 `b22c3fc1b6a45666d28892bb2f7694beeb77a8362d7ebd77c1a5431ec9435471`。已存在且校验通过则跳过；先写 `.part`、校验后转正，超时、有限重试，失败以非零状态退出。脚本不下载 ASR/VAD 权重。
 
-## 内置模型来源与校验
+需要代理时可为 setup 设置 `HTTPS_PROXY`；Gradle 可按环境设置 `-Dhttps.proxyHost`、`-Dhttps.proxyPort`。这与应用关于页的更新行为无关。
 
-语音识别与静音检测模型随应用直接打包分发，不在运行时联网下载。`./setup.sh` 仅从固定官方地址拉取文件，并逐一校验文件字节数与 SHA-256，校验不通过立即报错退出：
+| 产物 | 路径 |
+|---|---|
+| Debug APK | `app/build/outputs/apk/debug/app-debug.apk` |
+| Release APK | `app/build/outputs/apk/release/app-release.apk` |
 
-| 文件路径 | 大小 | 上游来源 | 用途 |
-|---|---|---|---|
-| `asr/encoder.int8.onnx` 等 4 个文件 | 约 77 MB | 固定版本的 Hugging Face 仓库 [csukuangfj/reazonspeech-k2-v2-ja-en](https://huggingface.co/csukuangfj/reazonspeech-k2-v2-ja-en) | ReazonSpeech 日/英语音识别 |
-| `vad/silero_vad.onnx` | 0.6 MB | `sherpa-onnx` GitHub Release（`asr-models`） | Silero VAD 静音检测 |
-| `asr/LICENSE`、`vad/LICENSE` | — | `apache.org` 的 Apache-2.0 原文、`silero-vad` 固定 commit 的 MIT 许可证 | 随模型一同分发许可证 |
+## 模型与许可打包
 
-### 三端打包位置
+- `assets.exclude("models/**")` 排除历史模型目录，APK 不包含 ASR 或 VAD 权重。
+- 安装后进入「模型库」主动下载；每个 ASR 包包含各自 VAD，无需独立选择。
+- 固定源、字节数与 SHA-256 在 `models/ModelCatalog.kt`；逐文件验证后落盘，下载成功不自动启用。用户需点击「启用模型」，同传运行期间禁止切换。
+- 权重位于私有 `files/models/<模型标识>/asr/` 与 `vad/`。
+- 许可文本随 APK 的 `assets/licenses/` 分发，包括 ReazonSpeech、SenseVoice 与 Silero，不与模型下载文件放在同一目录。事实依据见 [MODEL_SOURCES.md](MODEL_SOURCES.md)。
 
-- **Android**：`setup.sh` 将模型复制到 `app/src/main/assets/models/`（不纳入 Git），`.onnx` 在 APK 内配置为 `noCompress`，由 `sherpa-onnx` 直接从 `assets` 零拷贝读取。
-- **macOS**：`tools/mac-app/build.sh` 将 `models/asr` 与 `models/vad` 打入 `.app` 的资源目录；直接从源码仓库运行时读取 `./models`（可通过 `-Dsimulsub.models=<目录>` 覆盖）。
-- **Windows**：`tools/win-app/build.sh` 使用 `sha256sum` 校验 `models/asr` 与 `models/vad` 后打入应用资源目录。
-
----
-
-## macOS 端到端回归测试
+可检查 APK 内容，确认没有误打包 `.onnx` / `.tflite` 且包含许可文本：
 
 ```bash
-tools/mac-e2e/run.sh [file.wav]
+unzip -l app/build/outputs/apk/debug/app-debug.apk
 ```
 
-在 macOS 上加载真实的 `sherpa-onnx` 离线模型与你配置的翻译服务，运行与手机端完全相同的 `Pipeline` / `Segmenter` 代码，按 1x 实时速度喂入 WAV 音频：
+## 回归与设备验收
 
-- **环境变量**：通过 `BYOK_URL`、`BYOK_MODEL`、`BYOK_KEY` 指定翻译接口（模型须支持关闭思考，首次运行会先自动探测关闭思考参数）。
-- **默认语料**：不传音频文件参数时，自动调用 `say -v Kyoko` 合成一段 6 句日语语音作为回归输入；所有定稿按顺序送达才以退出码 `0` 结束。
-- **反向自检**：`JAVA_OPTS=-DdropFinal=3 tools/mac-e2e/run.sh` 用于模拟丢句，必须以失败退出。
-- **超时保护**：`-DdeadlineS`（默认 180 秒）超时后以退出码 `2` 强制退出，防止底层原生调用卡死挂起测试。
-
----
-
-## 桌面端构建与打包
-
-### 1. macOS 版（Apple Silicon，macOS 14.2+）
-
-系统音频采集依赖 macOS 14.2 引入的 Core Audio Process Tap，因此仅支持 Apple Silicon（`arm64`）与 macOS 14.2 及以上版本。
-
-#### 从源码仓库直接运行
+`.github/workflows/android.yml` 执行核心测试、Android 本地单元测试、lint、Debug 打包和 APK 模型排除检查。设备 UI 回归需另外准备 Android 设备；当前 ABI 为 arm64，不能将仅有 x86 原生库的模拟环境当作模型运行验收。
 
 ```bash
-tools/mac-capture/build.sh          # 编译系统音频采集工具 sysaudio
-tools/mac-e2e/run.sh                # 顺带拉取 sherpa-onnx 的 macOS 原生库（需设置 BYOK_* 环境变量）
-./gradlew :desktop:run
+./gradlew :app:connectedDebugAndroidTest
 ```
 
-源码运行时直接读取仓库根目录下的 `models/` 与上述原生库，配置文件写入 `desktop/build/run-data/`，不污染系统中已安装的正式版 App。
+编译、单元测试、UI 示例和真实采集分别提供不同证据。真实浮窗、模型完整下载与启用、旋转/分屏、采集授权与拒绝路径、日志活动保护、付费翻译服务可用性需在相应设备和账户上验证。验收状态以 [ANDROID_QA.md](ANDROID_QA.md) 为准；本文命令不表示本轮已全部执行。
 
-#### 打包 DMG
+## 当前更新与发行
 
-```bash
-export JAVA_HOME=$(mise where java@zulu-17.68.203.0)
-tools/mac-app/build.sh
-```
+「设置 → 关于」有两个独立动作：
 
-构建产物为 `desktop/build/compose/binaries/main/dmg/SimulSub-<versionName>-mac-arm64.dmg`（脚本结束时会打印 SHA-256）。`build.sh` 独立完成所有原生依赖组装，不依赖 `tools/mac-e2e`：
+1. 「检查更新」调用 `AppController.checkUpdate()`，只读取 `https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest`，总超时 15 秒。成功显示发行标签；404 提示 Fork 尚无安装包；其他错误显示失败信息。
+2. 「打开项目仓库」打开 `https://github.com/ZOUYIQAQ/simul-subtitle`，用户自行查看发行版并下载安装。
 
-- 自动准备 `sherpa-onnx` 1.13.8 的 JVM JAR 与 `osx-aarch64` 原生库。
-- 打包经 `./setup.sh` 校验的 `models/asr` 与 `models/vad`。
-- 编译 `arm64` 架构的 `sysaudio`。
-- 执行 `:desktop:createDistributable` 生成带裁剪版 JRE（含 `java.net.http`、`jdk.crypto.ec`、`java.naming` 等模块）的 `.app`，将原生库、模型与 `sysaudio` 放入 `SimulSub.app/Contents/app/resources/`（即 `compose.application.resources.dir`）。
-- 版本号与 Android 端共用 `versionName`。因 `jpackage` 要求主版本号大于 0，Bundle 的 `CFBundleVersion` 设为 `1.<versionCode>`（仅用于内部排序），随后将 `CFBundleShortVersionString` 写回 `versionName` 并重新执行 ad-hoc 签名。
-- `Info.plist` 内置 `NSAudioCaptureUsageDescription`，首次启动字幕时触发系统录音授权弹窗。
+当前不比较 `versionCode` 判断新旧，不读取 `update.json`，没有自动检查、应用内 APK 下载/安装、多代理回退，也没有「跳过版本」「稍后提醒」「永不检查」等偏好。仓库保留的 `AppUpdater.kt`、旧 Provider 与安装权限不是当前 UI 已启用功能，不应据此恢复旧更新协议说明。
 
-> 注：DMG 未做 Apple Developer ID 签名与公证，用户首次打开需在「应用程序」中右键选择「打开」或在「系统设置 → 隐私与安全性」中点击「仍要打开」。
+## 签名与发布前检查
 
----
+包名为 `io.github.korenkrita.simulsub`。当前 Release 构建配置仍引用 `signingConfigs.getByName("debug")`，因此签名取决于构建机器的 keystore；不能把其他机器新生成的 debug key 当作原发行证书。覆盖安装要求相同包名、兼容版本号与相同签名；正式发行前必须确认维护者指定的证书和密钥管理方案。
 
-### 2. Windows 版（x64，免安装 ZIP）
-
-Windows 版仅构建 64 位（`x64`）绿色免安装压缩包。通过 GitHub Actions 的 Windows runner 构建：推送 `windows` 分支或在 Actions 页面手动触发 `.github/workflows/windows.yml`，即可执行 `tools/win-app/build.sh`，生成 `SimulSub-<versionName>-windows-x64.zip`（Actions Artifact 为解压状态的 `SimulSub/` 目录）。
-
-#### `tools/win-app/build.sh` 构建细节
-
-在 Windows Git Bash 中运行，依赖 JDK 17 与 MSVC `cl.exe`（Developer Command Prompt 或 CI 中的 `ilammy/msvc-dev-cmd`）：
-
-- 集成 `sherpa-onnx` 1.13.8 的 JVM JAR 与 `win-x64` 原生库（`sherpa-onnx-jni.dll`、`onnxruntime.dll`）。
-- 使用 `sha256sum` 校验并复制 `models/asr` 与 `models/vad`。
-- 编译 `tools/win-capture/sysaudio.cpp`：通过 WASAPI Loopback 录制默认播放设备，重采样为 16 kHz 单声道 `float32` 写入标准输出（与 macOS `sysaudio` 协议一致）；静音期间持续输出零采样以保持实时时钟，默认播放设备切换时自动跟随，每 5 秒向 `stderr` 输出一行设备名与音量统计（写入会话日志的 `sysaudio` 事件）。采用静态 C 运行库（`/MT`）编译，用户无需额外安装 VC++ Redistributable。
-- 执行 `:desktop:createDistributable` 生成 `SimulSub/SimulSub.exe` 及裁剪版 JRE（额外包含 `jdk.crypto.mscapi`），再用系统自带 `tar.exe` 打包为 `.zip`（统一使用 `/` 路径分隔符；因 `jpackage` 在 Windows 下按系统代码页解析参数，包描述使用英文）。
-
-#### Windows 与 macOS 的平台差异（`isWindows` 分支）
-
-- **软件渲染（`SOFTWARE`）**：Windows 默认使用 Skiko 的 `SOFTWARE` 渲染后端——实测 Direct3D 渲染透明置顶字幕窗会出现拖动后工具栏被裁剪、放大后字幕消失、关闭窗口时主进程卡死等问题，而 OpenGL 会导致工具栏底部发黑（仍可通过环境变量 `SKIKO_RENDER_API` 手动覆盖）。
-- **系统根证书库**：信任 Windows 系统证书库（`Windows-ROOT`），与桌面浏览器行为一致。
-- **数据与密钥存储**：配置保存在 `%APPDATA%\SimulSub\`；API Key 通过 Windows DPAPI（`jna-platform` 的 `Crypt32Util`）加密后存入 `keys.json`。
-- **托盘图标配色**：根据注册表 `SystemUsesLightTheme` 自动切换黑/白托盘图标。
-- **双端共用的代理回退策略**：默认启用系统代理（`java.net.useSystemProxies`），并在代理路由末尾追加一条直连路由；OkHttp 仅在请求尚未发出（TCP 连接或 TLS 握手失败）时自动回退直连，单次流式请求体发出后不会重发。
-
----
-
-## Android 签名、应用内更新与发布流程
-
-### 包名与签名约束
-
-- **应用包名**：`io.github.korenkrita.simulsub`（从早期 `dev.krita.jpsub` 升级时会作为独立新应用安装）。
-- **固定签名证书**：当前 Release 构建使用原签名机器上的 `~/.android/debug.keystore`，**严禁在其他机器上临时生成新的 debug key 发布**，否则存量用户无法覆盖升级，且应用内更新的同签名校验会拒绝安装。
-  - 已发布版本（v0.3 起）的签名证书 SHA-256 指纹：
-    `d75c33a978e0d78c3392ccefc7972abfbc75856fd9843a9d5e08762e2f94fdd8`
-
-### 应用内更新协议（v0.4 起）
-
-不自建更新服务器，不解析 HTML 网页，也不通过反向代理请求 GitHub REST API。每个正式版的 GitHub Release 必须同时上传 APK 与固定命名的 `update.json`，并标记为 **Latest**（预览版切勿标记为 Latest）。
-
-#### 1. 清单与 APK 获取顺序
-
-按以下顺序请求版本清单，以第一个合法响应为准（APK 下载同样使用清单内的具体版本地址，并按相同代理顺序回退）：
-
-1. `https://github.com/KorenKrita/simul-subtitle/releases/latest/download/update.json`
-2. `https://gh-proxy.com/https://github.com/KorenKrita/simul-subtitle/releases/latest/download/update.json`
-3. `https://gh.llkk.cc/https://github.com/KorenKrita/simul-subtitle/releases/latest/download/update.json`
-
-- **超时与体积限制**：连接超时 6 秒；读取停滞超时：清单 8 秒 / APK 10 秒；单次总超时：清单 15 秒 / APK 3 分钟；体积上限：清单 128 KiB / APK 200 MB。不携带认证头，拒绝 HTTPS 降级为 HTTP。
-
-#### 2. `update.json` 格式
-
-```json
-{
-  "versionCode": 4,
-  "versionName": "0.4",
-  "notes": "## 这次更新\n\n- 新版本可以在 App 里下载安装。",
-  "apkUrl": "https://github.com/KorenKrita/simul-subtitle/releases/download/v0.4/simul-subtitle-v0.4.apk",
-  "size": 12345678,
-  "sha256": "替换为实际 APK 的 64 位小写 SHA-256"
-}
-```
-
-- `size` 必须为 APK 实际字节数；`versionCode` 必须严格递增（客户端据此判定是否有新版）；`versionName` 采用数字点分格式（如 `0.4`、`0.6.7`），须与 APK、Git tag 及文件名完全一致；`notes` 与 GitHub Release 正文使用同一份中文更新说明。
-- 清单缺失、损坏或字段不合规时会自动尝试下一个镜像源，不会误报“已是最新版本”。
-
-#### 3. 客户端检查与安装行为
-
-- **触发时机**：每次进入 App（`MainActivity.onStart`：冷启动、后台恢复前台、进程重建恢复）在后台检查一次；旋转屏幕或切换深浅色主题引起的重建不重复触发（除非打断了进行中的检查）。自动检查失败静默忽略，不打扰用户。
-- **用户偏好控制**：「永不检查」会持久关闭自动检查（可在「设置 → 关于」重新开启）；「跳过本次更新」仅跳过当前 `versionCode`；「稍后提醒」将当前版本延后 24 小时再提示，不影响更高版本。手动点击「检查更新」始终忽略上述屏蔽设置。
-- **下载与多重校验**：APK 下载至应用私有缓存 `updates/update.apk`（仅通过独立 `FileProvider` 暴露该子目录）。无论从直连还是代理源下载，安装前均严格校验：**文件字节数、SHA-256、包名、`versionCode`、`versionName` 以及与当前已安装应用完全一致的签名证书**。
-- **真机手动验收项**（仅编译通过不代表验收完成）：用较低 `versionCode` 的同签名包测试线上更新；弹窗出现后旋转屏幕应恢复四个按钮；下载或校验中途取消并重进首页不应自动跳安装；「允许安装未知应用」授权页拒绝后可重试、允许后正常拉起系统安装器；大字号下可滚动按到全部四个按钮；开启跳过/稍后/关闭自动检查后，手动检查仍能正常弹出新版。
-
----
-
-### 正式版发布步骤（必须在原签名 Mac 上执行）
-
-1. **递增版本号并编译校验**
-   先提交完所有功能代码，再单独修改 `app/build.gradle.kts` 中的 `versionCode` 与 `versionName`，独立提交为 `Version X.Y`。编译 Release APK 并核对签名与版本号：
-
-   ```bash
-   export JAVA_HOME=$(mise where java@zulu-17.68.203.0) ANDROID_HOME=~/Library/Android/sdk
-   ./gradlew -q :app:compileDebugUnitTestKotlin :app:assembleRelease
-   "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-   "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | head -1
-   ```
-
-2. **生成 `update.json` 并打包三端产物**
-   将 `VERSION` 与 `CODE` 替换为本次发布的值，在 `build/release/notes.md` 中写好中文更新说明后生成清单：
-
-   ```bash
-   export VERSION=0.4 CODE=4
-   mkdir -p build/release
-   cp app/build/outputs/apk/release/app-release.apk "build/release/simul-subtitle-v$VERSION.apk"
-   # 先在 build/release/notes.md 写好本次中文更新内容，再运行：
-   uv run python - <<'PY'
-   import hashlib, json, os
-   from pathlib import Path
-   version, code = os.environ["VERSION"], int(os.environ["CODE"])
-   folder = Path("build/release")
-   apk = folder / f"simul-subtitle-v{version}.apk"
-   manifest = dict(versionCode=code, versionName=version,
-       notes=(folder / "notes.md").read_text(),
-       apkUrl=f"https://github.com/KorenKrita/simul-subtitle/releases/download/v{version}/{apk.name}",
-       size=apk.stat().st_size, sha256=hashlib.sha256(apk.read_bytes()).hexdigest())
-   (folder / "update.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-   PY
-   ```
-
-   接着打包 macOS DMG，并在推送版本号提交后触发 GitHub Actions 构建 Windows ZIP，汇总到 `build/release/`：
-
-   ```bash
-   tools/mac-app/build.sh
-   cp "desktop/build/compose/binaries/main/dmg/SimulSub-$VERSION-mac-arm64.dmg" build/release/
-
-   # Windows：将版本号提交推送到 main 后，触发远端工作流并下载产物
-   gh workflow run windows.yml --repo KorenKrita/simul-subtitle --ref main
-   gh run watch "$(gh run list --repo KorenKrita/simul-subtitle --workflow windows.yml --limit 1 --json databaseId -q '.[0].databaseId')" --repo KorenKrita/simul-subtitle --exit-status
-   gh run download "$(gh run list --repo KorenKrita/simul-subtitle --workflow windows.yml --limit 1 --json databaseId -q '.[0].databaseId')" \
-     --repo KorenKrita/simul-subtitle -n SimulSub-windows-x64 --dir build/release/win
-   (cd build/release/win && zip -qr "../SimulSub-$VERSION-windows-x64.zip" SimulSub)
-   ```
-
-3. **一次性发布 GitHub Release（四份附件齐全）**
-   切勿先发布缺 `update.json` 或缺 APK 的半成品 Release：
-
-   ```bash
-   git push origin main
-   gh release create "v$VERSION" --repo KorenKrita/simul-subtitle --target "$(git rev-parse HEAD)" --latest \
-     --title "同传字幕 v$VERSION" --notes-file build/release/notes.md \
-     "build/release/simul-subtitle-v$VERSION.apk" build/release/update.json "build/release/SimulSub-$VERSION-mac-arm64.dmg" \
-     "build/release/SimulSub-$VERSION-windows-x64.zip"
-   ```
-
-4. **线上回读校验**
-   不要只看上传命令的退出码，必须回读线上 APK 与三条清单链路核对 SHA-256 及字段一致性：
-
-   ```bash
-   mkdir -p "build/release/readback-v$VERSION"
-   gh release download "v$VERSION" --repo KorenKrita/simul-subtitle \
-     --pattern "simul-subtitle-v$VERSION.apk" --dir "build/release/readback-v$VERSION"
-   shasum -a 256 "build/release/simul-subtitle-v$VERSION.apk" \
-     "build/release/readback-v$VERSION/simul-subtitle-v$VERSION.apk"
-   for prefix in '' 'https://gh-proxy.com/' 'https://gh.llkk.cc/'; do
-     curl -fL --connect-timeout 6 --max-time 30 -H 'Cache-Control: no-cache' \
-       "${prefix}https://github.com/KorenKrita/simul-subtitle/releases/latest/download/update.json"
-   done
-   ```
-
-   确认本地与回读 APK 的 SHA-256 完全一致，且直连与两条代理返回的 `update.json` 在 `versionCode`、`versionName`、`size`、`sha256`、`notes` 上均与本地生成的清单相同。
+构建后使用已安装 SDK 的 `apksigner` 核对证书，使用 `aapt` 或 `apkanalyzer` 核对包名与版本；与实际目标旧包比较。不要把旧文档的证书指纹或旧上游仓库发行流程作为本 Fork 已验证事实。发布说明、标签和 APK 版本应一致；发布后回读安装包核对哈希。当前客户端不要求上传 `update.json`。

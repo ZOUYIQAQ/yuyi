@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅调试包允许本地验收服务证书；发布包不合并此配置。 -->
+    <application android:networkSecurityConfig="@xml/debug_network_security" />
+</manifest>

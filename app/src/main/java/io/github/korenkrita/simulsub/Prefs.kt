@@ -10,7 +10,7 @@ class Prefs(ctx: Context) {
 
     /** Chinese caption size in sp */
     var textSp: Float
-        get() = sp.getFloat("textSp", 13f)
+        get() = sp.getFloat("textSp", 18f).coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP)
         set(v) = sp.edit().putFloat("textSp", v).apply()
 
     /** Background opacity 0..1 */
@@ -66,6 +66,11 @@ class Prefs(ctx: Context) {
     var keepChars: Int
         get() = sp.getInt("keepChars", CaptionBoard.DEFAULT_CHARS)
         set(v) = sp.edit().putInt("keepChars", v).apply()
+
+    /** 原文与译文合计的实际显示行数，0不限；只限制显示，不裁掉会话历史。 */
+    var maxCaptionLines: Int
+        get() = sp.getInt("maxCaptionLines", 0).coerceIn(0, 20)
+        set(v) = sp.edit().putInt("maxCaptionLines", v.coerceIn(0, 20)).apply()
 
     /** true = only show finished sentences; false = live drafts that are corrected in place. Overlay and home share it. */
     var finalOnly: Boolean

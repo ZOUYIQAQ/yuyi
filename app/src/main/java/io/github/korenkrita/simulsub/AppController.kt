@@ -1,0 +1,485 @@
+package io.github.korenkrita.simulsub
+
+import android.app.Application
+import android.content.SharedPreferences
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import io.github.korenkrita.simulsub.models.*
+import io.github.korenkrita.simulsub.ui.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.UUID
+
+/** 连接 Compose 页面与原有业务；草稿保存在 ViewModel，旋转和窗口调整不会丢失输入。 */
+class AppController(application: Application) : AndroidViewModel(application) {
+    private val prefs = Prefs(application)
+    private val models = ModelRepository.get(application)
+    private val appearance = application.getSharedPreferences("appearance", 0)
+    private val mutableState = MutableStateFlow(SimulSubUiState())
+    val state = mutableState.asStateFlow()
+    private var probe: ByokTranslator? = null
+    private var probeJob: Job? = null
+    private var probeService: ByokService? = null
+    private var generation: Job? = null
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        viewModelScope.launch { refresh() }
+    }
+    private var permissions = emptyList<PermissionUiState>()
+
+    init {
+        prefs.listen(prefListener)
+        mutableState.update { it.copy(settings = it.settings.copy(api = savedApi())) }
+        refresh()
+        viewModelScope.launch { models.state.collect { refresh() } }
+        viewModelScope.launch { CaptionService.state.collect { refresh() } }
+        refreshRecords()
+    }
+
+    /** 构建 Activity 无关的动作，系统授权与分享动作由 Activity 注入。 */
+    fun actions(
+        start: () -> Unit,
+        permission: (String) -> Unit,
+        share: (File) -> Unit,
+        openUrl: (String) -> Unit,
+    ) = SimulSubActions(
+        onNavigate = { destination -> mutableState.update { it.copy(destination = destination) } },
+        onStart = { cancelProbe(); start() },
+        onStop = { cancelProbe(); CaptionService.stop(getApplication()) },
+        onPermission = permission,
+        onSourceLanguage = { id -> prefs.sourceLang = if (id == "auto") null else Lang.of(id); refresh() },
+        onTargetLanguage = { id -> Target.parse(id)?.let { prefs.targetLang = it }; refresh() },
+        onCustomTargetChange = { value -> mutableState.update { it.copy(live = it.live.copy(customTarget = value)) } },
+        onApplyCustomTarget = {
+            Target.custom(state.value.live.customTarget)?.let { prefs.targetLang = it; refresh() }
+                ?: message("请输入 1～40 字的目标语言名称", true)
+        },
+        onSelectScene = { id -> prefs.scenes.firstOrNull { it.id == id }?.let { prefs.scene = it }; refresh() },
+        onFinalOnly = { prefs.finalOnly = it; refresh() },
+        onRefreshModels = { models.refresh() },
+        onDownloadModel = { models.download(it) },
+        onCancelDownload = { models.cancel(it) },
+        onActivateModel = { id ->
+            if (CaptionService.running) message("请先停止同传，再切换识别模型", true)
+            else {
+                models.select(id)
+                if (modelSpec(id)?.kind == ModelKind.REAZON && prefs.sourceLang !in listOf(null, Lang.JA, Lang.EN)) prefs.sourceLang = Lang.JA
+                refresh()
+            }
+        },
+        onModelSource = { id -> modelSpec(id)?.files?.firstOrNull()?.sources?.firstOrNull()?.let(openUrl) },
+        onModelLicense = { id -> openUrl(if (id.contains("sense")) "https://github.com/QwenAudio/SenseVoice" else "https://github.com/reazon-research/ReazonSpeech") },
+        onCreateScene = { editScene(null) },
+        onEditScene = { editScene(it) },
+        onSceneDraftChange = { editor -> mutableState.update { it.copy(scenes = it.scenes.copy(editor = editor)) } },
+        onAddTerm = { updateEditor { it.copy(terms = it.terms + TermUiState(UUID.randomUUID().toString())) } },
+        onRemoveTerm = { id -> updateEditor { it.copy(terms = it.terms.filterNot { row -> row.id == id }) } },
+        onGenerateTerms = ::generateSceneTerms,
+        onSaveScene = ::saveScene,
+        onCloseSceneEditor = { mutableState.update { it.copy(scenes = it.scenes.copy(editor = null)) } },
+        onResetScene = { id ->
+            Scene.DEFAULTS.firstOrNull { it.id == id }?.let { original ->
+                prefs.scenes = prefs.scenes.map { if (it.id == id) original else it }
+                editScene(id); refresh()
+            }
+        },
+        onDeleteScene = { id ->
+            if (prefs.scenes.any { it.id == id && !it.builtin }) {
+                prefs.scenes = prefs.scenes.filterNot { it.id == id }
+                mutableState.update { it.copy(scenes = it.scenes.copy(editor = null)) }; refresh()
+            }
+        },
+        onApplyApiPreset = { id ->
+            if (!state.value.settings.api.testing && !state.value.settings.api.saving) {
+                cancelProbe()
+                updateApi { TranslationPresets.apply(it, id) }
+            }
+        },
+        onApiDraftChange = ::editApiDraft,
+        onAddHeader = { cancelProbe(); updateApi { it.copy(headers = it.headers + HeaderUiState(UUID.randomUUID().toString())) } },
+        onRemoveHeader = { id -> cancelProbe(); updateApi { it.copy(headers = it.headers.filterNot { row -> row.id == id }) } },
+        onSaveApi = { saveApi() },
+        onTestApi = ::testApi,
+        onSubtitleStyleChange = ::saveStyle,
+        onResetOverlayPosition = { prefs.overlayX = -1; prefs.overlayY = -1; message("字幕位置将在下次启动同传时恢复默认") },
+        onThemeColorChange = { id ->
+            if (ThemePalettes.entries.any { it.id == id }) appearance.edit().putString("color", id).putBoolean("dynamic", false).apply()
+            refresh()
+        },
+        onThemeChange = { prefs.theme = when (it) { UiThemeMode.SYSTEM -> "system"; UiThemeMode.LIGHT -> "light"; UiThemeMode.DARK -> "dark" }; refresh() },
+        onDynamicColorsChange = { appearance.edit().putBoolean("dynamic", it).apply(); refresh() },
+        onAdvancedChange = ::saveAdvanced,
+        onSaveJevKey = { saveJevKey() },
+        onKeepLogsChange = { prefs.keepLogs = it; refresh() },
+        onRefreshRecords = { refreshRecords() },
+        onShareRecord = { id ->
+            val root = getApplication<Application>().getExternalFilesDir(null)
+            val file = root?.let { SessionLog.list(it).firstOrNull { f -> f.name == id } }
+            if (file == null || SessionLog.isActive(file)) message("这条记录仍在写入或已不可用", true) else share(file)
+        },
+        onDeleteRecord = ::deleteRecord,
+        onDeleteAllRecords = ::deleteAllRecords,
+        onCheckUpdate = ::checkUpdate,
+        onOpenRepository = { openUrl(REPOSITORY) },
+        onDismissMessage = { mutableState.update { it.copy(message = null) } },
+    )
+
+    /** 接收系统授权状态，只展示系统实际授予的结果。 */
+    fun setPermissions(value: List<PermissionUiState>) { permissions = value; refresh() }
+
+    /** 给界面发布具体操作结果。 */
+    fun message(text: String, error: Boolean = false) { mutableState.update { it.copy(message = UiMessage(text, error)) } }
+
+    /** 取得固定目录内的模型，拒绝来自页面的未知标识。 */
+    private fun modelSpec(id: String): ModelSpec? = models.state.value.entries.firstOrNull { it.spec.id == id }?.spec
+
+    /** 更新持久化状态，保持用户尚未保存的 API 和场景草稿。 */
+    private fun refresh() {
+        val library = models.state.value
+        val session = CaptionService.state.value
+        if (probe != null && (session.running || prefs.byokService() != probeService)) cancelProbe()
+        val selected = library.entries.firstOrNull { it.spec.id == library.selectedId && it.status == ModelStatus.READY }
+        val scenes = prefs.scenes
+        val sourceLanguages = if (selected?.spec?.kind == ModelKind.SENSEVOICE) Lang.entries.toList() else listOf(Lang.JA, Lang.EN)
+        val ready = selected != null && prefs.byokReady
+        val status = when {
+            session.running -> "正在同传"
+            selected == null -> "先选择一个识别模型"
+            !prefs.byokReady -> "还差一步：配置翻译服务"
+            permissions.any { it.required && !it.granted } -> "开启权限后即可开始"
+            else -> "准备就绪"
+        }
+        mutableState.update { old ->
+            old.copy(
+                live = old.live.copy(
+                    running = session.running,
+                    canStart = ready && permissions.none { it.required && !it.granted },
+                    statusTitle = status,
+                    statusDetail = if (session.running) session.status.ifBlank { "正在听取目标应用播放的声音" } else when {
+                        selected == null -> "模型不会随安装包下载。前往模型库，选择适合你的语言和设备的模型。"
+                        !prefs.byokReady -> "语音识别在本地完成，识别文本交给你配置的服务翻译。"
+                        else -> "${selected.spec.name} · 音频仅在设备上识别"
+                    },
+                    modelLabel = selected?.spec?.name ?: "未启用模型",
+                    translationLabel = prefs.byokModel.ifBlank { "未配置" },
+                    sourceId = prefs.sourceLang?.code ?: "auto",
+                    targetId = prefs.targetLang.stored,
+                    sourceOptions = sourceLanguages.map { UiOption(it.code, it.zh) } + UiOption("auto", "自动识别"),
+                    targetOptions = Target.PRESETS.map { UiOption(it.stored, it.zh) } +
+                        (if (prefs.targetLang.lang == null) listOf(UiOption(prefs.targetLang.stored, prefs.targetLang.zh)) else emptyList()),
+                    sceneId = prefs.scene.id,
+                    sceneOptions = scenes.map { UiOption(it.id, it.label) },
+                    finalOnly = prefs.finalOnly,
+                    permissions = permissions,
+                    captions = session.captions.map { CaptionUiState("${it.segmentId}", it.ja, it.zh, !it.isFinal, "识别 ${it.timing.asrMs} 毫秒 · 翻译 ${it.timing.mtMs} 毫秒") },
+                ),
+                models = old.models.copy(items = library.entries.map { entry -> modelUi(entry, library.selectedId, session.running) }),
+                scenes = old.scenes.copy(items = scenes.map { SceneUiState(it.id, it.label, it.background.orEmpty(), it.terms.size, it.termsLang.zh, it.builtin, it.summary(prefs.targetLang)) }, selectedId = prefs.scene.id),
+                settings = old.settings.copy(
+                    api = old.settings.api.copy(canTest = !session.running && !old.settings.api.testing),
+                    theme = when (prefs.theme) { "dark" -> UiThemeMode.DARK; "light" -> UiThemeMode.LIGHT; else -> UiThemeMode.SYSTEM },
+                    dynamicColors = appearance.getBoolean("dynamic", false),
+                    themeColorId = appearance.getString("color", "ocean") ?: "ocean",
+                    subtitle = styleState(),
+                    keepLogs = prefs.keepLogs,
+                    advanced = old.settings.advanced.copy(
+                        contextOn = prefs.contextOn, contextSentences = prefs.contextSentences,
+                        maxContextSentences = Pipeline.MAX_PREVIOUS_SENTENCES, dedupeJoin = prefs.dedupeJoin,
+                        jevOn = prefs.jevOn, jevCheck = prefs.jevCheck, jevProviderId = prefs.jevProvider.name,
+                        jevProviders = JevProvider.entries.map { UiOption(it.name, it.label) },
+                        jevNeedsKey = prefs.jevProvider.needsKey,
+                        jevHasSavedKey = !prefs.jevKey(prefs.jevProvider).isNullOrBlank(),
+                        jevKey = old.settings.advanced.jevKey.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name },
+                        jevMessage = old.settings.advanced.jevMessage.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name },
+                    ), version = BuildConfig.VERSION_NAME,
+                ),
+            )
+        }
+    }
+
+    /** 将后台状态映射为明确的安装、校验、错误和可执行操作。 */
+    private fun modelUi(entry: ModelEntry, selectedId: String?, running: Boolean): ModelUiState {
+        val status = when (entry.status) {
+            ModelStatus.NOT_INSTALLED -> ModelUiStatus.NOT_INSTALLED
+            ModelStatus.QUEUED, ModelStatus.DOWNLOADING -> ModelUiStatus.DOWNLOADING
+            ModelStatus.VERIFYING -> ModelUiStatus.VERIFYING
+            ModelStatus.READY -> if (entry.spec.id == selectedId) ModelUiStatus.ACTIVE else ModelUiStatus.READY
+            ModelStatus.FAILED -> ModelUiStatus.FAILED
+            ModelStatus.CANCELLED -> ModelUiStatus.CANCELLED
+        }
+        return ModelUiState(
+            id = entry.spec.id, name = entry.spec.name, description = if (entry.spec.kind == ModelKind.REAZON) "轻量日英识别，适合日语视频与日常后台使用。" else "中英日韩粤语识别，可识别更多语言，内存占用较高。",
+            languages = entry.spec.languages.joinToString("、"), sizeLabel = size(entry.spec.sizeBytes),
+            license = (if (entry.spec.kind == ModelKind.SENSEVOICE) "FunASR 模型协议 v1.1" else "ReazonSpeech 上游 Apache-2.0") + " · VAD：MIT", sourceLabel = entry.source?.let { android.net.Uri.parse(it).host }.orEmpty().ifBlank { "优先国内源，失败时切换备用源" },
+            status = status, progress = if (entry.status == ModelStatus.QUEUED) null else entry.progress,
+            downloadedLabel = "${size(entry.downloadedBytes)} / ${size(entry.totalBytes)}", error = entry.error,
+            canDownload = entry.status in listOf(ModelStatus.NOT_INSTALLED, ModelStatus.FAILED, ModelStatus.CANCELLED),
+            canCancel = entry.status in listOf(ModelStatus.QUEUED, ModelStatus.DOWNLOADING, ModelStatus.VERIFYING),
+            canActivate = entry.status == ModelStatus.READY && entry.spec.id != selectedId && !running,
+            verificationDetail = "逐文件核对完整大小与 SHA-256，校验通过后才能启用。" + if (running) "切换模型前请停止同传。" else "",
+            sourceUrl = entry.spec.files.firstOrNull()?.sources?.firstOrNull().orEmpty(),
+        )
+    }
+
+    /** 格式化真实字节数，使用二进制单位。 */
+    private fun size(bytes: Long): String = "%.1f MiB".format(bytes / 1048576.0)
+
+    /** 读取已保存配置；密钥不回填输入框，用保留标记表示。 */
+    private fun savedApi() = TranslationApiUiState(
+        presetId = TranslationPresets.match(prefs.byokUrl),
+        url = prefs.byokUrl, model = prefs.byokModel, hasSavedKey = !prefs.byokKey.isNullOrBlank(),
+        userAgent = prefs.byokUserAgent,
+        headers = prefs.byokHeaders.map { HeaderUiState(UUID.randomUUID().toString(), it.first, it.second) },
+        resolvedUrl = ByokTranslator.chatUrl(prefs.byokUrl).second.orEmpty(),
+    )
+
+    /** 更新 API 草稿，不触发网络或改动已保存配置。 */
+    private fun updateApi(change: (TranslationApiUiState) -> TranslationApiUiState) {
+        mutableState.update { it.copy(settings = it.settings.copy(api = change(it.settings.api))) }
+    }
+
+    /** 按预设使用的完整聊天端点比较地址，换路径清空旧凭据，等价地址保留。 */
+    private fun editApiDraft(draft: TranslationApiUiState) {
+        val previous = state.value.settings.api
+        val endpointChanged = previous.url.isNotBlank() &&
+            ByokTranslator.chatUrl(previous.url).second != ByokTranslator.chatUrl(draft.url).second
+        cancelProbe()
+        updateApi {
+            draft.copy(
+                testing = false, canTest = !CaptionService.running,
+                key = if (endpointChanged) "" else draft.key,
+                hasSavedKey = if (endpointChanged) false else draft.hasSavedKey,
+                headers = if (endpointChanged) emptyList() else draft.headers,
+                userAgent = if (endpointChanged) "" else draft.userAgent,
+                message = if (endpointChanged) UiMessage("服务地址已变更，请填写对应密钥；旧密钥和请求头不会带入。") else draft.message,
+            )
+        }
+    }
+
+    /** 校验整套翻译配置并一次保存，防止运行会话读到半套配置。 */
+    private fun saveApi(): Boolean {
+        val draft = state.value.settings.api
+        val (error, url) = ByokTranslator.chatUrl(draft.url)
+        val headers = draft.headers.map { it.name.trim() to it.value }
+        val headerError = ByokService.badAdvanced(draft.userAgent, headers)
+        val problem = error ?: if (url == null) "翻译地址无效" else if (draft.model.isBlank()) "请填写模型 ID" else headerError
+        if (problem != null) { updateApi { it.copy(message = UiMessage(problem, true)) }; return false }
+        cancelProbe()
+        prefs.saveByok(draft.url, draft.model, draft.key, draft.userAgent, headers)
+        updateApi { savedApi().copy(message = UiMessage("翻译配置已保存")) }
+        refresh()
+        return true
+    }
+
+    /** 在后台验证用户填写的服务，沿用原有关闭思考参数探测与取消机制。 */
+    private fun testApi() {
+        if (CaptionService.running || probe != null || !saveApi()) return
+        val service = prefs.byokService() ?: return
+        val translator = ByokTranslator(service, byokSystem(prefs.scene, prefs.sourceLang, prefs.targetLang), null, maxTokens = mtMaxTokens(prefs.targetLang))
+        probe = translator
+        probeService = service
+        updateApi { it.copy(testing = true, canTest = false, message = UiMessage("正在测试连接与关闭思考参数，最多 6 次请求，服务商可能计费。")) }
+        probeJob = viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val steps = mutableListOf<ByokTranslator.Step>()
+                    val variant = translator.probe(steps)
+                    when {
+                        variant != null -> variant.name to UiMessage("连接可用，已保存关闭思考参数：${variant.label}")
+                        translator.exhausted(steps) -> ByokTranslator.NONE_WORKED to UiMessage("连接可用，但未能关闭思考，字幕延迟可能较大")
+                        else -> null to UiMessage(steps.lastOrNull()?.result?.let { ByokTranslator.why(it) } ?: "服务没有回应", true)
+                    }
+                }.getOrElse { null to UiMessage("连接测试失败，请检查服务配置后重试", true) }
+            }
+            if (probe === translator) {
+                if (CaptionService.running || prefs.byokService() != service) { cancelProbe(); return@launch }
+                probe = null
+                probeService = null
+                probeJob = null
+                outcome.first?.let { prefs.setByokVariant(service.url, service.model, it) }
+                updateApi { it.copy(testing = false, canTest = true, message = outcome.second) }
+            }
+        }
+    }
+
+    /** 先使旧结果失效并复位界面，再终止网络和协程；已发送的请求无法撤回。 */
+    private fun cancelProbe() {
+        val translator = probe
+        probe = null
+        probeService = null
+        val job = probeJob
+        probeJob = null
+        updateApi { it.copy(testing = false, canTest = !CaptionService.running, message = if (it.testing) UiMessage("连接测试已取消") else it.message) }
+        translator?.cancel()
+        job?.cancel()
+    }
+
+    /** 提取与悬浮字幕相同的样式配置。 */
+    private fun styleState() = SubtitleStyleUiState(
+        textSp = prefs.textSp, backgroundAlpha = prefs.bgAlpha, widthFraction = prefs.widthFrac,
+        heightFraction = prefs.heightFrac, keepSentences = prefs.keepSentences, keepChars = prefs.keepChars, maxLines = prefs.maxCaptionLines,
+        showOriginal = prefs.showJa, showStats = prefs.showStats, paletteId = prefs.palette,
+        minTextSp = CaptionOverlayView.MIN_SP, maxTextSp = CaptionOverlayView.MAX_SP,
+        palettes = CaptionOverlayView.PALETTES.map { CaptionPaletteUiState(it.id, it.label, it.zh, it.bg, it.ja) },
+    )
+
+    /** 修改字幕样式立即持久化，服务通过原有监听同步变化。 */
+    private fun saveStyle(style: SubtitleStyleUiState) {
+        prefs.setStyle(style.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), style.backgroundAlpha.coerceIn(0f, 1f))
+        prefs.widthFrac = style.widthFraction.coerceIn(Prefs.MIN_WIDTH, 1f)
+        prefs.heightFrac = style.heightFraction.coerceIn(0f, CaptionService.MAX_CAPTION_FRAC)
+        prefs.maxCaptionLines = style.maxLines
+        prefs.keepSentences = style.keepSentences.coerceIn(1, 10); prefs.keepChars = style.keepChars.coerceIn(0, 1000)
+        prefs.showJa = style.showOriginal; prefs.showStats = style.showStats; prefs.palette = style.paletteId
+        refresh()
+    }
+
+    /** 保存高级翻译参数，运行中固定的 Jev 开关保持原会话值。 */
+    private fun saveAdvanced(value: AdvancedUiState) {
+        val provider = runCatching { JevProvider.valueOf(value.jevProviderId) }.getOrNull() ?: prefs.jevProvider
+        val switched = provider.name != state.value.settings.advanced.jevProviderId || provider != prefs.jevProvider
+        prefs.contextOn = value.contextOn; prefs.contextSentences = value.contextSentences; prefs.dedupeJoin = value.dedupeJoin
+        if (!CaptionService.running) { prefs.jevOn = value.jevOn; prefs.jevCheck = value.jevCheck }
+        prefs.jevProvider = provider
+        val draft = if (switched) value.copy(jevKey = null, jevMessage = null) else value
+        mutableState.update { it.copy(settings = it.settings.copy(advanced = draft)) }; refresh()
+    }
+
+    /** 仅在用户点保存时更新 Jev 密钥。 */
+    private fun saveJevKey() {
+        val draft = state.value.settings.advanced
+        val provider = prefs.jevProvider
+        if (draft.jevProviderId != provider.name || !provider.needsKey) return
+        draft.jevKey?.let { prefs.setJevKey(provider, it) } ?: return
+        mutableState.update { it.copy(settings = it.settings.copy(advanced = it.settings.advanced.copy(jevKey = null, jevMessage = UiMessage("辅助服务密钥已保存")))) }
+        refresh()
+    }
+
+    /** 打开持久化场景的可编辑草稿。 */
+    private fun editScene(id: String?) {
+        val scene = prefs.scenes.firstOrNull { it.id == id }
+        val editor = SceneEditorUiState(
+            id = scene?.id ?: UUID.randomUUID().toString(), name = scene?.label.orEmpty(), background = scene?.background.orEmpty(),
+            termsLanguageId = scene?.termsLang?.stored ?: prefs.targetLang.stored,
+            languageOptions = Target.PRESETS.map { UiOption(it.stored, it.zh) } +
+                (if (prefs.targetLang.lang == null) listOf(UiOption(prefs.targetLang.stored, prefs.targetLang.zh)) else emptyList()),
+            terms = scene?.terms?.map { TermUiState(UUID.randomUUID().toString(), it.first, it.second) }.orEmpty(),
+            builtin = scene?.builtin == true, canGenerate = prefs.byokReady,
+        )
+        mutableState.update { it.copy(scenes = it.scenes.copy(editor = editor)) }
+    }
+
+    /** 更新场景草稿，不影响当前同传。 */
+    private fun updateEditor(change: (SceneEditorUiState) -> SceneEditorUiState) {
+        mutableState.update { root -> root.copy(scenes = root.scenes.copy(editor = root.scenes.editor?.let(change))) }
+    }
+
+    /** 通过原有严格字段校验保存场景，失败时保留完整草稿。 */
+    private fun saveScene() {
+        val editor = state.value.scenes.editor ?: return
+        val target = Target.parse(editor.termsLanguageId) ?: prefs.targetLang
+        val (scene, error) = Scene.edit(editor.id ?: UUID.randomUUID().toString(), editor.name, editor.background, editor.terms.map { it.original to it.translated }, target)
+        if (scene == null) { updateEditor { it.copy(message = UiMessage(error ?: "场景保存失败", true)) }; return }
+        prefs.scenes = prefs.scenes.filterNot { it.id == scene.id } + scene
+        mutableState.update { it.copy(scenes = it.scenes.copy(editor = null)) }; refresh(); message("场景与术语已保存")
+    }
+
+    /** 使用用户自己的翻译服务生成术语，结果仅写入仍打开的同一份草稿。 */
+    private fun generateSceneTerms() {
+        val editor = state.value.scenes.editor ?: return
+        val service = prefs.byokService() ?: return message("请先保存翻译配置", true)
+        if (generation?.isActive == true) return
+        val count = editor.generationCount.toIntOrNull()?.coerceIn(1, MAX_GENERATE) ?: return message("请输入有效的生成数量", true)
+        updateEditor { it.copy(generating = true, message = UiMessage("正在生成术语，服务商可能计费…")) }
+        generation = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { generateTerms(service, prefs.byokVariant(service.url, service.model), { prefs.setByokVariant(service.url, service.model, it) }, editor.name, editor.background, editor.terms.map { it.original }.toSet(), count, prefs.sourceLang, Target.parse(editor.termsLanguageId) ?: prefs.targetLang) }
+            }
+            if (state.value.scenes.editor?.id != editor.id) return@launch
+            result.fold(onSuccess = { (terms, error) ->
+                updateEditor { current -> current.copy(generating = false, terms = current.terms + terms.orEmpty().map { TermUiState(UUID.randomUUID().toString(), it.first, it.second) }, message = UiMessage(error ?: "已生成 ${terms.orEmpty().size} 条术语，请检查后保存", error != null)) }
+            }, onFailure = { error -> updateEditor { it.copy(generating = false, message = UiMessage(error.message ?: "生成失败", true)) } })
+        }
+    }
+
+    /** 在后台读取真实日志索引，不阻塞页面滚动。 */
+    private fun refreshRecords(result: UiMessage? = state.value.settings.recordsMessage) {
+        mutableState.update { it.copy(settings = it.settings.copy(recordsLoading = true)) }
+        viewModelScope.launch {
+            val records = withContext(Dispatchers.IO) {
+                val root = getApplication<Application>().getExternalFilesDir(null)
+                root?.let { SessionLog.list(it) }.orEmpty().map {
+                    val active = SessionLog.isActive(it)
+                    UsageRecordUiState(it.name, it.name.removePrefix("session-").removeSuffix(".jsonl"), java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.lastModified())), "${size(it.length())} · ${if (active) "正在记录，稍后可分享或删除" else if (SessionLog.complete(it)) "完整记录" else "未完整结束"}", active = active)
+                }
+            }
+            mutableState.update { it.copy(settings = it.settings.copy(records = records, recordsLoading = false, recordsMessage = result)) }
+        }
+    }
+
+    /** 仅删除固定日志索引中的记录，活动记录由现有存储接口再次保护。 */
+    private fun deleteRecord(id: String) {
+        changeRecords { root ->
+            val file = SessionLog.list(root).firstOrNull { it.name == id }
+            when {
+                file == null -> UiMessage("这条记录已不存在，请刷新列表", true)
+                SessionLog.delete(file) -> UiMessage("记录已删除")
+                SessionLog.isActive(file) -> UiMessage("这条记录仍在写入，请在会话结束后删除", true)
+                else -> UiMessage("记录删除失败，请稍后重试", true)
+            }
+        }
+    }
+
+    /** 清空非活动记录，告知仍被写入或删除失败而保留的记录数。 */
+    private fun deleteAllRecords() {
+        changeRecords { root ->
+            val left = SessionLog.deleteAll(root)
+            if (left == 0) UiMessage("使用记录已清空")
+            else UiMessage("已清理可删除的记录，保留 $left 条正在写入或暂时无法删除的记录")
+        }
+    }
+
+    /** 串行处理记录删除与刷新，在后台执行磁盘操作并反馈真实结果。 */
+    private fun changeRecords(change: (File) -> UiMessage) {
+        if (state.value.settings.recordsLoading) return
+        mutableState.update { it.copy(settings = it.settings.copy(recordsLoading = true)) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().getExternalFilesDir(null)?.let(change)
+                        ?: UiMessage("无法访问使用记录目录，请稍后重试", true)
+                }.getOrElse { UiMessage("记录清理失败，请稍后重试", true) }
+            }
+            refreshRecords(result)
+        }
+    }
+
+    /** 检查 Fork 的发行信息，不向上游自动覆盖安装本分支。 */
+    private fun checkUpdate() {
+        if (state.value.settings.checkingUpdate) return
+        mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = true, updateMessage = "正在检查安卓版本…")) }
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest").build()
+                    okhttp3.OkHttpClient.Builder().callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
+                        if (response.code == 404) "此 Fork 还没有发布安装包，当前版本 ${BuildConfig.VERSION_NAME}"
+                        else if (!response.isSuccessful) "检查失败：HTTP ${response.code}，可在项目页面查看版本"
+                        else "最新发行版：${org.json.JSONObject(response.body?.string().orEmpty()).optString("tag_name")}；可在项目页面查看并下载安装"
+                    }
+                }.getOrElse { "检查失败：${it.message}" }
+            }
+            mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = false, updateMessage = text)) }
+        }
+    }
+
+    /** 销毁控制器时取消探测，避免离开应用后继续发送连接测试请求。 */
+    override fun onCleared() { prefs.unlisten(prefListener); cancelProbe(); generation?.cancel(); super.onCleared() }
+
+    companion object { const val REPOSITORY = "https://github.com/ZOUYIQAQ/simul-subtitle" }
+}

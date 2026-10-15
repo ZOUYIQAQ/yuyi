@@ -1,140 +1,73 @@
-<p align="center">
-  <img src="docs/images/icon.svg" width="112" alt="同传字幕">
-</p>
+# 同传字幕 · SimulSub
 
-<h1 align="center">同传字幕（Simul Subtitle）</h1>
+[English](README.en.md) · [技术文档](docs/README.md) · [项目与发行版](https://github.com/ZOUYIQAQ/simul-subtitle/releases)
 
-<p align="center">
-  日语、英语视频与直播的实时同传悬浮字幕（Android / macOS / Windows）<br>
-  本地离线语音识别 · 自备 LLM 接口翻译（BYOK）· 浮在任意播放器与直播软件上方
-</p>
+在 Android 上识别正在播放的声音，通过你自己的翻译 API 显示悬浮字幕。语音识别与静音检测在设备本地运行，翻译服务接收文字。支持手机和平板；仓库只保留 Android 产品及其共享核心。
 
-<p align="center">
-  <a href="README.en.md">English</a> ·
-  <a href="../../releases">下载 Releases</a> ·
-  <a href="docs/README.md">技术文档</a>
-</p>
+## 开始使用
 
----
+需要 **Android 10（API 29）及以上、arm64-v8a** 设备。安装 APK 后：
 
-## 界面一览
+1. 进入「模型库」，下载适合原声语言的模型包。每包已包含各自的 Silero VAD，无需另选；逐文件校验完成后，手动点击「启用模型」。
+2. 进入「设置 → 翻译 API」，选择服务预设或手动填写地址、模型 ID 和自己的密钥，点击「保存翻译配置」。可点「测试连接」：它会先保存，再请求服务，可能计费。
+3. 在「同传」页选择原声语言、目标语言与场景，按提示授予录音、悬浮窗和系统屏幕共享授权，点击「开始同传」。
 
-<table>
-  <tr><th colspan="3">Android</th></tr>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/screens/home.png" width="240" alt="Android · 首页"><br>首页</td>
-    <td align="center" valign="top"><img src="docs/images/screens/caption.png" width="240" alt="Android · 设置 · 字幕"><br>设置 · 字幕</td>
-    <td align="center" valign="top"><img src="docs/images/screens/translate.png" width="240" alt="Android · 设置 · 翻译"><br>设置 · 翻译</td>
-  </tr>
-  <tr><th colspan="3">桌面端（macOS / Windows）</th></tr>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/home.png" width="260" alt="桌面端 · 首页"><br>首页</td>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/caption.png" width="260" alt="桌面端 · 设置 · 字幕"><br>设置 · 字幕</td>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/translate.png" width="260" alt="桌面端 · 设置 · 翻译"><br>设置 · 翻译</td>
-  </tr>
-</table>
+音频采集受来源 App 的采集策略、DRM、系统版本及设备实现影响，不能保证所有播放器或内容都可采集。系统授权界面也可能因设备不同而不同；当前采集未按单个进程隔离，其他允许内录且同时发声的应用可能混入字幕。
 
-## 核心特性
+## 界面
 
-- **不挑播放器，全局悬浮**：B 站、YouTube、Twitch、浏览器或本地播放器都能直接配字幕。手机端直接内录目标 App 的播放音频（开启 DRM 或系统禁录的除外）；电脑端直接监听系统音频输出，无需麦克风外放。
-- **边听边出，句尾定稿**：说话人开口即实时刷新草稿字幕，停顿或句末自动转为正式字幕；也可切换为「说完再出」以节省电量与 Token。
-- **语音识别完全在本地完成**：App 内置 ReazonSpeech 与 Silero VAD 离线模型（约 78 MB），开箱即用、无需额外下载，**音频永远不会离开你的设备**。
-- **自备 LLM 接口（BYOK）**：填入任意 OpenAI 兼容接口的地址、模型 ID 与 API Key（如 DeepSeek、通义千问、OpenRouter 等），按自身实际用量向服务商付费；首次连接时会自动探测并关闭模型的思考模式（Reasoning）。
-- **支持任意目标语言**：内置中文、英语、日语、韩语，也可选择「自己填…」输入任意目标语言或方言（如繁体中文、粤语、法语）。
-- **场景化背景与术语表**：自带「B站 VTuber 直播」场景预设，也支持自建场景——编写几句背景说明、维护固定译名术语表，或让 LLM 根据背景一键生成常用术语。
+| 同传 | 模型库 | 翻译 API |
+|---|---|---|
+| ![同传首页](docs/images/screens/home.png) | ![模型库](docs/images/screens/models.png) | ![翻译 API](docs/images/screens/translate.png) |
 
-## 三步开始
+| 实际悬浮字幕 | 字幕设置预览 | 外观 |
+|---|---|---|
+| ![实际悬浮字幕](docs/images/screens/caption.png) | ![字幕设置中的预览示例](docs/images/screens/subtitle.png) | ![外观设置](docs/images/screens/appearance.png) |
 
-1. **填写翻译接口**：首次打开时点击首页的「去填写」（或进入「设置 → 翻译」），填入 OpenAI 兼容服务的地址、模型 ID 与 API Key，点击「测试连接」验证。
-   > 想先零门槛体验，也可以参考[翻译文档中的 B 站 Index 免费接口配置](docs/translation.md#示例使用-b-站-index-免费翻译接口)。
-2. **授予权限**：
-   - **Android**：按提示允许录制播放音频与显示悬浮窗。
-   - **macOS**：首次开始字幕时，在系统弹窗中允许「录制系统声音」。
-   - **Windows**：无需额外授权。
-3. **开始字幕**：在首页选好视频原声语言（日语 / 英语），点击「开始字幕」。手机端在弹窗中选择要观看的 App，电脑端直接监听系统正在播放的声音，切回视频即可看到实时字幕。
-
-### 悬浮窗手势与操作
-
-手机端（点按）与桌面端（鼠标点击）操作完全一致：
-
-| 操作 | 效果 |
+| 场景术语 | 深色界面 |
 |---|---|
-| **按住拖动** | 移动字幕悬浮窗位置（桌面端可拖至外接显示器） |
-| **点按字幕** | 展开 / 收起工具栏：调节字号、背景透明度、切换「边听边出 / 说完再出」、开关原文与耗时显示、锁定或停止 |
-| **拖动四角箭头** | 展开工具栏时，拖动字幕框四角的箭头可调整宽度与高度 |
-| **锁定位置** | 点击工具栏中的锁定图标后，字幕框固定不可拖动或缩放；再次点按仅在右下角浮现解锁按钮，防止看视频时误触 |
+| ![场景术语](docs/images/screens/scenes.png) | ![深色界面](docs/images/screens/dark.png) |
 
-## 安装指南
+| 平板同传 | 平板模型库 | 平板设置 |
+|---|---|---|
+| ![平板同传](docs/images/screens/tablet-home.png) | ![平板模型库](docs/images/screens/tablet-models.png) | ![平板设置](docs/images/screens/tablet-settings.png) |
 
-请前往 [Releases](../../releases) 页面下载对应平台的安装包。
+以上为2026-10-15本地API35模拟器的真实截图，平板图使用平板窗口尺寸；实际悬浮字幕图来自真实内录与离线识别，译文由本地固定响应夹具提供。
 
-### Android
+界面编排参考[FlClash](https://github.com/chen08209/FlClash)的Material You层级与卡片组织，使用原生Compose Material3实现。
 
-- **系统要求**：Android 10（API 29）及以上，arm64 架构。
-- **安装方式**：下载 `.apk` 安装包并在手机上打开（需按系统提示允许「安装未知应用」）。
-- **应用内更新**：0.4 版本起支持打开 App 时自动检查更新，可直接查看更新内容并下载覆盖安装，也可在「设置 → 关于」中手动检查或关闭自动检查。
+窄屏为底部导航，宽屏为侧边导航；页面按可用宽度排布。字幕设置中的示例用于预览样式，实际浮窗见上方「实际悬浮字幕」。
 
-### macOS
+## 模型与翻译
 
-- **系统要求**：Apple Silicon（M1 及后续芯片），macOS 14.2 及以上。
-- **安装方式**：下载 `SimulSub-<版本>-mac-arm64.dmg`，打开后将「同传字幕」拖入「应用程序（Applications）」。
-- **首次打开放行**：安装包未做 Apple 公证。首次打开若提示“无法验证开发者”，请在「应用程序」中**右键点击同传字幕 → 打开**，或前往「系统设置 → 隐私与安全性」点击「仍要打开」。
-- **系统录音权限**：首次点击「开始字幕」时，请允许录制系统声音（后续可在「系统设置 → 隐私与安全性 → 屏幕与系统录音」中修改）。
-- **日常使用与数据目录**：
-  - 关闭主窗口不会中断字幕；可通过顶部菜单栏图标随时开始、停止或重新打开主窗口。
-  - 配置文件与使用记录保存在 `~/Library/Application Support/SimulSub/`，API Key 加密保存在 macOS 登录钥匙串中（删除 App 不会清除这些数据）。
+| 识别模型 | 原声语言 | 完整下载量（含 VAD） |
+|---|---|---|
+| ReazonSpeech | 日语、英语 | 77,745,395 字节，约 74.1 MiB |
+| SenseVoice Small | 中文、英语、日语、韩语、粤语 | 240,193,589 字节，约 229.1 MiB |
 
-### Windows
+APK 不内置 ASR 或 VAD 权重。模型下载到应用私有目录，校验字节数与 SHA-256 后才可手动启用；同传运行期间不能切换模型，需停止后切换。许可文本以 APK 的 `assets/licenses/` 随包提供，并非与模型下载到同一目录。详情见[模型说明](docs/asr.md)和[来源核查](docs/MODEL_SOURCES.md)。
 
-- **系统要求**：Windows 10 / 11，64 位（x64）。
-- **运行方式**：下载 `SimulSub-<版本>-windows-x64.zip`，解压到任意目录后直接双击 `SimulSub.exe` 即可运行（绿色免安装）。
-- **首次打开放行**：程序未附带代码签名。首次运行若弹出 Windows SmartScreen 提示“已保护你的电脑”，请点击**「更多信息」→「仍要运行」**。
-- **日常使用与数据目录**：
-  - 自动监听当前默认播放设备的声音，插拔耳机切换播放设备时会自动跟随。
-  - 关闭主窗口不会中断字幕；可通过任务栏右下角托盘图标控制，彻底退出请右键托盘图标选择「退出」。
-  - 网络请求默认跟随系统代理，代理不可达时自动回退直连。
-  - 配置文件与使用记录保存在 `%APPDATA%\SimulSub\`，API Key 通过 Windows DPAPI 绑定当前系统账户加密保存在同目录的 `keys.json` 中。
+翻译 API 提供 DeepSeek 官方、硅基流动、OpenRouter 预设，也支持自定义 OpenAI 兼容聊天接口。预设仅填写草稿，不保存、不请求网络，所有字段均可修改；跨端点切换预设会清空草稿里的旧密钥、自定义请求头和 User-Agent。OpenRouter 需要自行填写模型 ID。默认值与官方来源核查日期为 **2026-10-15**，服务商可随时调整；这不代表已验证你的付费账户或 API。详见[翻译配置](docs/translation.md)。
 
-## 常见问题
+## 常用设置
 
-**Q：为什么手机上有些 App 或视频不出字幕？**
-部分 App（如开启了 DRM 版权保护的流媒体视频）在系统层禁止其他应用录制其音频，这是 Android 系统的权限限制。电脑端直接捕获系统播放设备输出，不受此限制。
+- **同传**：选择原声、译文语言和场景，切换「仅显示定稿」。原声选项随已启用模型变化；目标语言也可自行填写。
+- **场景术语**：独立导航入口，编辑背景、固定译名，或调用自己的翻译服务生成术语；生成后需检查并保存。
+- **设置 → 字幕样式**：字幕配色、文字大小、背景不透明度、原文、耗时、宽高和旧句保留策略。最多显示行数可设 0（不限）或 1–20，按实际换行合计原文与译文，保留最新行；耗时和状态提示不计入。仍受屏高 40% 与固定高度约束，取更严格限制；不改变会话历史或提示词上下文。
+- **设置 → 外观**：海蓝、松绿、鸢尾、暖砂、蔷薇、岩灰六色，Android 12 及以上可动态取色，旧系统回退所选配色。浅色、深色或跟随系统独立设置，应用外观与字幕配色分开。
+- **设置 → 高级设置**：结合上文翻译、衔接重复字处理、Jev 智能断句与译文检查。Jev 默认关闭，开启后发送文字到第三方服务，可能计费或限速。
+- **设置 → 使用记录**：默认关闭，可开启文字 JSONL 记录、分享、确认删除单条或确认清空。正在写入的记录受保护，不能分享或删除。
 
-**Q：目前支持识别哪些原声语言？**
-支持**日语**和**英语**。建议在首页准确选择视频原声语言，能让翻译提示词更贴合语境。
+点按实际字幕可展开工具栏，拖动移动，展开后拖四角调整大小；支持锁定与停止。可在「字幕样式」重置位置。
 
-**Q：我的视频声音会被上传到服务器吗？**
-**不会。** 语音识别完全在手机或电脑本地完成，网络请求只发送识别出来的文本（发往你配置的 LLM 接口）。详见[隐私说明](docs/privacy.md)。
+## 更新与构建
 
-**Q：应该选什么样的翻译模型？**
-两个原则：**能关闭深度思考（Reasoning）**、**首字响应快**。开启思考会导致每句字幕延迟数秒甚至超时；首次连接某个模型时，App 会自动探测关闭思考所需的参数并记住。
+「设置 → 关于 → 检查更新」只读取 [ZOUYIQAQ/simul-subtitle 的 latest release](https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest) 并显示发行标签；「打开项目仓库」打开项目页，由用户自行查看与下载。当前没有自动检查、应用内下载或安装、更新代理回退、跳过版本或关闭自动检查的开关。
 
-**Q：觉得某些专有名词或上下文翻译不够准怎么办？**
-可以在「设置 → 翻译」中开启「结合上文来翻译」，或在「内容类型」中新建场景，补充直播背景说明与专属术语表。你也可以在「设置 → 使用记录」中开启记录并导出 JSONL 日志用于排查。
+自行构建见[构建与开发](docs/build.md)。当前构建入口为 `:core` 与 `:app`，不分发 macOS / Windows 版本。
 
-## 技术文档
+## 更多说明
 
-想了解内部实现、数据流或自行编译打包，可参阅 [`docs/`](docs/README.md)：
+[架构](docs/architecture.md) · [ASR](docs/asr.md) · [翻译](docs/translation.md) · [Jev](docs/jev.md) · [隐私](docs/privacy.md) · [使用记录](docs/logs.md)
 
-| 文档 | 内容概要 |
-|---|---|
-| [整体架构](docs/architecture.md) | 音频采集 → VAD → 分句 → 本地识别 → 翻译 → 悬浮窗渲染；三端模块划分与过载保护 |
-| [语音识别（ASR）](docs/asr.md) | ReazonSpeech 离线模型细节，以及与 SenseVoice-Small 的准确率、延迟和内存对比 |
-| [翻译（BYOK）](docs/translation.md) | OpenAI 兼容接口协议、6 种关闭思考参数自动探测、前缀缓存排布、上下文与场景术语表 |
-| [Jev 智能辅助](docs/jev.md) | 可选的 TypeSafe Jev 云端结构化判断：句尾断句判断与译文错译重译、实测耗时与费用 |
-| [隐私说明](docs/privacy.md) | 本地留存与网络发送的数据边界、系统权限用途、三端密钥加密方式 |
-| [使用记录与调试](docs/logs.md) | JSONL 会话日志格式、Android `logcat` 延迟分析字段 |
-| [构建与开发](docs/build.md) | 本地编译、模型校验、macOS 端到端测试、三端打包与版本发布流程 |
-
-## 致谢
-
-同传字幕基于以下优秀的开源项目构建：
-
-- **[ReazonSpeech](https://github.com/reazon-research/ReazonSpeech)**：日语 / 英语语音识别模型（内置 [csukuangfj/reazonspeech-k2-v2-ja-en](https://huggingface.co/csukuangfj/reazonspeech-k2-v2-ja-en) sherpa-onnx 导出版）。
-- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：跨平台离线语音识别与语音活动检测运行时（配合 [Silero VAD](https://github.com/snakers4/silero-vad)）。
-
-此外，设置中可选开启的「智能断句」与「检查译文」功能基于 **[TypeSafe Jev](https://typesafe.ai)**（闭源商业云服务，默认关闭；开启并选用付费接口时按输入 Token 计费，每小时约 0.04 美元，详见 [Jev 说明](docs/jev.md)）。
-
----
-
-开源许可：[MIT License](LICENSE)。内置模型与第三方依赖库各自遵循其原有许可证。
+应用代码采用 [MIT License](LICENSE)。感谢 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[ReazonSpeech](https://github.com/reazon-research/ReazonSpeech)、[SenseVoice](https://github.com/FunAudioLLM/SenseVoice) 与 [Silero VAD](https://github.com/snakers4/silero-vad)。模型和依赖遵循各自许可；Jev 是可选的第三方云服务。

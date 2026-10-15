@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -11,13 +12,14 @@ android {
         applicationId = "io.github.korenkrita.simulsub"
         minSdk = 29 // AudioPlaybackCapture
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 21
+        versionName = "1.2.0"
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    // the speech models in assets/models (setup.sh): stored, so sherpa-onnx reads them from the APK without inflating
-    androidResources { noCompress += "onnx" }
+    // 模型只从应用私有目录加载，构建时排除历史 assets 模型。
+    sourceSets.getByName("main").assets.exclude("models/**")
 
     buildTypes {
         release {
@@ -33,7 +35,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { buildConfig = true }
+    buildFeatures { buildConfig = true; compose = true }
     // The sherpa-onnx AAR also ships its C and C++ API libraries; the Kotlin API only loads libsherpa-onnx-jni.so, which links none of their symbols.
     // useLegacyPackaging: .so files are stored compressed in the APK (release APK 13.6 MB at d83a627) and extracted
     // on install, so the installed footprint is larger (APK + extracted libraries) and the first install is slower.
@@ -47,6 +49,19 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    implementation(platform("androidx.compose:compose-bom:2025.05.01"))
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.05.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-1.13.8.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // Jev and online MT: a Call can be cancelled before it runs, so stop never lets a request go out afterwards

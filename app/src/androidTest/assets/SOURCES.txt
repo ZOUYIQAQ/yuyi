@@ -1,0 +1,3 @@
+ja.wav 为 sherpa-onnx 发布者提供的日语识别测试音频，用于模型加载与解码冒烟验收，不用于准确率排名。
+固定来源：https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs/ja.wav
+仅随 androidTest 测试包分发，不进入产品 APK。

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 仅限模拟器访问主机的本地 HTTPS 测试服务，其他域名仍使用系统信任。 -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <trust-anchors><certificates src="@raw/qa_local_ca" /></trust-anchors>
+    </domain-config>
+</network-security-config>

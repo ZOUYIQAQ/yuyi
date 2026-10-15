@@ -1,0 +1,30 @@
+name: 安卓构建与回归
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - run: ./setup.sh
+      - run: ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: 验证安装包不含语音模型
+        run: |
+          if unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -E '\.(onnx|tflite)$'; then
+            echo '安装包包含了不应内置的语音模型'
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 安卓安装包
+          path: app/build/outputs/apk/debug/app-debug.apk

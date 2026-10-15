@@ -33,7 +33,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
     private val card = FrameLayout(ctx)
-    private val text = TextView(ctx)
+    private val text = CaptionTextView(ctx)
     private val stats = TextView(ctx)
     /** resize marks, one per corner: top-left, top-right, bottom-right, bottom-left */
     private val corners = List(4) { android.widget.ImageView(ctx) }
@@ -61,7 +61,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         setTextColor(Color.WHITE); setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setPadding(dp(6f).toInt(), 0, dp(6f).toInt(), 0)
-        minWidth = dp(36f).toInt()
+        minWidth = dp(48f).toInt()
         setOnClickListener { onToggleMode(); bumpToolbarTimer() }
     }
     /** Shows the current mode on the toolbar button; the label is what is on screen now. */
@@ -74,7 +74,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     var onToggleStats: () -> Unit = {}
     private fun switchBtn(label: String, onClick: () -> Unit) = TextView(context).apply {
         text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f); typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER; minWidth = dp(36f).toInt()
+        gravity = Gravity.CENTER; minWidth = dp(48f).toInt()
         compoundDrawablePadding = dp(4f).toInt()
         setPadding(dp(4f).toInt(), 0, dp(4f).toInt(), 0)
         setOnClickListener { onClick(); bumpToolbarTimer() }
@@ -168,12 +168,29 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     private var captionMaxPx = Int.MAX_VALUE
     private var captionFixedPx = 0
+    /** 设置原文和译文合计的实际排版行上限；零保持不限行，其他值约束在一到二十。 */
+    fun setMaxCaptionLines(value: Int) {
+        val limit = value.coerceIn(0, 20)
+        if (text.captionLineLimit == limit) return
+        text.captionLineLimit = limit
+        applyCaptionHeight()
+        text.requestLayout()
+    }
+
     /**
      * Fixed caption area height in px (0 = fit the text, up to the max height). Text stays bottom-aligned, so
      * when it does not fit the newest lines are shown and older ones are cut off at the top.
      */
     fun setCaptionHeight(px: Int) { captionFixedPx = px; applyCaptionHeight() }
+    /** 限行时严格遵守高度上限；不限行时保留原有的最小一行及固定高度行为。 */
     private fun applyCaptionHeight() {
+        if (text.captionLineLimit > 0) {
+            val cap = captionMaxPx.coerceAtLeast(0)
+            val fixed = if (captionFixedPx > 0) captionFixedPx.coerceAtMost(cap) else 0
+            text.minHeight = fixed
+            text.maxHeight = if (captionFixedPx > 0) fixed else cap
+            return
+        }
         val want = if (captionFixedPx > 0) captionFixedPx.coerceIn(minCaptionPx(), captionMaxPx.coerceAtLeast(minCaptionPx())) else 0
         if (want > 0) { if (text.minHeight != want) text.minHeight = want; if (text.maxHeight != want) text.maxHeight = want }
         else { if (text.minHeight != 0) text.minHeight = 0; if (text.maxHeight != captionMaxPx) text.maxHeight = captionMaxPx }
@@ -236,7 +253,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             visibility = GONE
             setOnClickListener { setLocked(false) }
         }
-        card.addView(unlockBtn, FrameLayout.LayoutParams(dp(34f).toInt(), dp(34f).toInt(), Gravity.BOTTOM or Gravity.END).apply {
+        card.addView(unlockBtn, FrameLayout.LayoutParams(dp(48f).toInt(), dp(48f).toInt(), Gravity.BOTTOM or Gravity.END).apply {
             val m = dp(3f).toInt(); setMargins(m, m, m, m)
         })
         // the card keeps its own place inside the window (see placeCard), and so does the toolbar
@@ -248,6 +265,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         applyStyle(textSp, bgAlpha)
     }
 
+    /** 应用字号和背景样式，同时重建原文的绝对字号 Span 以便重新排版。 */
     fun applyStyle(sizeSp: Float, alpha: Float) {
         textSp = sizeSp; bgAlpha = alpha
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
@@ -260,6 +278,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         // magpie's hairline edge on a dark card, so it stands off a dark video; none once the card is nearly clear
         bg.setStroke(dp(0.5f).toInt().coerceAtLeast(1), if (colors.shadow && alpha >= 0.2f) 0x1AFFFFFF else 0)
         corners.forEach { it.setColorFilter(colors.zh) }
+        setLines(lastLines, lastStats)
     }
 
     /** Text / background colours of the captions; the background keeps the user's opacity. */
@@ -270,12 +289,12 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         colors = p
         text.setTextColor(p.zh); stats.setTextColor(p.stats)
         applyStyle(textSp, bgAlpha)
-        setLines(lastLines, lastStats) // spans carry the old colours
     }
 
     /** One entry per visible line: Chinese text, optional Japanese, draft flag. */
     class Line(val zh: String, val ja: String?, val isFinal: Boolean)
 
+    /** 保存完整输入并生成带字号和颜色的正文；限行只影响视图，不修改字幕板。 */
     fun setLines(lines: List<Line>, statsLine: String?) {
         lastLines = lines; lastStats = statsLine
         val sb = SpannableStringBuilder()
@@ -297,9 +316,46 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
                 sb.setSpan(android.text.style.RelativeSizeSpan(0.85f), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
-        text.text = sb
+        text.setCaption(sb)
         stats.text = statsLine ?: ""
         stats.visibility = if (statsLine.isNullOrEmpty()) GONE else VISIBLE
+    }
+
+    /** 沿用 TextView 原生排版，仅在测量时从正文末尾选择能够完整容纳的实际行。 */
+    private class CaptionTextView(ctx: Context) : androidx.appcompat.widget.AppCompatTextView(ctx) {
+        var captionLineLimit = 0
+        private var fullCaption: CharSequence = ""
+        private var shortened = false
+
+        /** 保存未截取的完整富文本，供宽度、字号和高度改变后重新排版。 */
+        fun setCaption(value: CharSequence) {
+            fullCaption = value
+            shortened = false
+            text = value
+        }
+
+        /** 使用真实行起点截取；再次测量截取结果，保证混合字号和首行字体留白也完整装入。 */
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (shortened) {
+                text = fullCaption
+                shortened = false
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            if (captionLineLimit == 0) return
+            scrollTo(0, 0)
+            while (text.isNotEmpty()) {
+                val placed = layout ?: break
+                val available = measuredHeight - compoundPaddingTop - compoundPaddingBottom
+                val first = (placed.lineCount - captionLineLimit).coerceAtLeast(0)
+                if (first == 0 && placed.height <= available) break
+                // 先按行数跳过旧行；高度仍不足时再移走最旧的一行，直至整行可见。
+                val skip = first.coerceAtLeast(1)
+                val start = if (skip < placed.lineCount) placed.getLineStart(skip) else text.length
+                text = text.subSequence(start, text.length)
+                shortened = true
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }
     }
 
     /**
@@ -321,7 +377,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             showDividers = SHOW_DIVIDER_MIDDLE
             visibility = GONE
         }
-        val size = dp(36f).toInt() // smallest comfortable tap target
+        val size = dp(48f).toInt() // 所有可点按工具至少提供 48dp 触控区域
         // a cell takes its share of the row (weight); its natural size is the minimum
         fun cell(weight: Float = 1f) = LayoutParams(LayoutParams.WRAP_CONTENT, size, weight)
         fun btn(icon: Int, label: String, onClick: () -> Unit) = ImageButton(context).apply {
@@ -465,7 +521,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     companion object {
         /** Caption size range, shared with the settings slider. */
-        const val MIN_SP = 5f
+        const val MIN_SP = 12f
         const val MAX_SP = 36f
         /** Card opacity when the user has not set one: magpie's ink card at 78%. */
         const val DEFAULT_ALPHA = 0.78f

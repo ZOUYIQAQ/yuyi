@@ -1,124 +1,66 @@
-<p align="center">
-  <img src="docs/images/icon.svg" width="112" alt="Simul Subtitle">
-</p>
+# SimulSub · 同传字幕
 
-<h1 align="center">Simul Subtitle（同传字幕）</h1>
+[简体中文](README.md) · [Documentation (Chinese)](docs/README.md) · [Releases](https://github.com/ZOUYIQAQ/simul-subtitle/releases)
 
-<p align="center">
-  Real-time floating translated subtitles for Japanese and English videos &amp; livestreams on Android, macOS, and Windows.<br>
-  100% on-device speech recognition · Bring Your Own LLM (BYOK) · Works on top of any app.
-</p>
+Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
 
-<p align="center">
-  <a href="README.md">中文</a> ·
-  <a href="../../releases">Releases</a> ·
-  <a href="docs/README.md">Technical Docs (Chinese)</a>
-</p>
+## Get started
 
----
+Requires **Android 10 (API 29)+ and arm64-v8a**.
 
-## Screenshots
+1. Open **模型库 (Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
+2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. **测试连接 (Test connection)** saves the form first and sends requests that may incur charges.
+3. On **同传 (Live)**, select source/target languages and a scene, grant the requested permissions and system capture authorization, then start subtitles.
 
-<table>
-  <tr><th colspan="3">Android</th></tr>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/screens/home.png" width="240" alt="Android · Home"><br>Home</td>
-    <td align="center" valign="top"><img src="docs/images/screens/caption.png" width="240" alt="Android · Settings · Subtitles"><br>Settings · Subtitles</td>
-    <td align="center" valign="top"><img src="docs/images/screens/translate.png" width="240" alt="Android · Settings · Translation"><br>Settings · Translation</td>
-  </tr>
-  <tr><th colspan="3">Desktop (macOS / Windows)</th></tr>
-  <tr>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/home.png" width="260" alt="Desktop · Home"><br>Home</td>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/caption.png" width="260" alt="Desktop · Settings · Subtitles"><br>Settings · Subtitles</td>
-    <td align="center" valign="top"><img src="docs/images/screens/desktop/translate.png" width="260" alt="Desktop · Settings · Translation"><br>Settings · Translation</td>
-  </tr>
-</table>
+Capture depends on the source app, DRM, Android version and device implementation. Compatibility with every player or video is not guaranteed. Capture is not isolated by process: other eligible apps playing audio at the same time may also be transcribed.
 
-## Key Features
+## Screens
 
-- **Works across your apps**: Watch Bilibili, YouTube, Twitch, browser streams, or local players. On Android, the app captures internal audio from any app that permits playback capture (DRM-protected streams excluded); on macOS and Windows, it captures system audio output directly without using a microphone.
-- **Live drafts &amp; final subtitles**: Draft captions appear while someone is speaking and settle into a polished translation as soon as the sentence ends—or switch to final-only mode to save battery and tokens.
-- **100% on-device speech recognition**: Ships with bundled ReazonSpeech and Silero VAD models (~78 MB). Nothing extra to download, and **your audio never leaves your device**.
-- **Bring Your Own LLM (BYOK)**: Connect any OpenAI-compatible API endpoint (DeepSeek, Qwen, OpenRouter, etc.) with your own base URL, model ID, and API key. On first use, the app automatically probes and disables reasoning/thinking mode for low-latency streaming.
-- **Translate into any language**: Built-in presets for Chinese, English, Japanese, and Korean, or choose **Custom…** (自己填…) to type any target language or dialect (e.g., Traditional Chinese, Cantonese, French, Spanish).
-- **Scene context &amp; glossaries**: Includes a built-in *Bilibili VTuber Livestream* preset and lets you create custom scenes with background notes and a term glossary—or have your LLM generate domain terms automatically from your description.
+| Live | Model library | Translation API |
+|---|---|---|
+| ![Live](docs/images/screens/home.png) | ![Models](docs/images/screens/models.png) | ![Translation API](docs/images/screens/translate.png) |
 
-## Get Started in Three Steps
+| Actual floating overlay | Style preview in settings | Appearance |
+|---|---|---|
+| ![Actual overlay](docs/images/screens/caption.png) | ![Settings preview](docs/images/screens/subtitle.png) | ![Appearance](docs/images/screens/appearance.png) |
 
-> Note: The app's UI is currently in Chinese. Button labels below include both English meanings and their exact Chinese text.
-
-1. **Configure your LLM API**: On first launch, tap **Configure** (去填写) on the home screen—or go to **Settings → Translation** (设置 → 翻译). Enter your OpenAI-compatible base URL, model ID, and API key, then tap **Test Connection** (测试连接).
-2. **Grant permissions**:
-   - **Android**: Allow internal audio capture and displaying over other apps when prompted.
-   - **macOS**: Allow **System Audio Recording** the first time you start subtitles.
-   - **Windows**: No special permissions required.
-3. **Start subtitles**: Select the spoken language (Japanese / English) on the home screen and tap **Start Captions** (开始字幕). On Android, pick the target app in the system dialog; on desktop, it listens to all system playback immediately. Switch back to your video to watch with live subtitles.
-
-### Subtitle Overlay Controls
-
-Controls work the same way via touch on Android or mouse click on desktop:
-
-| Action | Effect |
+| Scenes and terms | Dark theme |
 |---|---|
-| **Drag** | Move the floating subtitle window anywhere (including external displays on desktop) |
-| **Tap / Click** | Show or hide the toolbar: font size, background opacity, live draft vs. final-only mode, original text &amp; latency stats toggle, lock, and stop |
-| **Drag corner arrows** | Resize the subtitle box width and height while the toolbar is visible |
-| **Lock** | Fix position and size to prevent accidental touches; tapping while locked only reveals an unlock button in the bottom-right corner |
+| ![Scenes](docs/images/screens/scenes.png) | ![Dark theme](docs/images/screens/dark.png) |
 
-## Installation
+| Tablet live | Tablet models | Tablet settings |
+|---|---|---|
+| ![Tablet live](docs/images/screens/tablet-home.png) | ![Tablet models](docs/images/screens/tablet-models.png) | ![Tablet settings](docs/images/screens/tablet-settings.png) |
 
-Download the latest package for your platform from the [Releases](../../releases) page.
+Screenshots were captured on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The actual overlay uses real audio capture and offline recognition with a fixed local translation fixture. Layout references [FlClash](https://github.com/chen08209/FlClash), implemented using native Compose Material 3.
 
-### Android
+Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings preview is a sample; the actual overlay is shown separately above.
 
-- **Requirements**: Android 10 (API 29) or later, `arm64-v8a`.
-- **Install**: Download the `.apk` from [Releases](../../releases) and open it on your phone (allow *Install unknown apps* when prompted).
-- **In-app updates**: Since v0.4, the app checks for updates on launch and can download and install new releases directly. You can also check manually or disable auto-checks under **Settings → About** (设置 → 关于).
+## Recognition and translation
 
-### macOS
+| Recognition package | Source languages | Download including VAD |
+|---|---|---|
+| ReazonSpeech | Japanese, English | 77,745,395 bytes (about 74.1 MiB) |
+| SenseVoice Small | Chinese, English, Japanese, Korean, Cantonese | 240,193,589 bytes (about 229.1 MiB) |
 
-- **Requirements**: Apple Silicon (M1 or later), macOS 14.2 or later.
-- **Install**: Download `SimulSub-<version>-mac-arm64.dmg` from [Releases](../../releases), open it, and drag **同传字幕** into **Applications**.
-- **First launch (unnotarized app)**: Because the DMG is not notarized by Apple, macOS will warn that the developer cannot be verified on first launch. **Right-click 同传字幕 in Applications and choose Open**, or click **Open Anyway** in *System Settings → Privacy &amp; Security*.
-- **System audio permission**: On the first subtitle session, grant permission in the macOS prompt (*System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording*).
-- **Background &amp; data**:
-  - Closing the main window keeps subtitles running; use the menu bar icon to start, stop, or reopen the window.
-  - Preferences and optional session logs are stored in `~/Library/Application Support/SimulSub/`, and API keys are stored in the macOS Keychain.
+The APK contains no ASR or VAD weights. Packages are downloaded to private app storage and checked against fixed sizes and SHA-256 hashes. Activation is manual; stop a running session before switching models. License texts ship in the APK under `assets/licenses/`, rather than being downloaded alongside model files. See [ASR](docs/asr.md) and [model sources](docs/MODEL_SOURCES.md).
 
-### Windows
+Translation presets include DeepSeek official (`https://api.deepseek.com/v1`, `deepseek-flash`), SiliconFlow (`https://api.siliconflow.cn/v1`, `deepseek-ai/DeepSeek-V4-Flash`) and OpenRouter (`https://openrouter.ai/api/v1`, model ID must be entered). Presets only fill an editable draft: they neither save nor send requests. Switching presets across endpoints clears the draft's old key, custom headers and User-Agent. Custom mode preserves the form. Defaults were checked against official documentation on **2026-10-15** and may change; this is not verification of a user's paid API access. Sources and protocol details: [Translation](docs/translation.md).
 
-- **Requirements**: Windows 10 / 11, 64-bit (`x64`).
-- **Run**: Download `SimulSub-<version>-windows-x64.zip` from [Releases](../../releases), extract the folder anywhere, and run `SimulSub.exe` (portable, no installer needed).
-- **First launch (unsigned binary)**: If Windows SmartScreen displays *"Windows protected your PC"*, click **More info** → **Run anyway**.
-- **Background &amp; data**:
-  - Captures audio from the default playback device via WASAPI loopback and automatically follows device switches (e.g., plugging in headphones).
-  - Closing the main window keeps subtitles running in the system tray; right-click the tray icon and choose **Quit** (退出) to exit completely.
-  - Network requests follow the system proxy and fall back to direct connections when a proxy cannot reach the target host.
-  - Preferences and optional logs live in `%APPDATA%\SimulSub\`. API keys are encrypted with Windows DPAPI (bound to your Windows user account) in `keys.json`.
+## Settings and controls
 
-## FAQ
+- **场景术语 (Scenes and terms)** is a separate navigation destination for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
+- **设置 → 字幕样式 (Subtitle style)** controls colors, text size, opacity, source text, timings, width, height and retained sentences. **最多显示行数 (Maximum displayed lines)** accepts 0 (unlimited) or 1–20, counting wrapped source and translated lines together and keeping the newest lines. Timing/status text is excluded. The 40% screen-height cap and fixed height still apply, with the stricter limit winning. This affects display only, not session history or prompt context.
+- **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Warm Sand, Rose and Slate palettes, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
+- **设置 → 高级设置 (Advanced)** contains translation context, join deduplication and optional Jev sentence/translation checks. Jev is off by default and sends text to a third-party service when enabled.
+- **设置 → 使用记录 (Usage records)** is off by default. Finished text logs can be shared, individually deleted after confirmation or cleared after confirmation. Active logs cannot be shared or deleted.
 
-**Q: Why don't subtitles appear for certain apps on Android?**
-Some apps (such as DRM-protected video players) block other apps from capturing their audio at the OS level. Desktop builds capture system output directly and do not have this limitation.
+Tap the floating subtitles to reveal controls, drag to move, or resize from the corners while controls are visible. Lock and stop controls are available; reset position under Subtitle style.
 
-**Q: Which spoken languages are supported?**
-**Japanese** and **English**. Selecting the matching source language on the home screen helps tailor the translation prompt.
+## Updates and development
 
-**Q: Is my audio ever uploaded to the cloud?**
-**No.** Speech-to-text runs locally on your phone or computer. Only the recognized text transcript is sent to the LLM API endpoint you configured. See [docs/privacy.md](docs/privacy.md) for details.
+**设置 → 关于 → 检查更新 (About → Check updates)** reads only this fork's [latest release endpoint](https://api.github.com/repos/ZOUYIQAQ/simul-subtitle/releases/latest) and displays its tag. **打开项目仓库 (Open repository)** opens the project page for manual review/download. There is no automatic checking, in-app APK download/install, update proxy fallback or skipped-version preference in the current flow.
 
-**Q: Which LLM model should I choose for translation?**
-Pick a fast model whose reasoning/thinking mode can be disabled—otherwise thinking tokens add several seconds of delay to every sentence. The first time you connect a model, the app automatically tests and remembers the parameter needed to disable thinking.
+See [Build](docs/build.md) for `:core` and `:app`. macOS/Windows builds are no longer distributed. More: [Architecture](docs/architecture.md), [Privacy](docs/privacy.md), [Logs](docs/logs.md), [Jev](docs/jev.md).
 
-## Acknowledgements
-
-Simul Subtitle builds on these open-source projects:
-
-- **[ReazonSpeech](https://github.com/reazon-research/ReazonSpeech)**: Japanese and English speech recognition ([reazonspeech-k2-v2-ja-en](https://huggingface.co/csukuangfj/reazonspeech-k2-v2-ja-en) exported for sherpa-onnx).
-- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: On-device speech recognition and voice activity detection runtime ([Silero VAD](https://github.com/snakers4/silero-vad)).
-
-The optional **Smart Sentence Segmentation** and **Translation Verification** features use **[TypeSafe Jev](https://typesafe.ai)**—a closed-source commercial cloud service for structured decisions (disabled by default; billed at ~$0.04 per hour of speech when using a paid endpoint; see [docs/jev.md](docs/jev.md)).
-
----
-
-License: [MIT](LICENSE). Bundled models and third-party libraries remain under their respective licenses.
+Application code: [MIT](LICENSE). Thanks to [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ReazonSpeech](https://github.com/reazon-research/ReazonSpeech), [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) and [Silero VAD](https://github.com/snakers4/silero-vad). Models and dependencies retain their own licenses; Jev is an optional cloud service.

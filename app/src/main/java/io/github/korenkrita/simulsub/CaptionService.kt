@@ -36,6 +36,10 @@ import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
 import java.io.File
+import io.github.korenkrita.simulsub.models.ModelRepository
+import io.github.korenkrita.simulsub.models.ModelPaths
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Foreground service: playback capture → Silero VAD → [Segmenter] → [Pipeline] → overlay.
@@ -44,6 +48,7 @@ import java.io.File
 class CaptionService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null
+    private var sessionModel: ModelPaths? = null
 
     /**
      * One "session" thread owns every native object (VAD, ASR, MT, AudioRecord) from creation to release:
@@ -118,6 +123,13 @@ class CaptionService : Service() {
         if (projection != null) return START_NOT_STICKY
 
         startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        // 同一次会话固定使用已完成校验的模型，后台切换不能释放正在推理的对象。
+        sessionModel = ModelRepository.get(this).selectedPaths()
+        if (sessionModel == null) {
+            sessionState.value = SessionSnapshot(false, "请先在模型库下载并启用模型")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         registerReceiver(screenOn, android.content.IntentFilter(Intent.ACTION_SCREEN_ON))
         @Suppress("DEPRECATION")
         val data: Intent? = intent?.getParcelableExtra(EXTRA_DATA)
@@ -130,6 +142,7 @@ class CaptionService : Service() {
         }, main)
         projection = p
         running = true
+        sessionState.value = SessionSnapshot(true, "正在加载识别模型…")
         showOverlay()
         // fixed at the start: switching it while models load affects the next session, as the switch says
         val keepLogs = prefs.keepLogs
@@ -156,9 +169,10 @@ class CaptionService : Service() {
                 setStatus("⚠ LLM API 还没填完整（地址、模型 ID），请到设置「翻译」里填好"); Log.w(TAG, "byok incomplete"); return
             }
             val t0 = monoMs()
-            // the models ship inside the APK: sherpa-onnx reads them from the assets
-            vad = SileroProb(assets)
-            asr = SherpaAsr(assets, ASR_THREADS)
+            // 模型由用户安装后下载，整个会话从同一个完整目录读取。
+            val model = requireNotNull(sessionModel) { "没有可用的识别模型" }
+            vad = SileroProb(model.directory)
+            asr = SherpaAsr(model, ASR_THREADS)
             val t1 = monoMs()
             // warm-up so the first real sentence does not pay page-in / first-run costs (nothing is sent anywhere)
             asr.recognize(FloatArray(16_000))
@@ -523,14 +537,17 @@ class CaptionService : Service() {
         if (board.accept(c)) refresh()
     }
 
+    /** 更新服务提示并同步到应用界面和悬浮字幕。 */
     private fun setStatus(s: String) { status = s; refresh() }
     /** A warning that stays for the whole session (the status line is cleared once capture starts). */
     @Volatile private var notice = ""
 
+    /** 将字幕状态发布到界面，悬浮窗不存在时仍保留错误提示。 */
     private fun refresh() = main.post {
-        val v = overlay ?: return@post
         // "only finished sentences": drafts are hidden (and a draft already on screen disappears), read live from prefs
         val shown = board.snapshot().let { s -> if (prefs.finalOnly) s.filter { it.isFinal } else s }
+        sessionState.value = SessionSnapshot(running, status, shown)
+        val v = overlay ?: return@post
         val showJa = prefs.showJa
         val lines = shown.map { CaptionOverlayView.Line(it.zh, if (showJa) it.ja else null, it.isFinal) }
         // status messages (loading, errors, overload) always show; timings only when enabled in settings
@@ -584,6 +601,7 @@ class CaptionService : Service() {
         val dm = resources.displayMetrics
         val v = CaptionOverlayView(this, interactive = true)
         v.setColors(CaptionOverlayView.palette(prefs.palette))
+        v.setMaxCaptionLines(prefs.maxCaptionLines)
         v.applyStyle(prefs.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), prefs.bgAlpha)
         // usable area: current window bounds (follows rotation) minus status / navigation bars. Only its size is
         // used: the overlay's x/y are already relative to that area (its parent frame excludes the bars).
@@ -699,6 +717,7 @@ class CaptionService : Service() {
                 "widthFrac" -> (area().width() * prefs.widthFrac).toInt().let { if (it != cardW) { cardW = it; layout() } }
                 "heightFrac" -> if (captionH == 0) { applyHeight(); layout() }
                 "showJa", "showStats" -> { v.setShown(prefs.showJa, prefs.showStats); refresh() }
+                "maxCaptionLines" -> { v.setMaxCaptionLines(prefs.maxCaptionLines); layout() }
                 "palette" -> v.setColors(CaptionOverlayView.palette(prefs.palette))
                 "keepSentences", "keepChars" -> if (board.setLimits(prefs.keepSentences, prefs.keepChars)) refresh()
                 "finalOnly" -> { v.setFinalOnly(prefs.finalOnly); refresh() }
@@ -733,6 +752,9 @@ class CaptionService : Service() {
         activeJudge = null // stops watching its service
         runCatching { unregisterReceiver(screenOn) }
         running = false
+        val finalStatus = sessionState.value.status.takeIf { it.startsWith("请先") || it.startsWith("出错") || it.startsWith("⚠") } ?: "同传已停止"
+        sessionState.value = sessionState.value.copy(running = false, status = finalStatus)
+        sessionModel = null
         // Only flags and request cancels (the session thread detaches the pipeline under the same lock before
         // freeing). The session thread notices `stopping` within ~10 ms (non-blocking reads).
         synchronized(cancelLock) { probing?.cancel(); pipeline?.stop() }
@@ -785,6 +807,10 @@ class CaptionService : Service() {
     }
 
     companion object {
+        /** 服务保留最后字幕供主界面返回后查看，不向展示层暴露原生模型对象。 */
+        data class SessionSnapshot(val running: Boolean = false, val status: String = "", val captions: List<Caption> = emptyList())
+        private val sessionState = MutableStateFlow(SessionSnapshot())
+        val state = sessionState.asStateFlow()
         private const val TAG = "jpsub"
         /**
          * Settings a running session takes from the next sentence. BYOK changes as one: "保存" writes its fields and
@@ -810,12 +836,14 @@ class CaptionService : Service() {
         @Volatile var running = false
             private set
 
+        /** 获得系统捕获授权后启动前台字幕服务。 */
         fun start(ctx: Context, code: Int, data: Intent) {
             ctx.startForegroundService(
                 Intent(ctx, CaptionService::class.java).putExtra(EXTRA_CODE, code).putExtra(EXTRA_DATA, data),
             )
         }
 
+        /** 由应用或通知栏发出停止指令。 */
         fun stop(ctx: Context) {
             ctx.startService(Intent(ctx, CaptionService::class.java).setAction(ACTION_STOP))
         }

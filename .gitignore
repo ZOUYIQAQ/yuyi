@@ -5,10 +5,12 @@ local.properties
 *.iml
 .idea/
 app/libs/
-models/
-tools/mac-e2e/build/
-tools/mac-capture/build/
-tools/mac-app/build/
+/models/
 app/src/main/assets/models/
-tools/win-app/build/
 .DS_Store
+
+# 本地开发与验收产物
+.qa/
+.artifacts/
+.tools/
+.kotlin/
