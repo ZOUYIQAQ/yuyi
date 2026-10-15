@@ -53,6 +53,45 @@ class ApiKeySaveControllerDeviceTest {
     /** 只释放本例监听和协程，不删除任何文件。 */
     @After fun finish() = onMain { store.clear() }
 
+    /** 默认配置升级与多套命名配置切换都回填自己的密钥，重建控制器后仍一致。 */
+    @Test fun namedProfilesSwitchAndRecreateWithoutSharingKeys() = onMain {
+        prefs.saveByok("https://first.example", "模型一", "密钥一")
+        actions.onDiscardApiDraft()
+        actions.onAddApiProfile("备用")
+        val second = controller.state.value.settings.api.profileId
+        assertNotEquals("", second)
+        assertEquals("", controller.state.value.settings.api.url)
+        assertNull(controller.state.value.settings.api.key)
+        actions.onApiDraftChange(controller.state.value.settings.api.copy(
+            url = "https://second.example", model = "模型二", key = "密钥二"))
+        actions.onSaveApi()
+        actions.onSelectApiProfile("")
+        assertSavedKey("密钥一")
+        assertEquals("模型一", controller.state.value.settings.api.model)
+        actions.onSelectApiProfile(second)
+        assertSavedKey("密钥二")
+        createController()
+        assertEquals(second, controller.state.value.settings.api.profileId)
+        assertSavedKey("密钥二")
+    }
+
+    /** 管理动作不能绕过界面的草稿确认；明确放弃后才允许切换或新增。 */
+    @Test fun dirtyProfileActionsCannotSilentlyDiscardEdits() = onMain {
+        actions.onApiDraftChange(controller.state.value.settings.api.copy(model = "尚未保存"))
+        actions.onAddApiProfile("备用")
+        assertEquals(1, prefs.byokProfiles.size)
+        assertTrue(controller.state.value.settings.api.hasUnsavedChanges)
+        actions.onDiscardApiDraft()
+        actions.onAddApiProfile("备用")
+        assertEquals(2, prefs.byokProfiles.size)
+        val id = prefs.byokProfile.id
+        actions.onRenameApiProfile("本地")
+        assertEquals("本地", prefs.byokProfile.name)
+        actions.onDeleteApiProfile()
+        assertEquals("", prefs.byokProfile.id)
+        assertFalse(prefs.byokProfiles.any { it.id == id })
+    }
+
     /** 保存后不清空输入值，重新创建仍可见，同时偏好里保持密文。 */
     @Test fun saveAndRecreateKeepKeyVisibleAndEncrypted() = onMain {
         actions.onApiDraftChange(controller.state.value.settings.api.copy(

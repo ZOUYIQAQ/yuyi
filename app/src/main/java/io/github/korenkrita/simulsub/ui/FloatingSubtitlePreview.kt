@@ -54,22 +54,27 @@ internal fun FloatingSubtitlePreview(style: SubtitleStyleUiState, finalOnly: Boo
         val bodyHeight = minOf(220.dp, maxHeight * 0.4f, (maxHeight - 48.dp).coerceAtLeast(0.dp))
         val maxX = (constraints.maxWidth - panelSize.width).coerceAtLeast(0).toFloat()
         val maxY = (constraints.maxHeight - panelSize.height).coerceAtLeast(0).toFloat()
-        val drag = Modifier.pointerInput(maxX, maxY) {
+        // 未拖动时跟随当前窗口选择默认角落；自定义位置只在尺寸变化后收敛到可见范围。
+        val defaultPosition = Offset(if (maxWidth >= 600.dp) 0f else maxX, maxY)
+        LaunchedEffect(maxX, maxY) {
+            position = position?.let { Offset(it.x.coerceIn(0f, maxX), it.y.coerceIn(0f, maxY)) }
+        }
+        val drag = Modifier.pointerInput(maxX, maxY, defaultPosition) {
             detectDragGestures { change, delta ->
                 change.consume()
-                val current = position ?: Offset(maxX, maxY)
+                val current = position?.let { Offset(it.x.coerceIn(0f, maxX), it.y.coerceIn(0f, maxY)) } ?: defaultPosition
                 position = Offset((current.x + delta.x).coerceIn(0f, maxX), (current.y + delta.y).coerceIn(0f, maxY))
             }
         }.semantics {
             contentDescription = "拖动字幕预览"
             customActions = listOf(
-                CustomAccessibilityAction("移到顶部") { position = Offset((position?.x ?: maxX).coerceIn(0f, maxX), 0f); true },
-                CustomAccessibilityAction("移到底部") { position = Offset((position?.x ?: maxX).coerceIn(0f, maxX), maxY); true },
+                CustomAccessibilityAction("移到顶部") { position = Offset((position?.x ?: defaultPosition.x).coerceIn(0f, maxX), 0f); true },
+                CustomAccessibilityAction("移到底部") { position = Offset((position?.x ?: defaultPosition.x).coerceIn(0f, maxX), maxY); true },
             )
         }
         Surface(
             modifier = Modifier.offset {
-                IntOffset((position?.x ?: maxX).coerceIn(0f, maxX).roundToInt(), (position?.y ?: maxY).coerceIn(0f, maxY).roundToInt())
+                IntOffset((position?.x ?: defaultPosition.x).coerceIn(0f, maxX).roundToInt(), (position?.y ?: defaultPosition.y).coerceIn(0f, maxY).roundToInt())
             }.then(if (collapsed) Modifier.widthIn(max = panelWidth).then(drag) else Modifier.width(panelWidth))
                 .onSizeChanged { panelSize = it }.testTag("subtitle-floating-preview"),
             shape = MaterialTheme.shapes.large,

@@ -663,12 +663,13 @@ class ByokTranslator(
         )
         fun variant(name: String?) = THINKING_OFF.firstOrNull { it.name == name }
 
-        /** 只接受 HTTPS 且不带认证信息、查询或片段；完整接口路径保留，基础地址默认补 v1。返回错误或完整地址。 */
+        /** 接受 HTTP/HTTPS 并保留协议，不带认证信息、查询或片段；完整接口路径保留，基础地址默认补 v1。HTTP 会明文传输密钥与内容。 */
         fun chatUrl(input: String): Pair<String?, String?> {
             val s = input.trim()
             if (s.isEmpty()) return "还没填地址" to null
             val u = runCatching { java.net.URI(s) }.getOrNull() ?: return "地址格式不对" to null
-            if (u.scheme?.lowercase() != "https") return "地址要以 https:// 开头" to null
+            val scheme = u.scheme?.lowercase()
+            if (scheme != "http" && scheme != "https") return "地址要以 http:// 或 https:// 开头" to null
             if (u.host.isNullOrEmpty()) return "地址里没有域名" to null
             if (u.rawUserInfo != null || u.rawQuery != null || u.rawFragment != null) return "地址里不要带用户名、?参数 或 #" to null
             if (u.port == 0 || u.port > 65535) return "端口号不对" to null
@@ -678,11 +679,15 @@ class ByokTranslator(
                 path += "/chat/completions"
             }
             val port = if (u.port > 0) ":${u.port}" else ""
-            val out = "https://${u.host.lowercase()}$port$path"
-            // what OkHttp will be given: it must accept it too (IPv6 brackets, odd characters, ...)
+            val out = "$scheme://${u.host.lowercase()}$port$path"
+            // 最终地址也必须能被 OkHttp 接受，包括 IPv6 方括号与特殊字符。
             if (okhttp3.HttpUrl.Companion.run { out.toHttpUrlOrNull() } == null) return "地址格式不对" to null
             return null to out
         }
+
+        /** 为合法 HTTP 地址提供简短提示，供界面展示；不作为校验错误，也不改写地址。 */
+        fun cleartextWarning(input: String): String? =
+            if (chatUrl(input).second?.startsWith("http://") == true) "HTTP 会明文传输 API Key 和内容，请仅用于可信网络" else null
 
         /** 返回错误或最多两个去重的同源候选：先含 v1，再不含 v1；显式完整接口只使用原址。 */
         fun chatCandidates(input: String): Pair<String?, List<String>> {

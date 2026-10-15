@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <!-- 仅调试包允许本地验收服务证书；发布包不合并此配置。 -->
-    <application android:networkSecurityConfig="@xml/debug_network_security" />
+    <application android:networkSecurityConfig="@xml/debug_network_security"
+        tools:replace="android:networkSecurityConfig">
+        <!-- 仅测试宿主承接临时方向变化，避免平板用例在设置内容后因系统旋转重建丢失测试树。 -->
+        <activity android:name="androidx.activity.ComponentActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density" />
+    </application>
 </manifest>

@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
-/** 主操作固定在导航栏上方，手机占满可用宽度，平板限宽靠右，滚动时仍可触达。 */
+/** 主操作固定在导航栏上方，手机占满可用宽度，平板限宽居中，滚动时仍可触达。 */
 @Composable
 internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     val missingPermission = state.permissions.firstOrNull { it.required && !it.granted }
@@ -31,7 +31,7 @@ internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     }
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.widthIn(max = 1120.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterEnd) {
+            Box(Modifier.widthIn(max = 512.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
                 Button(
                     onClick = action, enabled = !state.busy,
                     modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(min = 72.dp).testTag("live-primary-action"),

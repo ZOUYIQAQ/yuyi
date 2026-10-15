@@ -128,7 +128,7 @@ private fun LivePermissionWarning(permissions: List<PermissionUiState>, enabled:
     }
 }
 
-/** 服务名称可完整换行，次要入口单独保持至少 48dp 的触控高度。 */
+/** 服务名称可完整换行，入口为大字号保留足够宽度与至少48dp触控高度。 */
 @Composable
 private fun LiveServiceRow(title: String, value: String, action: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -136,6 +136,6 @@ private fun LiveServiceRow(title: String, value: String, action: String, onClick
             Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.bodyMedium)
         }
-        TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 120.dp).heightIn(min = 48.dp)) { Text(action) }
+        TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 160.dp).heightIn(min = 48.dp)) { Text(action) }
     }
 }

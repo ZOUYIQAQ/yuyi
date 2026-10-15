@@ -136,6 +136,8 @@ data class ScenesUiState(val items: List<SceneUiState> = emptyList(), val select
 
 /** API 草稿：key=null 表示保留已存密钥，空字符串表示明确清空，其余为新值。 */
 data class TranslationApiUiState(
+    val profileId: String = "",
+    val profiles: List<UiOption> = listOf(UiOption("", "默认")),
     val presetId: String = "custom",
     val url: String = "",
     val model: String = "",
@@ -279,6 +281,10 @@ data class SimulSubActions(
     val onDeleteScene: (String) -> Unit = {},
     val onApplyApiPreset: (String) -> Unit = {},
     val onApiDraftChange: (TranslationApiUiState) -> Unit = {},
+    val onSelectApiProfile: (String) -> Unit = {},
+    val onAddApiProfile: (String) -> Unit = {},
+    val onRenameApiProfile: (String) -> Unit = {},
+    val onDeleteApiProfile: () -> Unit = {},
     val onAddHeader: () -> Unit = {},
     val onRemoveHeader: (String) -> Unit = {},
     val onSaveApi: () -> Unit = {},

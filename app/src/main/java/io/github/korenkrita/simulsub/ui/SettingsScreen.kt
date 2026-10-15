@@ -105,6 +105,7 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
     val editable = !api.testing && !api.saving
     var advancedOpen by rememberSaveable { mutableStateOf(api.headers.isNotEmpty() || api.userAgent.isNotEmpty()) }
     PageColumns(wide, header = navigation, first = {
+        if (!onboarding) item("api-profiles") { TranslationProfiles(api, actions, sessionBusy) }
         item("api-intro") {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 SectionHeading("连接翻译服务", "声音在本机识别，识别出的文字交给你选择的服务翻译。")
@@ -123,10 +124,11 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
                     Text("连接信息", style = MaterialTheme.typography.titleMedium)
                     TextField(
                         shape = TextFieldDefaults.shape,
-                        colors = TextFieldDefaults.colors(),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTPS 基础地址或完整聊天接口地址，均可编辑。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                        colors = TextFieldDefaults.colors(),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTP 或 HTTPS 基础地址，也可填写完整聊天接口地址。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     TextField(
                         shape = TextFieldDefaults.shape,
                         colors = TextFieldDefaults.colors(),value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    io.github.korenkrita.simulsub.ByokTranslator.cleartextWarning(api.url)?.let { SupportingText(it) }
                     TranslationKeyEditor(api, editable) { actions.onApiDraftChange(api.copy(key = it)) }
                     if (api.testing || api.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
                     Text(when {

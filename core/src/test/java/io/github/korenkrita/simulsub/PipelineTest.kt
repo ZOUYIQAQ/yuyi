@@ -88,13 +88,18 @@ class PipelineTest {
         assertEquals(listOf(1L, 2L, 3L, 4L, 5L), out.filter { it.isFinal }.map { it.segmentId })
     }
 
-    /** Drafts every 700 ms, MT takes 900 ms: a draft must still reach the screen while the speaker talks. */
+    /** 每七百毫秒一版草稿，翻译耗时九百毫秒：说话期间仍要展示草稿。 */
     @Test
     fun slowMtStillShowsDraftsBeforeTheFinal() {
         val out = Collections.synchronizedList(ArrayList<Caption>())
         val done = CountDownLatch(1)
         val mt = FakeMt(900)
-        val p = Pipeline(FakeAsr(), mt, { out.add(it); if (it.isFinal) done.countDown() })
+        // 每版追加六字以通过草稿门槛，本测试继续只检查慢速翻译时的队列合并。
+        val asr = object : Asr {
+            /** 用样本数生成每版至少增长五字的识别结果。 */
+            override fun recognize(samples: FloatArray) = "草稿内容增长".repeat(samples.size)
+        }
+        val p = Pipeline(asr, mt, { out.add(it); if (it.isFinal) done.countDown() })
         p.start()
         for (rev in 1..5) { p.submit(job(1, rev, false, rev)); Thread.sleep(700) }
         val draftsBeforeFinal = out.count { !it.isFinal }
@@ -102,26 +107,27 @@ class PipelineTest {
         assertTrue(done.await(5, TimeUnit.SECONDS))
         p.stop(); p.awaitStopped()
         assertTrue("drafts shown while talking: $draftsBeforeFinal", draftsBeforeFinal >= 2)
-        // queued stale drafts were merged: fewer MT calls than submitted drafts
+        // 已合并过期草稿，实际翻译次数应少于提交次数。
         assertTrue("MT calls ${mt.calls}", mt.calls.size < 6)
-        assertEquals("ja6", out.last().ja)
+        assertEquals("草稿内容增长".repeat(6), out.last().ja)
     }
 
-    /** Reviewer repro: ASR slower than the draft interval, a newer draft is always queued when one finishes. */
+    /** 识别慢于草稿间隔时，运行中的草稿结束前总已有新版排队，仍不能饿死字幕显示。 */
     @Test
     fun slowAsrStillShowsDrafts() {
         val out = Collections.synchronizedList(ArrayList<Caption>())
         val done = CountDownLatch(1)
         val gate = java.util.concurrent.Semaphore(0)
         val asr = object : Asr {
-            override fun recognize(samples: FloatArray): String { gate.acquire(); return "ja${samples.size}" }
+            /** 每版追加至少五字，避免增长门槛掩盖本测试的队列调度行为。 */
+            override fun recognize(samples: FloatArray): String { gate.acquire(); return "草稿内容增长".repeat(samples.size) }
         }
         val p = Pipeline(asr, FakeMt(1), { out.add(it); if (it.isFinal) done.countDown() })
         p.start()
         p.submit(job(1, 1, false, 1))
         for (rev in 2..5) {
             Thread.sleep(30)
-            p.submit(job(1, rev, false, rev)) // newer draft queued *before* the running one finishes
+            p.submit(job(1, rev, false, rev)) // 运行中的草稿完成前先提交新版。
             gate.release()
         }
         Thread.sleep(30)

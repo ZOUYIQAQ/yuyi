@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- 调试包与发布包都允许 HTTP，默认的 HTTPS 信任仍只来自系统。 -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
     <!-- 仅限模拟器访问主机的本地 HTTPS 测试服务，其他域名仍使用系统信任。 -->
-    <domain-config cleartextTrafficPermitted="false">
+    <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">10.0.2.2</domain>
         <trust-anchors><certificates src="@raw/qa_local_ca" /></trust-anchors>
     </domain-config>

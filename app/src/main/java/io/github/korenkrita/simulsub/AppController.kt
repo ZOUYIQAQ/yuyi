@@ -50,7 +50,7 @@ class AppController internal constructor(application: Application,
         val previouslySaved: ByokService?, val url: String, val variantName: String?)
     /** 只比较可编辑输入，测试进度与提示变化不使快照失效。 */
     private data class ApiDraftSnapshot(val url: String, val model: String, val key: String?, val hasSavedKey: Boolean,
-        val userAgent: String, val headers: List<Pair<String, String>>)
+        val userAgent: String, val headers: List<Pair<String, String>>, val profileId: String)
     private var testedEndpoint: TestedEndpoint? = null
     private var deletingModelId: String? = null
     private var onboardingStep: OnboardingStep? = if (appearance.getBoolean("onboarding_completed", false)) null else OnboardingStep.PERMISSIONS
@@ -149,6 +149,10 @@ class AppController internal constructor(application: Application,
         onApiDraftChange = ::editApiDraft,
         onAddHeader = { cancelProbe(); updateApi { it.copy(headers = it.headers + HeaderUiState(UUID.randomUUID().toString())) } },
         onRemoveHeader = { id -> cancelProbe(); updateApi { it.copy(headers = it.headers.filterNot { row -> row.id == id }) } },
+        onSelectApiProfile = { id -> changeApiProfile { prefs.useByokProfile(prefs.byokProfiles.firstOrNull { it.id == id } ?: error("翻译配置不存在")) } },
+        onAddApiProfile = { name -> changeApiProfile { prefs.addByokProfile(name) } },
+        onRenameApiProfile = { name -> changeApiProfile { prefs.renameByokProfile(prefs.byokProfile, name) } },
+        onDeleteApiProfile = { changeApiProfile { prefs.deleteByokProfile(prefs.byokProfile) } },
         onSaveApi = { saveApi() },
         onTestApi = ::testApi,
         onApplyTestedApiUrl = ::applyTestedApiUrl,
@@ -322,7 +326,10 @@ class AppController internal constructor(application: Application,
                         else -> "${selected.spec.name} · 音频仅在设备上识别"
                     },
                     modelLabel = selected?.spec?.name ?: "未启用模型",
-                    translationLabel = prefs.byokModel.ifBlank { "未配置" },
+                    translationLabel = prefs.byokModel.let { model ->
+                        if (model.isNotBlank()) "${prefs.byokProfile.name} · $model"
+                        else if (session.running) "继续使用会话中的服务" else "未配置"
+                    },
                     sourceId = prefs.sourceLang?.code ?: "auto",
                     targetId = prefs.targetLang.stored,
                     sourceOptions = sourceLanguages.map { UiOption(it.code, it.zh) } + UiOption("auto", "自动识别"),
@@ -403,6 +410,7 @@ class AppController internal constructor(application: Application,
 
     /** 从加密存储恢复已保存值，保存与页面重建后仍能核对密钥，避免空白被误认为保存失败。 */
     private fun savedApi() = TranslationApiUiState(
+        profileId = prefs.byokProfile.id, profiles = prefs.byokProfiles.map { UiOption(it.id, it.name) },
         presetId = TranslationPresets.match(prefs.byokUrl),
         url = prefs.byokUrl, model = prefs.byokModel, key = prefs.byokKey, hasSavedKey = !prefs.byokKey.isNullOrBlank(),
         hasSavedConfiguration = prefs.byokReady,
@@ -410,6 +418,21 @@ class AppController internal constructor(application: Application,
         headers = prefs.byokHeaders.map { HeaderUiState(UUID.randomUUID().toString(), it.first, it.second) },
         resolvedUrl = ByokTranslator.chatUrl(prefs.byokUrl).second.orEmpty(),
     )
+
+    /** 配置管理先处理未保存草稿并取消旧测试，之后回填所选配置自己的字段与凭据。 */
+    private fun changeApiProfile(change: () -> Unit) {
+        if (state.value.settings.api.hasUnsavedChanges) {
+            updateApi { it.copy(message = UiMessage("请先保存或放弃当前修改", true)) }
+            return
+        }
+        cancelProbe()
+        runCatching(change).onFailure { error ->
+            updateApi { it.copy(message = UiMessage(error.message ?: "配置操作失败", true)) }
+            return
+        }
+        updateApi { savedApi() }
+        refresh()
+    }
 
     /** 更新 API 草稿，不触发网络或改动已保存配置。 */
     private fun updateApi(change: (TranslationApiUiState) -> TranslationApiUiState) {
@@ -422,7 +445,7 @@ class AppController internal constructor(application: Application,
     /** 只比较真正会保存的字段，输入框的空密钥与保留已存密钥遵循各自语义。 */
     private fun isApiDirty(draft: TranslationApiUiState): Boolean {
         val effectiveKey = draft.key?.trim() ?: if (draft.hasSavedKey) prefs.byokKey.orEmpty() else ""
-        return draft.url.trim() != prefs.byokUrl.trim() || draft.model.trim() != prefs.byokModel.trim() ||
+        return draft.profileId != prefs.byokProfile.id || draft.url.trim() != prefs.byokUrl.trim() || draft.model.trim() != prefs.byokModel.trim() ||
             effectiveKey != prefs.byokKey.orEmpty() || draft.userAgent.trim() != prefs.byokUserAgent ||
             draft.headers.map { it.name.trim() to it.value } != prefs.byokHeaders
     }
@@ -430,6 +453,7 @@ class AppController internal constructor(application: Application,
     /** 按预设使用的完整聊天端点比较地址，换路径清空旧凭据，等价地址保留。 */
     private fun editApiDraft(draft: TranslationApiUiState) {
         val previous = state.value.settings.api
+        if (draft.profileId != previous.profileId) return
         val endpointChanged = previous.url.isNotBlank() &&
             ByokTranslator.chatUrl(previous.url).second != ByokTranslator.chatUrl(draft.url).second
         cancelProbe()
@@ -450,6 +474,7 @@ class AppController internal constructor(application: Application,
     /** 校验整套翻译配置并一次保存，防止运行会话读到半套配置。 */
     private fun saveApi(): Boolean {
         val draft = state.value.settings.api
+        if (draft.profileId != prefs.byokProfile.id) return false
         val (error, url) = ByokTranslator.chatUrl(draft.url)
         val headers = draft.headers.map { it.name.trim() to it.value }
         val headerError = ByokService.badAdvanced(draft.userAgent, headers)
@@ -470,7 +495,7 @@ class AppController internal constructor(application: Application,
 
     /** 提取本次草稿快照，保留密钥的明确填写、清空和保留三种状态。 */
     private fun apiSnapshot(draft: TranslationApiUiState) = ApiDraftSnapshot(draft.url.trim(), draft.model.trim(),
-        draft.key, draft.hasSavedKey, draft.userAgent.trim(), draft.headers.map { it.name.trim() to it.value })
+        draft.key, draft.hasSavedKey, draft.userAgent.trim(), draft.headers.map { it.name.trim() to it.value }, draft.profileId)
 
     /** 用临时配置测试，不保存草稿或探测结果；只有用户确认才写入设置。 */
     private fun testApi() {

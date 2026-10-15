@@ -58,9 +58,9 @@ class ByokConnectionProbeTest {
         }
     }
 
-    /** 非 HTTPS、带认证信息或参数及非法端口等输入不得生成任何候选或发请求。 */
+    /** 非 HTTP(S)、带认证信息或参数及非法端口等输入不得生成任何候选或发请求。 */
     @Test fun invalidInputsHaveAnExplanationAndSendNothing() {
-        val inputs = listOf("", "api.example.com", "http://h.io", "https:///api", "https://u:p@h.io/api",
+        val inputs = listOf("", "api.example.com", "ftp://h.io", "https:///api", "https://u:p@h.io/api",
             "https://@h.io/api", "https://h.io/api?", "https://h.io/api?x=1", "https://h.io/api#",
             "https://h.io/api#x", "https://h.io:0", "https://h.io:65536", "https://h.io:-2", "https://h.io:bad")
         for (input in inputs) {

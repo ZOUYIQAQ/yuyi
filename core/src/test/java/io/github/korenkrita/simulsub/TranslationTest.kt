@@ -9,6 +9,69 @@ import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class TranslationTest {
+    /** 明文提示与地址校验分离，合法 HTTP 不报错且不升级为 HTTPS。 */
+    @Test fun cleartextWarningOnlyAppliesToValidHttpAddresses() {
+        for (input in listOf("http://localhost:8000", "HTTP://192.168.1.7:8000", "http://[::1]:8000")) {
+            assertNull(ByokTranslator.chatUrl(input).first)
+            assertTrue(ByokTranslator.chatUrl(input).second!!.startsWith("http://"))
+            assertTrue(ByokTranslator.cleartextWarning(input)!!.contains("明文"))
+        }
+        for (input in listOf("https://h.io", "ftp://h.io", "http://u:p@h.io", "http://h.io?x=1", ""))
+            assertNull(ByokTranslator.cleartextWarning(input))
+    }
+
+    /** HTTP 和 HTTPS 都仅在 404/405 时探测同源备用后缀，原服务配置始终不变。 */
+    @Test fun httpAndHttpsSuffixProbesPreserveTheOriginAndSavedService() {
+        for (scheme in listOf("http", "https")) for (status in listOf(404, 405)) {
+            val base = "$scheme://192.168.1.7:8000/api"
+            val service = ByokService("$base/v1/chat/completions", "本地模型", "")
+            val translator = ByokTranslator(service, "测试", null)
+            val requests = mutableListOf<String>()
+            val result = translator.probeConnection(base) { endpoint, _ ->
+                requests += endpoint
+                if (requests.size == 1) MtResult("", 'f', null, null, http = status, error = "HTTP $status")
+                else MtResult("你好", 'e', null, null, http = 200)
+            }
+            assertEquals(listOf("$base/v1/chat/completions", "$base/chat/completions"), requests)
+            assertEquals("$base/chat/completions", result.url)
+            assertEquals("$base/v1/chat/completions", service.url)
+            assertEquals(listOf("$base/v3/chat/completions"), ByokTranslator.chatCandidates("$base/v3/chat/completions").second)
+        }
+    }
+
+    /** 重定向、认证失败及服务故障不得触发 HTTP 后缀切换。 */
+    @Test fun httpProbeStopsOnRedirectsAndOtherFailures() {
+        for (status in listOf(301, 302, 307, 308, 401, 403, 429, 500, 503)) {
+            val base = "http://127.0.0.1:8000"
+            val translator = ByokTranslator(ByokService("$base/v1/chat/completions", "本地模型", ""), "测试", null)
+            val requests = mutableListOf<String>()
+            val result = translator.probeConnection(base) { endpoint, _ ->
+                requests += endpoint
+                MtResult("", 'f', null, null, http = status, error = "HTTP $status")
+            }
+            assertNull(result.url)
+            assertTrue(requests.isNotEmpty())
+            assertEquals(listOf("$base/v1/chat/completions"), requests.distinct())
+        }
+    }
+
+    /** 取消发生在 HTTP 首个候选返回时，后续参数与备用后缀均不得发送。 */
+    @Test fun cancellationStopsHttpSuffixProbingPermanently() {
+        val base = "http://127.0.0.1:8000"
+        val translator = ByokTranslator(ByokService("$base/v1/chat/completions", "本地模型", ""), "测试", null)
+        var requests = 0
+        val result = translator.probeConnection(base) { _, _ ->
+            requests++
+            translator.cancel()
+            MtResult("", 'f', null, null, http = 404, error = "HTTP 404")
+        }
+        assertEquals(1, requests)
+        assertNull(result.url)
+        assertEquals("cancelled", result.lastResult?.error)
+        translator.probeConnection(base) { _, _ -> throw AssertionError("取消后不得发送请求") }
+        assertEquals("cancelled", translator.translate("测试")?.error)
+    }
+
     @Test
     fun reasoningIsNeverShownAndOnlyEndedAnswersAreUsable() {
         val r = MtResult("<think>\n\n</think>\n\n各位，请祈祷B站不要倒闭吧</think>", 'e', 87, 12)

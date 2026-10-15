@@ -119,6 +119,8 @@ class CapturePipelineDeviceTest {
             prefs.setCaptionRetention(previousLimit.first, previousLimit.second, previousLimit.third)
             prefs.showJa = previousDisplay.first
             prefs.showStats = previousDisplay.second
+            // 等待异步偏好写盘，避免测试进程退出后仍留下夹具地址。
+            assertTrue("测试配置恢复必须完成落盘", context.getSharedPreferences("jpsub", 0).edit().commit())
         }
     }
 

@@ -33,7 +33,8 @@ class FloatingSubtitlePreviewDeviceTest {
         compose.onNodeWithText("字幕样式").performClick()
         val first = nativeStage()
         val before = compose.onNodeWithTag("subtitle-floating-preview").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("字幕保留方式"))
+        // 宽屏右栏承载样式设置；窄屏只有一个列表，均选择最后一个真实容器。
+        compose.onAllNodes(hasScrollToIndexAction()).onLast().performScrollToNode(hasText("字幕保留方式"))
         assertEquals(before, compose.onNodeWithTag("subtitle-floating-preview").assertIsDisplayed().fetchSemanticsNode().boundsInRoot)
         compose.onNodeWithTag("subtitle-preview-handle").performTouchInput {
             down(center); moveBy(Offset(-100f, -200f)); up()
@@ -196,6 +197,71 @@ class FloatingSubtitlePreviewDeviceTest {
     /** 低矮横屏中，预览不占满视口且可以临时收起让出设置空间。 */
     @Test fun shortLandscapeControlsRemainReachable() = verifyWindow(640, 240, 2f, false)
 
+    /** 未拖动时，窗口宽窄切换应重新选择默认角落，不能把默认位置当成用户位置。 */
+    @Test fun untouchedPreviewFollowsDefaultCornerWhenWindowChanges() {
+        var width by mutableStateOf(360)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(0.3f, 1f)) {
+                SimulSubTheme(SettingsUiState()) {
+                    Box(Modifier.requiredSize(width.dp, 740.dp).testTag("preview-test-page")) {
+                        FloatingSubtitlePreview(SubtitleStyleUiState())
+                    }
+                }
+            }
+        }
+        listOf(360, 1040, 360).forEach { windowWidth ->
+            compose.runOnIdle { width = windowWidth }
+            val page = compose.onNodeWithTag("preview-test-page").fetchSemanticsNode().boundsInRoot
+            val panel = compose.onNodeWithTag("subtitle-floating-preview").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("未自定义的位置应跟随窗口选择左右角落",
+                if (windowWidth >= 600) page.left else page.right - panel.width, panel.left, 1f)
+            assertEquals("尺寸改变后默认位置仍然贴底", page.bottom, panel.bottom, 1f)
+        }
+    }
+
+    /** 真实拖动后不因切换宽窄屏恢复默认角落；缩窗收敛后的坐标在放大时继续保留。 */
+    @Test fun draggedPreviewKeepsCustomPositionAndClampsOnResize() {
+        var width by mutableStateOf(1040)
+        var height by mutableStateOf(740)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(0.3f, 1f)) {
+                SimulSubTheme(SettingsUiState()) {
+                    Box(Modifier.requiredSize(width.dp, height.dp).testTag("preview-test-page")) {
+                        FloatingSubtitlePreview(SubtitleStyleUiState())
+                    }
+                }
+            }
+        }
+        val initial = previewRelativeOffset()
+        compose.onNodeWithTag("subtitle-preview-handle").performTouchInput {
+            down(center); moveBy(Offset(70f, -60f)); up()
+        }
+        val dragged = previewRelativeOffset()
+        assertTrue("平板拖动应从左下向右上实际移动", dragged.x > initial.x && dragged.y < initial.y)
+        compose.onNodeWithContentDescription("暂时收起字幕预览").performClick()
+        assertEquals("收起不能重置自定义位置", dragged, previewRelativeOffset())
+        compose.onNodeWithTag("subtitle-preview-restore").performClick()
+        assertEquals("恢复不能重置自定义位置", dragged, previewRelativeOffset())
+        compose.runOnIdle { width = 1200; height = 900 }
+        assertEquals("可用空间增大时必须保留自定义坐标", dragged, previewRelativeOffset())
+        compose.runOnIdle { width = 360; height = 300 }
+        val page = compose.onNodeWithTag("preview-test-page").fetchSemanticsNode().boundsInRoot
+        val panel = compose.onNodeWithTag("subtitle-floating-preview").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val clamped = previewRelativeOffset()
+        assertTrue("缩窗后整个面板必须处于页面内", panel.left >= page.left - 1f && panel.top >= page.top - 1f &&
+            panel.right <= page.right + 1f && panel.bottom <= page.bottom + 1f)
+        assertTrue("缩窗必须同时收敛横纵坐标", clamped.x < dragged.x && clamped.y < dragged.y)
+        compose.runOnIdle { width = 1040; height = 740 }
+        assertEquals("放大不能跳回旧的越界坐标或默认角落", clamped, previewRelativeOffset())
+    }
+
+    /** 比较相对页面的真实像素坐标，避免测试宿主居中引起根坐标变化。 */
+    private fun previewRelativeOffset(): Offset {
+        val page = compose.onNodeWithTag("preview-test-page").fetchSemanticsNode().boundsInRoot
+        val panel = compose.onNodeWithTag("subtitle-floating-preview").fetchSemanticsNode().boundsInRoot
+        return panel.topLeft - page.topLeft
+    }
+
     /** 在限定窗口内实测预览边界和实际点击，不用断言控件存在代替可达性。 */
     private fun verifyWindow(width: Int, height: Int, fontScale: Float, wide: Boolean) {
         var style by mutableStateOf(SubtitleStyleUiState())
@@ -210,6 +276,8 @@ class FloatingSubtitlePreviewDeviceTest {
         }
         val page = compose.onNodeWithTag("preview-test-page").fetchSemanticsNode().boundsInRoot
         val panel = compose.onNodeWithTag("subtitle-floating-preview").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals("宽屏默认左下，手机默认右下", if (width >= 600) page.left else page.right - panel.width, panel.left, 1f)
+        assertEquals("预览默认贴住页面底部", page.bottom, panel.bottom, 1f)
         assertTrue("预览必须留在页面横向边界内", panel.left >= page.left && panel.right <= page.right)
         assertTrue("低矮窗口仍应保留设置空间", panel.height < page.height)
         compose.onNodeWithContentDescription("切换为横屏预览").performClick()

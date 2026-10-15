@@ -27,14 +27,10 @@ class CaptionWindowAnchorDeviceTest {
                     activity.window.decorView.setBackgroundColor(0xFF2D3436.toInt())
                     activity.window.insetsController!!.hide(android.view.WindowInsets.Type.systemBars())
                 }
-                val end = System.currentTimeMillis() + 5_000
-                while (wm.currentWindowMetrics.windowInsets.isVisible(android.view.WindowInsets.Type.systemBars())) {
-                    assertTrue("前台测试窗口必须实际进入沉浸模式", System.currentTimeMillis() < end)
-                    Thread.sleep(16)
-                }
+                awaitStableArea(wm, false)
                 assertEquals("隐藏系统栏后可用区域必须抵达物理屏幕底边",
                     wm.currentWindowMetrics.bounds.bottom, captionWindowArea(wm.currentWindowMetrics).bottom)
-                realBottomOverlayNeverDrawsShiftedFinalBaseline()
+                verifyBottomOverlayNeverDrawsShiftedFinalBaseline()
             } finally {
                 scenario.onActivity { it.window.insetsController!!.show(android.view.WindowInsets.Type.systemBars()) }
             }
@@ -43,6 +39,33 @@ class CaptionWindowAnchorDeviceTest {
 
     /** 底部放置后只更新字幕，生产绘制守卫必须在每一帧保持正式最后一行不动。 */
     @Test fun realBottomOverlayNeverDrawsShiftedFinalBaseline() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val wm = context.getSystemService(WindowManager::class.java)
+        androidx.test.core.app.ActivityScenario.launch(androidx.activity.ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { it.window.insetsController!!.show(android.view.WindowInsets.Type.systemBars()) }
+            awaitStableArea(wm, true)
+            verifyBottomOverlayNeverDrawsShiftedFinalBaseline()
+        }
+    }
+
+    /** 浮窗测量前等待前台宿主方向和系统栏稳定，不能继承上一测试的竖屏Activity过渡帧。 */
+    private fun awaitStableArea(wm: WindowManager, barsVisible: Boolean) {
+        val end = System.currentTimeMillis() + 5_000
+        var previous: android.graphics.Rect? = null
+        var stable = 0
+        while (stable < 8) {
+            val metrics = wm.currentWindowMetrics
+            val area = captionWindowArea(metrics)
+            val visible = metrics.windowInsets.isVisible(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+            stable = if (area == previous && visible == barsVisible) stable + 1 else 0
+            previous = area
+            assertTrue("前台方向与系统栏未稳定：$area", System.currentTimeMillis() < end)
+            Thread.sleep(16)
+        }
+    }
+
+    /** 复用同一逐帧和像素断言，分别在普通及沉浸前台宿主上验证生产定位器。 */
+    private fun verifyBottomOverlayNeverDrawsShiftedFinalBaseline() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         assertTrue("专用模拟器需已授权悬浮窗", Settings.canDrawOverlays(context))

@@ -209,43 +209,110 @@ class Prefs(ctx: Context) {
     fun setJevKey(p: JevProvider, key: String?) =
         sp.edit().apply { if (key.isNullOrBlank()) remove("jevKey:${p.name}") else putString("jevKey:${p.name}", KeyBox.seal(key.trim())) }.apply()
 
-    /** BYOK: the user's OpenAI-compatible service. The key is sealed like the Jev keys. */
+    /** 翻译配置目录与当前配置；未保存目录时直接读取旧版默认配置。 */
+    val byokProfiles: List<LlmProfile> get() = LlmProfile.all(sp.getString("byokProfiles", null))
+    val byokProfile: LlmProfile get() = byokProfiles.let { profiles ->
+        profiles.firstOrNull { it.id == sp.getString("byokActive", "") } ?: profiles.first()
+    }
+    private val byokSuffix: String get() = byokProfile.suffix
     var byokUrl: String
-        get() = sp.getString("byokUrl", "") ?: ""
-        set(v) = sp.edit().putString("byokUrl", v.trim()).apply()
+        get() = sp.getString("byokUrl$byokSuffix", "").orEmpty()
+        set(value) = sp.edit().putString("byokUrl$byokSuffix", value.trim()).apply()
     var byokModel: String
-        get() = sp.getString("byokModel", "") ?: ""
-        set(v) = sp.edit().putString("byokModel", v.trim()).apply()
+        get() = sp.getString("byokModel$byokSuffix", "").orEmpty()
+        set(value) = sp.edit().putString("byokModel$byokSuffix", value.trim()).apply()
     var byokKey: String?
-        get() = sp.getString("byokKey", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
-        set(v) = sp.edit().apply { if (v.isNullOrBlank()) remove("byokKey") else putString("byokKey", KeyBox.seal(v.trim())) }.apply()
-    /**
-     * "保存": all BYOK fields in one edit (null key = keep the saved one), plus the byokSaved marker a running session
-     * switches on. One edit, so a reader never sees the new address with the old key.
-     */
+        get() = sp.getString("byokKey$byokSuffix", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
+        set(value) = sp.edit().apply {
+            val key = "byokKey$byokSuffix"
+            if (value.isNullOrBlank()) remove(key) else putString(key, KeyBox.seal(value.trim()))
+        }.apply()
+
+    /** 一次保存当前配置全部字段；空密钥表示清空，null保留当前配置自己的密钥。 */
     fun saveByok(url: String, model: String, key: String?, userAgent: String? = null,
-                 headers: List<Pair<String, String>>? = null) = sp.edit().apply {
-        putString("byokUrl", url.trim()); putString("byokModel", model.trim())
-        if (key != null) { if (key.isBlank()) remove("byokKey") else putString("byokKey", KeyBox.seal(key.trim())) }
-        if (userAgent != null) { if (userAgent.isBlank()) remove("byokUserAgent") else putString("byokUserAgent", userAgent.trim()) }
-        // sealed like the key: a header may carry a second key
-        if (headers != null) { if (headers.isEmpty()) remove("byokHeaders") else putString("byokHeaders", KeyBox.seal(ByokService.storeHeaders(headers))) }
-        putLong("byokSaved", System.nanoTime())
-    }.apply()
-    val byokUserAgent: String get() = sp.getString("byokUserAgent", null).orEmpty()
+                 headers: List<Pair<String, String>>? = null) {
+        val suffix = byokSuffix
+        sp.edit().apply {
+            putString("byokUrl$suffix", url.trim()); putString("byokModel$suffix", model.trim())
+            if (key != null) { if (key.isBlank()) remove("byokKey$suffix") else putString("byokKey$suffix", KeyBox.seal(key.trim())) }
+            if (userAgent != null) { if (userAgent.isBlank()) remove("byokUserAgent$suffix") else putString("byokUserAgent$suffix", userAgent.trim()) }
+            if (headers != null) { if (headers.isEmpty()) remove("byokHeaders$suffix") else putString("byokHeaders$suffix", KeyBox.seal(ByokService.storeHeaders(headers))) }
+            putLong("byokSaved", System.nanoTime())
+        }.apply()
+    }
+
+    /** 只在配置完整时通知正在运行的服务切换，空配置不会打断现有翻译。 */
+    private fun byokProfileReady(profile: LlmProfile): Boolean =
+        ByokTranslator.chatUrl(sp.getString("byokUrl${profile.suffix}", "").orEmpty()).second != null &&
+            !sp.getString("byokModel${profile.suffix}", "").isNullOrBlank()
+
+    /** 选择一个已有配置，已保存的有效配置从下一句起应用。 */
+    fun useByokProfile(profile: LlmProfile) {
+        val selected = byokProfiles.firstOrNull { it.id == profile.id } ?: error("翻译配置不存在")
+        sp.edit().apply {
+            putString("byokActive", selected.id)
+            if (byokProfileReady(selected)) putLong("byokSaved", System.nanoTime())
+        }.apply()
+    }
+
+    /** 新增独立空配置并选中，不复制其他配置的地址、密钥或请求头。 */
+    fun addByokProfile(name: String): LlmProfile {
+        val profiles = byokProfiles
+        require(profiles.size < LlmProfile.MAX_PROFILES) { "最多保存 ${LlmProfile.MAX_PROFILES} 套配置" }
+        val (checked, error) = LlmProfile.name(name, profiles)
+        require(checked != null) { error.orEmpty() }
+        val profile = LlmProfile(LlmProfile.newId(profiles), checked)
+        sp.edit().putString("byokProfiles", LlmProfile.store(profiles + profile)).putString("byokActive", profile.id).apply()
+        return profile
+    }
+
+    /** 重命名只改变目录，不移动凭据或触发运行中切换。 */
+    fun renameByokProfile(profile: LlmProfile, name: String) {
+        val profiles = byokProfiles
+        require(profiles.any { it.id == profile.id }) { "翻译配置不存在" }
+        val (checked, error) = LlmProfile.name(name, profiles, profile.id)
+        require(checked != null) { error.orEmpty() }
+        sp.edit().putString("byokProfiles", LlmProfile.store(profiles.map {
+            if (it.id == profile.id) it.copy(name = checked) else it
+        })).apply()
+    }
+
+    /** 由界面确认后删除指定配置；至少保留一套，删除当前项后选中剩余第一套。 */
+    fun deleteByokProfile(profile: LlmProfile) {
+        val profiles = byokProfiles
+        require(profiles.size > 1) { "至少保留一套翻译配置" }
+        require(profiles.any { it.id == profile.id }) { "翻译配置不存在" }
+        val remaining = profiles.filterNot { it.id == profile.id }
+        val active = byokProfile.id == profile.id
+        sp.edit().apply {
+            for (key in listOf("byokUrl", "byokModel", "byokKey", "byokUserAgent", "byokHeaders")) remove(key + profile.suffix)
+            putString("byokProfiles", LlmProfile.store(remaining))
+            if (active) {
+                putString("byokActive", remaining.first().id)
+                if (byokProfileReady(remaining.first())) putLong("byokSaved", System.nanoTime())
+            }
+        }.apply()
+    }
+
+    val byokUserAgent: String get() = sp.getString("byokUserAgent$byokSuffix", null).orEmpty()
     val byokHeaders: List<Pair<String, String>>
-        get() = ByokService.parseHeaders(sp.getString("byokHeaders", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() })
-    /**
-     * The saved service read together (one copy of the preferences), for a session building its translator; null when
-     * the address is not valid. The key may be "" (a service without one).
-     */
+        get() = ByokService.parseHeaders(sp.getString("byokHeaders$byokSuffix", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() })
+
+    /** 会话从同一偏好快照解析配置及其所有凭据，避免跨配置混用地址与密钥。 */
     fun byokService(): ByokService? {
         val all = sp.all
-        val url = ByokTranslator.chatUrl((all["byokUrl"] as? String).orEmpty()).second ?: return null
-        fun open(k: String) = (all[k] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
-        return ByokService(url, (all["byokModel"] as? String).orEmpty(), open("byokKey").orEmpty(),
-            (all["byokUserAgent"] as? String).orEmpty(), ByokService.parseHeaders(open("byokHeaders")))
+        val profiles = LlmProfile.all(all["byokProfiles"] as? String)
+        val suffix = (profiles.firstOrNull { it.id == all["byokActive"] } ?: profiles.first()).suffix
+        val url = ByokTranslator.chatUrl((all["byokUrl$suffix"] as? String).orEmpty()).second ?: return null
+        /** 只解密所选配置的凭据，不能回退到其他配置。 */
+        fun open(key: String) = (all[key + suffix] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
+        return ByokService(url, (all["byokModel$suffix"] as? String).orEmpty(), open("byokKey").orEmpty(),
+            (all["byokUserAgent$suffix"] as? String).orEmpty(), ByokService.parseHeaders(open("byokHeaders")))
     }
+    /** 会话遇到尚未填好的新配置时保留正在使用的服务，完整保存后才切换。 */
+    fun byokForSession(fallback: ByokService?): ByokService? =
+        byokService()?.takeIf { it.model.isNotBlank() } ?: fallback
+
     /**
      * The [ByokTranslator.THINKING_OFF] variant (by name) that answered without reasoning for this exact service URL and
      * model; null = not found yet. Kept per URL + model, so switching back and forth does not probe again.

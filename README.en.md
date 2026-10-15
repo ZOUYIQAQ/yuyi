@@ -4,7 +4,7 @@
 
 **Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
 
-An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**, current version **1.5.0**. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.6.0 (versionCode 28)** and ports named API profiles, HTTP local/LAN endpoints and incremental draft translation from upstream 1.0.2; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
 
 The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
 
@@ -17,7 +17,7 @@ Requires **Android 10 (API 29)+ and arm64-v8a**.
 First launch guides permissions, the translation API, and model download/activation in that order. Each step can be skipped, and the guide can be reopened from Settings. Cold starts read actual system permission grants; missing required permissions appear in an emphasized card at the top of Live.
 
 1. Open **设置 → 模型库 (Settings → Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
-2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. Saving keeps the inputs and displays **已保存 (Saved)**. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
+2. Open **设置 → 翻译 API (Settings → Translation API)**. Select or add a named profile, then choose a preset or enter your OpenAI-compatible endpoint, model ID and API key, and save. Saving keeps the inputs and displays **已保存 (Saved)**. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
 3. On **同传 (Live)**, select source/target languages and a scene, grant the requested permissions and system capture authorization, then start subtitles.
 
 Capture depends on the source app, DRM, Android version and device implementation. Compatibility with every player or video is not guaranteed. Capture is not isolated by process: other eligible apps playing audio at the same time may also be transcribed.
@@ -37,7 +37,7 @@ Capture depends on the source app, DRM, Android version and device implementatio
 
 Only four representative screenshots are displayed here; screenshot files and historical QA records are retained.
 
-Current interface screenshots show Yuyi 1.5.0 on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The subtitle screenshot shows the settings preview.
+These four screenshots show Yuyi 1.6.0 running on the local API 35 emulator on 2026-10-16, including tablet-sized windows. The subtitle screenshot shows the settings preview.
 
 Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
 
@@ -56,7 +56,9 @@ The APK contains no ASR or VAD weights. Packages are downloaded to private app s
 
 Translation presets include DeepSeek official (`https://api.deepseek.com/v1`, `deepseek-flash`), SiliconFlow (`https://api.siliconflow.cn/v1`, `deepseek-ai/DeepSeek-V4-Flash`) and OpenRouter (`https://openrouter.ai/api/v1`, model ID must be entered). Presets only fill an editable draft: they neither save nor send requests. Connection tests never save the draft automatically: **Replace and save** explicitly applies a successful full endpoint; leaving with unsaved edits asks for confirmation. Switching presets across endpoints clears the draft's old key, custom headers and User-Agent. Custom mode preserves the form. Defaults were checked against official documentation on **2026-10-15** and may change; this is not verification of a user's paid API access. Sources and protocol details: [Translation](docs/translation.md).
 
-New installations start with **Camellia (山茶)**, sampled from the icon: orange-brown, cream, camellia red and sage green. On the Live page, the primary action stays above navigation while content scrolls: at least 72dp tall on phones and limited to 480dp on tablets. The same position becomes Stop while running.
+The API page manages up to 20 named profiles, each with its own endpoint, model, key, User-Agent and headers. Existing settings remain in the Default profile. Add, rename, switch or delete with confirmation; at least one profile remains, and unsaved edits require confirmation before being discarded. During a session, an empty profile keeps the existing service; a complete profile takes effect for subsequent sentences. HTTP and HTTPS endpoints are editable, with a cleartext warning for HTTP local/LAN services on trusted networks. Release HTTPS trusts system CAs only, and translation requests do not follow redirects. The first draft is translated immediately; later drafts need at least five Unicode code points of accumulated change from the last queued draft. Finals bypass this threshold.
+
+New installations start with **Camellia (山茶)**, sampled from the icon: orange-brown, cream, camellia red and sage green. On Live, the primary action stays centered at the bottom of the initial viewport above navigation while content scrolls, at least 72dp tall and no wider than 480dp. The same position becomes Stop while running. The subtitle settings preview defaults to the bottom-left at available widths of 600dp or more and bottom-right on narrower layouts; a dragged position is retained. The 1.5.1 fixes for transparent layout tails, visible system bar insets and stable subtitle baselines remain.
 
 ## Settings and controls
 

@@ -56,7 +56,7 @@ class JevTest {
                         Thread.sleep(delayMs)
                         val out = sock.getOutputStream()
                         val r = redirectTo
-                        if (r != null) { out.write("HTTP/1.1 307 Temporary Redirect\r\nLocation: $r\r\nContent-Length: 0\r\n\r\n".toByteArray()); return@use }
+                        if (r != null) { out.write("HTTP/1.1 307 Temporary Redirect\r\nLocation: $r\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()); return@use }
                         pieces?.let { ps ->
                             out.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n".toByteArray()); out.flush()
                             for ((p, pause) in ps) { Thread.sleep(pause); out.write(p.toByteArray()); out.flush() }
@@ -630,14 +630,53 @@ class JevTest {
         assertNull(byok().probe(steps)); assertTrue(byok().exhausted(steps))
     }
 
+    /** 从用户输入的 HTTP 基础地址生成接口，再走真实流式请求与后缀探测。 */
+    @Test fun normalizedHttpEndpointWorksWithTheRealTransport() {
+        val base = "http://127.0.0.1:$port"
+        val endpoint = ByokTranslator.chatUrl(base).second!!
+        val service = ByokService(endpoint, "本地模型", "")
+        val translator = ByokTranslator(service, "测试", null, deadlineMs = 2_000)
+        reply = { n -> if (n == 1) 404 to "{}" else 200 to sse("""{"choices":[{"delta":{"content":"你好"},"finish_reason":"stop"}]}""") }
+        val result = translator.probeConnection(base)
+        assertEquals("$base/chat/completions", result.url)
+        assertEquals("你好", result.lastResult?.text)
+        assertEquals(2, hits.get())
+        assertNull(lastAuth.get())
+        assertEquals("$base/v1/chat/completions", service.url)
+    }
+
+    /** HTTP 连接测试不跟随 HTTP 或 HTTPS 重定向，也不将重定向当成后缀回退。 */
+    @Test fun httpProbeDoesNotFollowRedirectsToEitherScheme() {
+        val base = "http://127.0.0.1:$port"
+        for (scheme in listOf("http", "https")) {
+            redirectTo = "$scheme://127.0.0.1:$port/elsewhere"
+            val before = hits.get()
+            val translator = ByokTranslator(ByokService(ByokTranslator.chatUrl(base).second!!, "本地模型", ""), "测试", null, deadlineMs = 2_000)
+            val result = translator.probeConnection(base)
+            assertNull(result.url)
+            assertEquals("协议=$scheme，错误=${result.lastResult?.error}，请求数=${hits.get() - before}", 307, result.lastResult?.http)
+            assertEquals(before + ByokTranslator.THINKING_OFF.size, hits.get())
+        }
+    }
+
+    /** 接受本机和局域网 HTTP，保留显式协议且只补一次默认接口路径。 */
     @Test
-    fun byokUrlsGetV1OnceAndOnlyHttps() {
+    fun byokUrlsGetV1OnceAndKeepTheScheme() {
         val ok = "https://api.example.com/v1/chat/completions"
         for (u in listOf("https://api.example.com", "https://api.example.com/", "https://api.example.com/v1", "https://API.example.com/v1/",
             "https://api.example.com/v1/chat/completions")) assertEquals(u, ok, ByokTranslator.chatUrl(u).second)
         assertEquals("https://h.io:8443/api/openai/v1/chat/completions", ByokTranslator.chatUrl("https://h.io:8443/api/openai").second)
-        for (u in listOf("", "http://api.example.com", "https://u:p@h.io", "https://h.io/v1?x=1", "https://h.io/#a", "api.example.com"))
+        for (host in listOf("localhost:8000", "127.0.0.1:8000", "192.168.1.7:8000", "[::1]:8000", "api.example.com")) {
+            val expected = "http://$host/v1/chat/completions"
+            for (suffix in listOf("", "/", "/v1", "/v1/", "/v1/chat/completions"))
+                assertEquals(expected, ByokTranslator.chatUrl("HTTP://$host$suffix").second)
+        }
+        assertEquals("http://h.io:8000/api/v3/chat/completions", ByokTranslator.chatUrl("http://h.io:8000/api/v3/chat/completions").second)
+        for (u in listOf("", "https://u:p@h.io", "https://h.io/v1?x=1", "https://h.io/#a", "api.example.com",
+            "http://u:p@h.io", "http://h.io?x=1", "http://h.io/#a", "http://h.io:0", "http://h.io:65536"))
             assertNull(u, ByokTranslator.chatUrl(u).second)
+        for (u in listOf("ftp://h.io", "ws://h.io", "file:///etc/hosts"))
+            assertTrue(u, ByokTranslator.chatUrl(u).first!!.contains("http:// 或 https://"))
         for (u in listOf("https://h.io:65536", "https://h.io:0")) assertNull(u, ByokTranslator.chatUrl(u).second)
         assertEquals("https://[::1]:8443/v1/chat/completions", ByokTranslator.chatUrl("HTTPS://[::1]:8443/v1/").second)
     }

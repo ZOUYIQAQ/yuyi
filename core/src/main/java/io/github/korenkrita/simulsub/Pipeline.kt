@@ -177,6 +177,8 @@ class Pipeline(
         segSetup.remove(seg)
         // a segment that ended without a final (empty, dropped by stop) would otherwise stay: keep the table bounded
         if (segSetup.size > 64) segSetup.keys.removeIf { it < seg - 32 }
+        // 定稿已交给翻译队列，后续任务自带设置，不再需要草稿比较基线。
+        sentDraft.remove(seg)
     }
 
     /**
@@ -314,6 +316,8 @@ class Pipeline(
 
     /** Raw recognitions of this segment's drafts (audio length, text), newest last; asr thread only. */
     private val segDrafts = HashMap<Long, MutableList<Pair<Int, String>>>()
+    /** 每段最后实际接受入翻译队列的草稿；仅识别线程访问，缺失定稿时也限制最多六十四段。 */
+    private val sentDraft = LinkedHashMap<Long, String>()
 
     /**
      * ReazonSpeech sometimes drops everything before an internal pause when the same utterance is recognized again
@@ -373,15 +377,43 @@ class Pipeline(
                 // A draft that already ran is kept even if a newer draft is queued: on a slow phone every
                 // draft would otherwise be superseded before it reaches MT and nothing would be shown.
                 if (!q.job.isFinal && ja.isEmpty()) return@synchronized
-                mtQueue.removeIf { it.q.job.segmentId == q.job.segmentId && !it.q.job.isFinal }
                 // a sentence-end candidate was recognized for Jev; it is only translated if drafts are wanted now
                 if (!q.job.isFinal && !drafts()) return@synchronized
+                // 先判断再修改队列：跳过的草稿既不能清除已排队任务，也不能推进比较基线；定稿始终通过。
+                if (!q.job.isFinal && !worthSendingDraft(q.job.segmentId, ja)) return@synchronized
+                mtQueue.removeIf { it.q.job.segmentId == q.job.segmentId && !it.q.job.isFinal }
                 mtQueue.addLast(MtJob(q, ja, start, end, setup))
+                if (!q.job.isFinal) {
+                    sentDraft[q.job.segmentId] = ja
+                    // 按首次接受顺序淘汰，编号跳跃、倒序或没有定稿也不会导致缓存持续增长。
+                    if (sentDraft.size > 64) sentDraft.remove(sentDraft.keys.first())
+                }
                 if (q.job.isFinal) inFlightFinals-- // now counted by mtQueue
             }
             // the final carries its setup on (MtJob): the segment needs no lookup any more
             if (q.job.isFinal) forget(q.job.segmentId)
         }
+    }
+
+    /** 只比较最后实际入队的草稿；跳过的识别结果不影响后续小增量累计。仅识别线程调用。 */
+    private fun worthSendingDraft(segmentId: Long, ja: String): Boolean {
+        val last = sentDraft[segmentId] ?: return true
+        return newChars(last, ja) >= DRAFT_MIN_NEW_CHARS
+    }
+
+    /**
+     * 扣除公共前后缀后，按 Unicode 码点计算变化区间的较长边。
+     * 追加时重复字符仍逐个计数；重排、替换和缩短也算变化，补充平面字符不会被拆成两个代理项。
+     */
+    private fun newChars(a: String, b: String): Int {
+        val before = a.codePoints().toArray()
+        val after = b.codePoints().toArray()
+        val shared = minOf(before.size, after.size)
+        var prefix = 0
+        while (prefix < shared && before[prefix] == after[prefix]) prefix++
+        var suffix = 0
+        while (suffix < shared - prefix && before[before.lastIndex - suffix] == after[after.lastIndex - suffix]) suffix++
+        return maxOf(before.size, after.size) - prefix - suffix
     }
 
     private fun judgeLoop() {
@@ -637,6 +669,8 @@ class Pipeline(
         /** a draft that may be kept (see recognizeKeepingLostDraft): at least 1.5 s of audio and 5 characters */
         const val LOST_MIN_SAMPLES = 24_000
         const val LOST_MIN_CHARS = 5
+        /** 首稿直接翻译，后续草稿相对最后接受的文本至少变化五个码点；不加时间门槛，定稿不受限制。 */
+        const val DRAFT_MIN_NEW_CHARS = 5
         /**
          * A suspected loss is real when the whole result and the separately recognized new audio share at least this
          * much of each (by characters in order). From one Mac A/B of two VTuber clips, not tuned on a reference.
