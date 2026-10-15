@@ -17,6 +17,38 @@ import org.junit.runner.RunWith
 /** 只测真实原生布局和像素，不启动服务、不请求悬浮窗权限、不修改用户数据。 */
 @RunWith(AndroidJUnit4::class)
 class CaptionDraftSlotDeviceTest {
+    /** 拖到底时临时字幕黑底必须抵达窗口末行，不能留下参与贴边计算的透明尾部。 */
+    @Test fun draftBackgroundReachesBottomWithoutMovingFinalBaseline() = onMain {
+        for (font in listOf(13f, 36f)) for (original in listOf(false, true)) {
+            val view = overlay(original)
+            val width = px(view, 300)
+            val screenHeight = px(view, 700)
+            view.applyStyle(font, 0.8f)
+            val final = CaptionOverlayView.Line("正式字幕保持原位", null, true)
+            view.setLines(listOf(final), null)
+            layout(view, width)
+            val anchor = CaptionBaselineAnchor()
+            val top = anchor.position(screenHeight, view.finalLineBaselinePx(), screenHeight, view.measureCaptionBlockHeight(width))
+            val baseline = top + view.finalLineBaselinePx()
+            for (draft in listOf("短草稿", "更新中的临时字幕".repeat(40), "", "再出现")) {
+                view.setLines(if (draft.isEmpty()) listOf(final) else listOf(final,
+                    CaptionOverlayView.Line(draft, if (original) "仮字幕" else null, false)), null)
+                layout(view, width)
+                assertEquals("临时字幕出现消失不能移动正式末行", baseline, top + view.finalLineBaselinePx())
+                assertEquals("拖到底的窗口不能再被多余透明空间挡住", screenHeight, top + view.height)
+                val bitmap = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(Canvas(bitmap))
+                if (draft.isNotEmpty()) {
+                    assertTrue("有临时字幕时黑底必须抵达可用区域底部：$font/$original",
+                        Color.alpha(bitmap.getPixel(width / 2, bitmap.height - 1)) > 0)
+                } else {
+                    assertEquals("草稿消失只收回背景，不移动定稿", 0,
+                        Color.alpha(bitmap.getPixel(width / 2, bitmap.height - 1)))
+                }
+            }
+        }
+    }
+
     /** 用真实TextView的最后一行基线核对宿主定位，草稿、诊断与正式内容换行都不能重设锚点。 */
     @Test fun actualFinalBaselineRemainsFixedAcrossTransientAndFinalUpdates() = onMain {
         for (fixed in listOf(false, true)) for (original in listOf(false, true)) {
@@ -165,7 +197,7 @@ class CaptionDraftSlotDeviceTest {
                     val slot = view.getChildAt(1)
                     val geometry = listOf(view.height, card.top, card.bottom, slot.top, slot.bottom)
                     if (expected == null) expected = geometry else assertEquals("草稿生命周期不应推动黑框：$landscape/$fixed/$original/$mode", expected, geometry)
-                    assertEquals(card.bottom, slot.top)
+                    assertEquals(card.bottom + (slot.layoutParams as LinearLayout.LayoutParams).topMargin, slot.top)
                     assertEquals(view.measureCardHeight(width) + view.draftSlotHeightPx(), view.height)
                     assertEquals(view.measureCaptionBlockHeight(width), view.height)
                     assertNull("草稿区不得继承正式背景", slot.background)
@@ -241,7 +273,8 @@ class CaptionDraftSlotDeviceTest {
             assertEquals("原文不再独占额外一行", 0, source.height)
             assertTrue("字号=$font，宽=$widthDp，高=${draft.height}，排版高=${draft.layout.height}，草稿=${draft.text}", draft.text.isNotEmpty() && draft.text.endsWith("尾") && ("很长的草稿。".repeat(100) + "最新结尾").endsWith(draft.text.toString()))
             assertEquals("临时字幕最多一行", 1, draft.lineCount)
-            assertTrue("临时字幕须贴近正文，不能叠加底部留白", slot.translationY < 0)
+            assertTrue("临时字幕共用正文留白，不能留下透明尾部", (slot.layoutParams as LinearLayout.LayoutParams).topMargin < 0)
+            assertEquals(0f, slot.translationY)
             assertTrue("草稿必须整行容纳在透明区域内", draft.layout.height <= draft.height)
             assertTrue(draft.bottom <= slot.height)
             assertEquals(View.VISIBLE, draft.visibility)
@@ -265,7 +298,7 @@ class CaptionDraftSlotDeviceTest {
             assertEquals(card.left, slot.left)
             assertEquals(card.right, slot.right)
             assertEquals(cardWidth, slot.width)
-            assertEquals(card.bottom, slot.top)
+            assertEquals(card.bottom + (slot.layoutParams as LinearLayout.LayoutParams).topMargin, slot.top)
             if (above) assertTrue(toolbar.bottom <= card.top) else assertTrue(toolbar.top >= slot.bottom)
             assertEquals(view.measureCaptionBlockHeight(cardWidth) + view.toolbarHeightPx(), view.height)
         }

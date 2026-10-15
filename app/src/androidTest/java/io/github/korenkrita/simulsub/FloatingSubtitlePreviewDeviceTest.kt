@@ -139,7 +139,7 @@ class FloatingSubtitlePreviewDeviceTest {
             cardHeight = view.measureCardHeight(view.width)
             assertTrue(slotHeight > 0)
             assertEquals(cardHeight + slotHeight, view.height)
-            assertEquals(view.getChildAt(0).bottom, view.getChildAt(1).top)
+            assertEquals(view.getChildAt(0).bottom + (view.getChildAt(1).layoutParams as LinearLayout.LayoutParams).topMargin, view.getChildAt(1).top)
             assertNull(view.getChildAt(1).background)
             assertFalse("草稿不得混入正式正文", caption(stage).text.contains("… "))
             assertTrue(draftSource(stage).text.contains("このV何者気になるV、他とは違うVだから"))

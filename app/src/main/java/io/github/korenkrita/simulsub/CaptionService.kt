@@ -615,9 +615,7 @@ class CaptionService : Service() {
         // used: the overlay's x/y are already relative to that area (its parent frame excludes the bars).
         fun area(): android.graphics.Rect {
             if (android.os.Build.VERSION.SDK_INT < 30) return android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
-            val m = wm.currentWindowMetrics
-            val i = m.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
-            return android.graphics.Rect(m.bounds.left + i.left, m.bounds.top + i.top, m.bounds.right - i.right, m.bounds.bottom - i.bottom)
+            return captionWindowArea(wm.currentWindowMetrics)
         }
         var cardW = (area().width() * prefs.widthFrac).toInt()
         var toolbarShown = false

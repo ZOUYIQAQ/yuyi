@@ -119,8 +119,11 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         setLines(lastLines, lastStats)
     }
 
-    /** 窗口固定预留的草稿高度，空闲时不绘制背景，不计工具栏。 */
-    fun draftSlotHeightPx(): Int = if (draftSlotEnabled) draftSlot.layoutParams.height else 0
+    /** 草稿对窗口增加的固定高度，扣除与正文底部共用的留白，不计工具栏。 */
+    fun draftSlotHeightPx(): Int = if (draftSlotEnabled) {
+        val params = draftSlot.layoutParams as LayoutParams
+        (params.height + params.topMargin + params.bottomMargin).coerceAtLeast(0)
+    } else 0
 
     /** 返回正文与草稿预留的固定总高度，供窗口贴屏和工具栏避让使用。 */
     fun measureCaptionBlockHeight(widthPx: Int): Int = measureCardHeight(widthPx) + draftSlotHeightPx()
@@ -180,11 +183,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 统一绘制正文和草稿的圆角背景；只有背景向下伸展，布局和定稿不随草稿改变。 */
     override fun dispatchDraw(canvas: Canvas) {
-        val extension = if (draftSlotEnabled && draftText.visibility == VISIBLE) {
-            val textHeight = minOf(draftText.layout?.height ?: draftText.lineHeight, draftText.height)
-            (draftSlot.translationY.toInt() + draftText.top + textHeight + draftSlot.paddingBottom).coerceIn(0, draftSlot.height)
-        } else 0
-        bg.setBounds(card.left, card.top, card.right, if (extension > 0) draftSlot.top + extension else card.bottom)
+        val bottom = if (draftSlotEnabled && draftText.visibility == VISIBLE)
+            maxOf(card.bottom, draftSlot.bottom) else card.bottom
+        bg.setBounds(card.left, card.top, card.right, bottom)
         bg.draw(canvas)
         super.dispatchDraw(canvas)
     }
@@ -388,8 +389,6 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         draftSlot.apply {
-            // 与原版一样紧接正文，抵消正文已有的底部留白，避免重复间距。
-            translationY = -dp(10f)
             orientation = VERTICAL
             clipChildren = true
             setPadding(dp(18f).toInt(), dp(DRAFT_GAP_DP).toInt(), dp(18f).toInt(), dp(10f).toInt())
@@ -397,7 +396,11 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             addView(draftText, LayoutParams(LayoutParams.MATCH_PARENT, 0))
             visibility = GONE
         }
-        addView(draftSlot, LayoutParams(LayoutParams.MATCH_PARENT, 0).apply { gravity = Gravity.START })
+        addView(draftSlot, LayoutParams(LayoutParams.MATCH_PARENT, 0).apply {
+            gravity = Gravity.START
+            // 在真实布局中共用正文底部留白，不能只移动绘制位置而留下透明尾部。
+            topMargin = -dp(10f).toInt()
+        })
 
         buildToolbar()
         addView(toolbar, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.START; topMargin = dp(TOOLBAR_GAP_DP).toInt() })

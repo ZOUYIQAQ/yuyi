@@ -131,3 +131,8 @@ LauncherIconChoice表示矢量彩色/纯色、背景、飘落装饰和纯色配�
 首次引导状态由AppController持有，依次为PERMISSIONS、API、MODEL；冷启动时读取系统真实授权状态，必要权限缺失时首页顶部显示强调卡，全部授予后隐藏。最后继续或跳过写入appearance.onboarding_completed。导航层复用API未保存确认，模型步骤仅提供下载、取消和启用；不提前申请一次性的MediaProjection授权。模型库和场景列表保存进入来源，顶栏和系统返回使用同一动作。首页移除内存字幕预览。
 
 系统启动页独立使用透明人物与飘落装饰，SplashTheme在Activity首帧前同步应用背景，并在Android12+用官方setSplashScreenTheme登记下次冷启动主题。六预设的浅深背景与应用完全一致；任意自定义种子的系统启动底色取最近的预设，Activity首帧为精确颜色。Android12/13动态色使用相近系统中性色，Android14+与Material3同用system_background。Android10/11最早启动底色仍使用默认山茶并跟随系统明暗。参考[官方SplashScreen API](https://developer.android.com/reference/android/window/SplashScreen#setSplashScreenTheme(int))。
+
+
+### 1.5.1字幕贴底修复
+
+临时字幕与正文共用的底部留白通过布局负边距扣除，不再用仅改变绘制位置的translationY留下透明尾部。`draftSlotHeightPx()`返回真实新增布局高度，黑底在有草稿时绘制到固定草稿区域底边，草稿消失只收回背景，正式末行锚点不变。`captionWindowArea()`统一服务和预览的可用区域，只扣除实际可见系统栏及显示缺口；沉浸视频隐藏系统栏后不继续预留其历史尺寸。

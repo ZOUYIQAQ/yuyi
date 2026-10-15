@@ -130,9 +130,8 @@ internal fun FloatingSubtitlePreview(style: SubtitleStyleUiState, finalOnly: Boo
 private fun subtitleWatchingArea(context: Context): IntSize {
     if (android.os.Build.VERSION.SDK_INT >= 30) {
         val metrics = context.getSystemService(android.view.WindowManager::class.java).currentWindowMetrics
-        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
-        return IntSize((metrics.bounds.width() - insets.left - insets.right).coerceAtLeast(1),
-            (metrics.bounds.height() - insets.top - insets.bottom).coerceAtLeast(1))
+        val area = io.github.korenkrita.simulsub.captionWindowArea(metrics)
+        return IntSize(area.width().coerceAtLeast(1), area.height().coerceAtLeast(1))
     }
     val metrics = context.resources.displayMetrics
     return IntSize(metrics.widthPixels.coerceAtLeast(1), metrics.heightPixels.coerceAtLeast(1))

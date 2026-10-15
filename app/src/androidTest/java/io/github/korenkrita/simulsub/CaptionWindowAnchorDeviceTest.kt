@@ -17,6 +17,30 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /** 使用真实系统悬浮窗口逐帧核对基线；不启动录音、不调用翻译、不改变业务配置。 */
 class CaptionWindowAnchorDeviceTest {
+    /** 真实前台窗口隐藏系统栏后，字幕也必须到屏幕底部，且草稿与工具栏不能恢复抖动。 */
+    @Test fun immersiveOverlayReachesScreenBottomWithoutJitter() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val wm = context.getSystemService(WindowManager::class.java)
+        androidx.test.core.app.ActivityScenario.launch(androidx.activity.ComponentActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    activity.window.decorView.setBackgroundColor(0xFF2D3436.toInt())
+                    activity.window.insetsController!!.hide(android.view.WindowInsets.Type.systemBars())
+                }
+                val end = System.currentTimeMillis() + 5_000
+                while (wm.currentWindowMetrics.windowInsets.isVisible(android.view.WindowInsets.Type.systemBars())) {
+                    assertTrue("前台测试窗口必须实际进入沉浸模式", System.currentTimeMillis() < end)
+                    Thread.sleep(16)
+                }
+                assertEquals("隐藏系统栏后可用区域必须抵达物理屏幕底边",
+                    wm.currentWindowMetrics.bounds.bottom, captionWindowArea(wm.currentWindowMetrics).bottom)
+                realBottomOverlayNeverDrawsShiftedFinalBaseline()
+            } finally {
+                scenario.onActivity { it.window.insetsController!!.show(android.view.WindowInsets.Type.systemBars()) }
+            }
+        }
+    }
+
     /** 底部放置后只更新字幕，生产绘制守卫必须在每一帧保持正式最后一行不动。 */
     @Test fun realBottomOverlayNeverDrawsShiftedFinalBaseline() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -52,10 +76,9 @@ class CaptionWindowAnchorDeviceTest {
         try {
             instrumentation.runOnMainSync {
                 val metrics = wm.currentWindowMetrics
-                val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
-                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
-                availableHeight = metrics.bounds.height() - insets.top - insets.bottom
-                areaTop = metrics.bounds.top + insets.top
+                val area = captionWindowArea(metrics)
+                availableHeight = area.height()
+                areaTop = area.top
                 cardWidth = (metrics.bounds.width() * 0.85f).toInt()
                 origin = CaptionWindowOrigin(areaTop)
                 view = CaptionOverlayView(context, true).apply {
@@ -116,6 +139,15 @@ class CaptionWindowAnchorDeviceTest {
                 awaitFrame(frames, index + 1)
                 Thread.sleep(80)
                 assertTrue("底部悬浮窗出现偏移帧：${frames.toList()}；详情：$details", frames.all { it.second == expected })
+                if (index in listOf(0, 1)) instrumentation.runOnMainSync {
+                    view.getLocationOnScreen(screenLocation)
+                    assertEquals("有草稿时字幕窗口必须真正贴到可用区域底部", areaTop + availableHeight,
+                        screenLocation[1] + view.height)
+                    val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                    view.draw(android.graphics.Canvas(bitmap))
+                    assertTrue("系统浮窗底部不能留下透明尾部",
+                        android.graphics.Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height - 1)) > 0)
+                }
                 if (index in listOf(0, 1, 2)) {
                     val file = File(context.getExternalFilesDir(null), "qa-first-release-fixes/window-$index.png")
                     file.parentFile!!.mkdirs()
