@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -17,6 +18,20 @@ import androidx.compose.ui.unit.dp
 /** 手机按列表与编辑区顺序进入，宽屏并排展示；当前场景以文字和色调共同标识。 */
 @Composable
 internal fun ScenesScreen(state: ScenesUiState, actions: SimulSubActions, wide: Boolean) {
+    val editor = state.editor
+    val pageStateHolder = rememberSaveableStateHolder()
+    // 手机列表与编辑器结构不同，必须分开保存；平板编辑时左侧列表继续使用原状态。
+    val pageKey = if (wide) "scene-columns" else if (editor == null) "scene-list" else "scene-editor"
+    pageStateHolder.SaveableStateProvider(pageKey) {
+        PageScrollStateProvider {
+            ScenePageColumns(state, actions, wide)
+        }
+    }
+}
+
+/** 列表与表单只读取控制器草稿，滚动保存范围由外层页面容器管理。 */
+@Composable
+private fun ScenePageColumns(state: ScenesUiState, actions: SimulSubActions, wide: Boolean) {
     val editor = state.editor
     val existing = state.items.any { it.id == editor?.id }
     PageColumns(wide, first = {
@@ -73,17 +88,11 @@ private fun LazyListScope.sceneEditorItems(editor: SceneEditorUiState, actions: 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeading(if (existing) "编辑场景" else "新建场景")
             TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.name, onValueChange = { actions.onSceneDraftChange(editor.copy(name = it)) }, label = { Text("场景名称") }, enabled = enabled, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = editor.name, onValueChange = { actions.onSceneDraftChange(editor.copy(name = it)) }, label = { Text("场景名称") }, enabled = enabled, modifier = Modifier.fillMaxWidth())
             TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.background, onValueChange = { actions.onSceneDraftChange(editor.copy(background = it)) }, label = { Text("内容背景") }, supportingText = { Text("写下题材、角色、专有名词或希望保持的语气。") }, enabled = enabled, minLines = 3, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = editor.background, onValueChange = { actions.onSceneDraftChange(editor.copy(background = it)) }, label = { Text("内容背景") }, supportingText = { Text("写下题材、角色、专有名词或希望保持的语气。") }, enabled = enabled, minLines = 3, modifier = Modifier.fillMaxWidth())
             OptionPicker("术语译文语言", editor.termsLanguageId, editor.languageOptions, enabled) { actions.onSceneDraftChange(editor.copy(termsLanguageId = it)) }
             editor.message?.let { MessagePanel(it) }
             SectionHeading("固定译法", "原文写视频里出现的词，译文写希望采用的说法。")
@@ -97,21 +106,15 @@ private fun LazyListScope.sceneEditorItems(editor: SceneEditorUiState, actions: 
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("术语 ${index + 1}", style = MaterialTheme.typography.labelLarge)
                 TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),
                     value = term.original,
                     onValueChange = { value -> actions.onSceneDraftChange(editor.copy(terms = editor.terms.map { if (it.id == term.id) it.copy(original = value) else it })) },
                     label = { Text("术语原文") }, enabled = enabled, modifier = Modifier.fillMaxWidth(),
                 )
                 TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),
                     value = term.translated,
                     onValueChange = { value -> actions.onSceneDraftChange(editor.copy(terms = editor.terms.map { if (it.id == term.id) it.copy(translated = value) else it })) },
                     label = { Text("指定译法") }, enabled = enabled, modifier = Modifier.fillMaxWidth(),
@@ -127,11 +130,8 @@ private fun LazyListScope.sceneEditorItems(editor: SceneEditorUiState, actions: 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SectionHeading("生成常用术语", "使用已保存的翻译服务生成，只追加新术语。")
             TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = editor.generationCount, onValueChange = { actions.onSceneDraftChange(editor.copy(generationCount = it)) }, label = { Text("最多生成条数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = enabled, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = editor.generationCount, onValueChange = { actions.onSceneDraftChange(editor.copy(generationCount = it)) }, label = { Text("最多生成条数") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = enabled, modifier = Modifier.fillMaxWidth())
             FilledTonalButton(onClick = actions.onGenerateTerms, enabled = enabled && editor.canGenerate, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (editor.generating) "正在生成…" else "生成术语") }
             if (!editor.canGenerate && !editor.generating) SupportingText("请先保存翻译服务配置，并填写场景名称或背景。")
             if (editor.generating || editor.saving) LinearProgressIndicator(Modifier.fillMaxWidth())

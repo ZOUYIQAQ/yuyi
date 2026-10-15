@@ -19,7 +19,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.korenkrita.simulsub.models.ModelRepository
-import io.github.korenkrita.simulsub.ui.PermissionUiState
 import io.github.korenkrita.simulsub.ui.SimulSubApp
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -86,16 +85,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 读取必要授权，通知权限为可选，拒绝后仍可手动使用字幕。 */
-    private fun refreshPermissions() {
-        controller.setPermissions(listOf(
-            PermissionUiState("audio", "录制播放音频", "仅识别应用播放的媒体声音；系统会在开始时再次询问捕获范围。", checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED),
-            PermissionUiState("overlay", "显示悬浮字幕", "允许字幕显示在播放器、课程或直播应用上方。", Settings.canDrawOverlays(this)),
-            PermissionUiState("notifications", "下载与运行通知", "显示模型下载进度和字幕服务控制。", Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED, false),
-        ))
-    }
+    private fun refreshPermissions() { controller.refreshPermissions() }
 
     /** 用户点击后申请权限；已授权的音频和通知打开应用详情，悬浮字幕始终打开专项设置。 */
     private fun requestPermission(id: String) {
+        if (id == "all") {
+            continueAfterAudioPermission = false
+            overlayLauncher.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            return
+        }
         val permission = when (id) {
             "audio" -> Manifest.permission.RECORD_AUDIO
             "notifications" -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null

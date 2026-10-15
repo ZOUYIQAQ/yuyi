@@ -50,7 +50,7 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         compose.onNodeWithText("下一步").assertIsEnabled()
         scrollBodyTo("系统屏幕共享会在每次开始同传时询问，这里无需提前授权。")
         compose.onNodeWithText("系统屏幕共享会在每次开始同传时询问，这里无需提前授权。").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(listOf("权限:必需权限"), events) }
+        compose.runOnIdle { assertEquals(listOf("权限:audio"), events) }
         assertNoLaterSettings()
     }
 
@@ -266,7 +266,8 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
     private fun show(step: OnboardingStep, dirty: Boolean = false) {
         state = SimulSubUiState(onboarding = OnboardingUiState(step = step),
             live = LiveUiState(permissions = listOf(
-                PermissionUiState("必需权限", "显示悬浮字幕", "仅用于在其他应用上显示字幕。", false),
+                PermissionUiState("audio", "录制播放音频", "仅识别应用播放声音。", false),
+                PermissionUiState("overlay", "显示悬浮字幕", "仅用于在其他应用上显示字幕。", true),
                 PermissionUiState("可选权限", "可选通知权限", "不应该出现在引导。", false, required = false))),
             settings = SettingsUiState(api = if (dirty) savedApi.copy(model = "未保存模型", hasUnsavedChanges = true) else savedApi),
             models = ModelsUiState(items = listOf(

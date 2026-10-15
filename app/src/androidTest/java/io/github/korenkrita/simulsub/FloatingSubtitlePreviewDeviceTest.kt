@@ -100,7 +100,8 @@ class FloatingSubtitlePreviewDeviceTest {
             assertFalse(style.showStats)
             assertFalse(caption(stage).text.toString().contains("このV何者気になるV、他とは違うVだから"))
             assertEquals(View.GONE, status(stage).visibility)
-            assertEquals(2, subtitlePreviewLines(style).size)
+            assertEquals(2, subtitlePreviewLines(style).count { it.isFinal })
+            assertEquals(1, subtitlePreviewLines(style).count { !it.isFinal })
             assertEquals("自动正文高度必须与服务的四成上限一致", (stage.watchingHeightPx * CaptionService.MAX_CAPTION_FRAC).toInt(), caption(stage).maxHeight)
             assertEquals("耗时区必须与服务的两成上限一致", (stage.watchingHeightPx * 0.2f).toInt(), status(stage).maxHeight)
             style = style.copy(textSp = 30f, backgroundAlpha = 0.2f, paletteId = "paper", widthFraction = 0.8f,
@@ -116,12 +117,12 @@ class FloatingSubtitlePreviewDeviceTest {
             assertEquals(stage.watchingWidthPx * 0.8f, stage.captionView.measuredWidth.toFloat(), 1f)
             assertEquals(stage.watchingHeightPx * 0.2f, stage.captionView.captionHeightPx().toFloat(), 1f)
             assertEquals(10, subtitlePreviewLines(style).sumOf { it.zh.codePointCount(0, it.zh.length) })
-            assertTrue("字数额度只剩草稿时，原文应显示在黑框外", draftSource(stage).text.toString().contains("このV何者気になるV、他とは違うVだから"))
+            assertTrue("字数额度只剩草稿时，原文应显示在背景内的临时区域", draftSource(stage).text.toString().contains("このV何者気になるV、他とは違うVだから"))
             assertEquals(View.VISIBLE, status(stage).visibility)
             style = style.copy(limitMode = CaptionLimitMode.SENTENCES, maxSentences = 5, keepChars = 10)
         }
         compose.waitForIdle()
-        compose.runOnIdle { assertEquals("句数模式不得再叠加十字阈值", 5, subtitlePreviewLines(style).size) }
+        compose.runOnIdle { assertEquals("句数模式只统计定稿且不叠加十字阈值", 5, subtitlePreviewLines(style).count { it.isFinal }) }
     }
 
     /** 真实预览切换仅定稿时移除外部槽，恢复后复用同一个原生视图和透明区域。 */
@@ -140,7 +141,7 @@ class FloatingSubtitlePreviewDeviceTest {
             assertEquals(cardHeight + slotHeight, view.height)
             assertEquals(view.getChildAt(0).bottom, view.getChildAt(1).top)
             assertNull(view.getChildAt(1).background)
-            assertFalse("草稿不得出现在正式黑框里", caption(stage).text.contains("… "))
+            assertFalse("草稿不得混入正式正文", caption(stage).text.contains("… "))
             assertTrue(draftSource(stage).text.contains("このV何者気になるV、他とは違うVだから"))
             finalOnly = true
         }
@@ -256,7 +257,7 @@ class FloatingSubtitlePreviewDeviceTest {
     private fun status(stage: SubtitlePreviewStage): TextView =
         ((stage.captionView.getChildAt(0) as FrameLayout).getChildAt(0) as LinearLayout).getChildAt(1) as TextView
 
-    /** 获取透明草稿槽中的原文视图，验证其与正式黑框分离。 */
+    /** 读取统一背景内的草稿原文视图，验证其不混入正式正文。 */
     private fun draftSource(stage: SubtitlePreviewStage): TextView =
         (stage.captionView.getChildAt(1) as LinearLayout).getChildAt(0) as TextView
 }

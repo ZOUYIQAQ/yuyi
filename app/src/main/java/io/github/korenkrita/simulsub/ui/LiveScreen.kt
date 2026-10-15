@@ -11,6 +11,11 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.heading
 
 /** 同传页把会话主操作、语言配置与字幕分开编排，所有动作仍交回控制器。 */
 @Composable
@@ -21,6 +26,9 @@ internal fun LiveScreen(state: LiveUiState, actions: SimulSubActions, wide: Bool
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
     PageColumns(wide, first = {
+        if (missingPermission != null) item("permissions") {
+            LivePermissionWarning(state.permissions.filter { it.required && !it.granted }, !state.busy, actions)
+        }
         item("session") {
             Card(
                 modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
@@ -57,11 +65,8 @@ internal fun LiveScreen(state: LiveUiState, actions: SimulSubActions, wide: Bool
                 }
                 if (customLanguageOpen) {
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),
                         value = state.customTarget, onValueChange = actions.onCustomTargetChange, enabled = editable,
                         label = { Text("自定义字幕语言") }, supportingText = { Text("输入语言名称后应用。") }, modifier = Modifier.fillMaxWidth(),
                     )
@@ -86,20 +91,40 @@ internal fun LiveScreen(state: LiveUiState, actions: SimulSubActions, wide: Bool
                 }
             }
         }
-        if (missingPermission != null) item("permissions") {
-            SettingsCard {
-                SectionHeading("需要系统权限", "允许录音与悬浮字幕后即可开始。")
-                state.permissions.filter { it.required && !it.granted }.forEach { permission ->
-                    Text(permission.title, style = MaterialTheme.typography.titleSmall)
-                    SupportingText(permission.description)
-                    FilledTonalButton(onClick = { actions.onPermission(permission.id) }, enabled = !state.busy,
-                        modifier = Modifier.heightIn(min = 48.dp)) { Text("去允许") }
-                }
-            }
-        }
     })
         }
         LivePrimaryAction(state, actions)
+    }
+}
+
+/** 必需授权在滚动内容最前使用主题强调底色，明暗主题均沿用配对内容色。 */
+@Composable
+private fun LivePermissionWarning(permissions: List<PermissionUiState>, enabled: Boolean, actions: SimulSubActions) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("live-permission-warning"),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Security, contentDescription = null)
+                Text("需要系统权限", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite })
+            }
+            Text("允许以下必需权限后即可开始。", style = MaterialTheme.typography.bodyMedium)
+            permissions.forEach { permission ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(permission.title, style = MaterialTheme.typography.titleSmall)
+                    Text(permission.description, style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = { actions.onPermission(permission.id) }, enabled = enabled,
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("去允许") }
+                }
+            }
+            TextButton(onClick = { actions.onPermission("all") }, enabled = enabled,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                modifier = Modifier.heightIn(min = 48.dp)) { Text("查看全部权限") }
+        }
     }
 }
 

@@ -621,6 +621,8 @@ class CaptionService : Service() {
         }
         var cardW = (area().width() * prefs.widthFrac).toInt()
         var toolbarShown = false
+        val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow())
+        overlayToolbarWindow = toolbarWindow
         val lp = WindowManager.LayoutParams(
             cardW,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -632,14 +634,14 @@ class CaptionService : Service() {
             x = prefs.overlayX.takeIf { it >= 0 } ?: ((area().width() - cardW) / 2)
             y = prefs.overlayY.takeIf { it >= 0 } ?: (area().height() * 2 / 3)
         }
-        // Where the user put the card (its top-left in the usable area). The window is derived from it on every
-        // layout: closed, the window is exactly the card, so no invisible area blocks touches to the app underneath;
-        // open, it also covers the toolbar, which is centred under the card but shifted to stay on screen (and put
-        // above the card when there is no room below). The card itself never moves when the toolbar opens.
+        // 字幕窗口只容纳正文和固定草稿预算；工具栏使用独立浮层，不移动字幕。
         var cardX = lp.x; var cardY = lp.y
         var shownX = cardX; var shownY = cardY // where layout() last put the card (cardX / cardY clamped to the screen)
-        // 黑底的底边独立于框外草稿预留，自动伸缩时向上展开。
-        var blackBottomAnchor: Int? = null
+        // 只固定最后一行定稿的基线，草稿和耗时变化不能重新贴屏或改写锚点。
+        val baselineAnchor = CaptionBaselineAnchor(prefs.overlayBaselineForArea(area().width(), area().height()))
+        var layoutGuard: CaptionLayoutGuard? = null
+        val screenLocation = IntArray(2)
+        val windowOrigin = CaptionWindowOrigin(if (android.os.Build.VERSION.SDK_INT >= 30) area().top else null)
         fun layout() {
             val a = area(); val sw = a.width(); val sh = a.height()
             cardW = cardW.coerceIn((sw * Prefs.MIN_WIDTH).toInt(), sw)
@@ -653,32 +655,30 @@ class CaptionService : Service() {
             // cardX / cardY stay what the user chose; only the shown position is clamped (a rotation or a taller card
             // must not overwrite the placement, so rotating back puts the card where it was)
             shownX = cardX.coerceIn(0, sw - cardW)
-            shownY = ((blackBottomAnchor ?: (cardY + cardH)) - cardH).coerceIn(0, (sh - blockH).coerceAtLeast(0))
-            blackBottomAnchor = shownY + cardH
-            val tbW = if (toolbarShown) v.toolbarWidthPx().coerceAtMost(sw) else 0
-            val tbH = if (toolbarShown) v.toolbarHeightPx() else 0
-            val tbX = (shownX + (cardW - tbW) / 2).coerceIn(0, sw - tbW)
-            // below if it fits, else above if that fits; on a short screen with room on neither side, the roomier
-            // side, the toolbar overlapping the card's edge by what is missing (it draws over the card)
-            val below = sh - (shownY + blockH); val aboveRoom = shownY
-            val above = toolbarShown && tbH > below && (tbH <= aboveRoom || aboveRoom > below)
-            val overlap = if (!toolbarShown) 0 else (tbH - if (above) aboveRoom else below).coerceAtLeast(0)
-            val left = if (toolbarShown) minOf(shownX, tbX) else shownX
-            val right = if (toolbarShown) maxOf(shownX + cardW, tbX + tbW) else shownX + cardW
-            v.placeCard(shownX - left, tbX - left, above, overlap)
-            lp.x = left; lp.width = right - left
-            lp.y = if (above) shownY - (tbH - overlap) else shownY
+            val baselineOffset = v.finalLineBaselinePx()
+            shownY = baselineAnchor.position(cardY, baselineOffset, sh, blockH)
+            v.placeCard(0, 0, false, 0)
+            lp.x = shownX; lp.width = cardW
+            lp.y = shownY
+            layoutGuard?.positioned(baselineOffset, blockH)
             if (v.isAttachedToWindow) wm.updateViewLayout(v, lp)
+            toolbarWindow.update(toolbarShown, shownX, shownY, cardW, blockH, sw, sh)
         }
         // rotation / resize: the caption height may not change, so re-fit explicitly from the saved width fraction
         // caption height from the saved fraction (0 = fit the text); kept within the 40 % cap by the view
         fun applyHeight() = v.setCaptionHeight((area().height() * prefs.heightFrac).toInt())
         var captionH = 0 // px while a resize drag runs
-        onDisplayChanged = { blackBottomAnchor = null; cardW = (area().width() * prefs.widthFrac).toInt(); applyHeight(); layout() }
+        onDisplayChanged = {
+            baselineAnchor.reset()
+            windowOrigin.reset(if (android.os.Build.VERSION.SDK_INT >= 30) area().top else null)
+            cardW = (area().width() * prefs.widthFrac).toInt()
+            applyHeight(); layout()
+            baselineAnchor.baseline?.let { prefs.saveOverlayBaseline(it, area().width(), area().height()) }
+        }
         // gestures start from where the card is shown, and what they end on is the new placement
         v.onMove = { dx, dy ->
             cardX = shownX + dx; cardY = shownY + dy
-            blackBottomAnchor = cardY + v.measureCardHeight(cardW)
+            baselineAnchor.reset()
             layout()
         }
         // a corner drag moves that corner; the opposite edges stay where they are. The whole card rectangle is
@@ -702,25 +702,39 @@ class CaptionService : Service() {
             if (newH > limit) { want = (want - (newH - limit)).coerceAtLeast(v.minCaptionPx()); v.setCaptionHeight(want) }
             captionH = want
             cardY = if (top) fixedBottom - v.measureCardHeight(cardW) else fixedTop
-            blackBottomAnchor = cardY + v.measureCardHeight(cardW)
+            baselineAnchor.reset()
             layout()
         }
         v.onMoveEnd = {
             cardX = shownX; cardY = shownY
             prefs.overlayX = cardX; prefs.overlayY = cardY; prefs.widthFrac = cardW.toFloat() / area().width()
+            baselineAnchor.baseline?.let { prefs.saveOverlayBaseline(it, area().width(), area().height()) }
             if (captionH > 0) { prefs.heightFrac = captionH.toFloat() / area().height(); captionH = 0 }
         }
         v.onStyleChanged = { prefs.setStyle(v.textSp, v.bgAlpha) }
-        v.onToolbarShown = { toolbarShown = it; layout() }
+        v.onToolbarShown = {
+            toolbarShown = it
+            val bounds = area()
+            toolbarWindow.update(it, shownX, shownY, cardW, v.measureCaptionBlockHeight(cardW), bounds.width(), bounds.height())
+        }
         v.onStop = { stopSelf() }
         v.setFinalOnly(prefs.finalOnly)
         v.onToggleMode = { prefs.finalOnly = !prefs.finalOnly } // the listener below updates the button and captions
         v.setShown(prefs.showJa, prefs.showStats)
         v.onToggleJa = { prefs.showJa = !prefs.showJa }
         v.onToggleStats = { prefs.showStats = !prefs.showStats }
-        // taller text / toolbar / rotation: pull the window back on screen once the new height is known
-        v.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) v.post { layout() }
+        // 绘制前纠正位置，包含外框高度没变但正文重排的情况，避免延后一帧的闪动。
+        layoutGuard = CaptionLayoutGuard(
+            baselineOffset = { v.finalLineBaselinePx() },
+            reservedHeight = { v.measureCaptionBlockHeight(cardW) },
+            position = { layout() },
+            aligned = {
+                v.getLocationOnScreen(screenLocation)
+                windowOrigin.aligned(screenLocation[1], lp.y, v.finalLineBaselineInWindowPx(), baselineAnchor.baseline ?: 0)
+            },
+        ).also { guard ->
+            overlayLayoutGuard = guard
+            v.viewTreeObserver.addOnPreDrawListener(guard)
         }
         // settings changed on the home screen while subtitles run
         prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -750,13 +764,15 @@ class CaptionService : Service() {
         }.also { prefs.listen(it) }
         v.setCardWidth(cardW)
         applyHeight()
-        wm.addView(v, lp)
         overlay = v
-        layout()
         refresh()
+        layout()
+        wm.addView(v, lp)
     }
 
     private var onDisplayChanged: (() -> Unit)? = null
+    private var overlayLayoutGuard: CaptionLayoutGuard? = null
+    private var overlayToolbarWindow: CaptionToolbarWindow? = null
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -785,7 +801,15 @@ class CaptionService : Service() {
         projection = null
         prefListener?.let { prefs.unlisten(it) }; prefListener = null
         onDisplayChanged = null
-        overlay?.let { getSystemService(WindowManager::class.java).removeView(it) }
+        overlayToolbarWindow?.dismiss()
+        overlayToolbarWindow = null
+        overlay?.let { view ->
+            overlayLayoutGuard?.let { guard ->
+                if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnPreDrawListener(guard)
+            }
+            getSystemService(WindowManager::class.java).removeView(view)
+        }
+        overlayLayoutGuard = null
         overlay = null
         super.onDestroy()
     }

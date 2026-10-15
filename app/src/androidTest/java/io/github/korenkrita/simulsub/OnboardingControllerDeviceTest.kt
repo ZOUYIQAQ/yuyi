@@ -43,7 +43,7 @@ class OnboardingControllerDeviceTest {
     private lateinit var actions: SimulSubActions
     private lateinit var prefs: Prefs
     private val missingPermissions = listOf(
-        PermissionUiState("record", "测试录音权限", "录音说明", false),
+        PermissionUiState("audio", "测试录音权限", "录音说明", false),
         PermissionUiState("overlay", "测试悬浮权限", "悬浮说明", false),
         PermissionUiState("notification", "测试通知权限", "可选说明", false, required = false),
     )
@@ -125,13 +125,44 @@ class OnboardingControllerDeviceTest {
     @Test fun permissionNextRequiresEveryRequiredGrant() = onMain {
         actions.onOnboardingNext()
         assertStep(OnboardingStep.PERMISSIONS)
-        controller.setPermissions(missingPermissions.map { if (it.id == "record") it.copy(granted = true) else it })
+        controller.setPermissions(missingPermissions.map { if (it.id == "audio") it.copy(granted = true) else it })
         actions.onOnboardingNext()
         assertStep(OnboardingStep.PERMISSIONS)
         controller.setPermissions(missingPermissions.map { if (it.required) it.copy(granted = true) else it })
         actions.onOnboardingNext()
         assertStep(OnboardingStep.API)
         assertFalse(completed())
+    }
+
+    /** 空列表或仅可选通知都不能冒充必需授权，也不能因为已有接口而跳过首步。 */
+    @Test fun emptyAndPartialPermissionSnapshotsCannotSkipFirstStep() = onMain {
+        prefs.saveByok("https://example.com/v1", "已存模型", "测试密钥", "", emptyList())
+        createController()
+        for (snapshot in listOf(emptyList(), missingPermissions.filter { !it.required },
+            missingPermissions.filter { it.id == "audio" }.map { it.copy(granted = true) })) {
+            controller.setPermissions(snapshot)
+            val permissions = controller.state.value.live.permissions
+            assertTrue(permissions.any { it.id == "audio" && it.required })
+            assertTrue(permissions.any { it.id == "overlay" && it.required && !it.granted })
+            actions.onOnboardingNext()
+            assertStep(OnboardingStep.PERMISSIONS)
+            assertFalse(controller.state.value.live.canStart)
+            assertFalse(completed())
+        }
+        actions.onOnboardingSkip()
+        assertStep(OnboardingStep.API)
+    }
+
+    /** 尚未收到 Activity 回调时，控制器首个状态就包含系统实际录音与悬浮窗权限。 */
+    @Test fun coldControllerReadsSystemPermissionsBeforeActivityCallback() = onMain {
+        store.clear()
+        val cold = AppController(application)
+        store.put("冷启动权限", cold)
+        val permissions = cold.state.value.live.permissions
+        assertEquals(context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED, permissions.single { it.id == "audio" }.granted)
+        assertEquals(android.provider.Settings.canDrawOverlays(context), permissions.single { it.id == "overlay" }.granted)
+        assertEquals(OnboardingStep.PERMISSIONS, cold.state.value.onboarding?.step)
     }
 
     /** 合法草稿不能冒充已存接口；显式保存后继续编辑仍受阻，放弃恢复后才允许前进。 */

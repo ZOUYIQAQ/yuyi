@@ -45,7 +45,7 @@ class RefinementDeviceTest {
         assertEquals(listOf("X-Key" to "old-header-key"), initial.headers.map { it.name to it.value })
         actions.onTestApi()
         assertTrue("旧端点应处于探测状态", controller.state.value.settings.api.testing)
-        assertNull("探测前保存应把密钥草稿恢复为保留已存密钥", controller.state.value.settings.api.key)
+        assertEquals("探测前应回填已存密钥", "old-api-key", controller.state.value.settings.api.key)
         assertTrue("探测前保存不能丢失已存密钥", controller.state.value.settings.api.hasSavedKey)
         val oldJob = AppController::class.java.getDeclaredField("probeJob").apply { isAccessible = true }.get(controller) as Job
         actions.onApiDraftChange(controller.state.value.settings.api.copy(url = "https://127.0.0.1:1/provider-b/v1"))
@@ -94,7 +94,7 @@ class RefinementDeviceTest {
             actions.onSaveApi()
             assertEquals("翻译配置已保存", controller.state.value.settings.api.message?.text)
             assertEquals(key ?: savedKey, prefs.byokKey)
-            assertNull("保存后密钥草稿应恢复为保留已存密钥", controller.state.value.settings.api.key)
+            assertEquals("保存后应保留实际密钥值供用户核对", key ?: savedKey, controller.state.value.settings.api.key)
             assertTrue("保存后应明确标记已有密钥", controller.state.value.settings.api.hasSavedKey)
         }
         assertEquals("draft-api-key", prefs.byokKey)

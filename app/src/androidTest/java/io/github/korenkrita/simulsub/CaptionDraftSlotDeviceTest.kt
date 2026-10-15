@@ -17,6 +17,107 @@ import org.junit.runner.RunWith
 /** 只测真实原生布局和像素，不启动服务、不请求悬浮窗权限、不修改用户数据。 */
 @RunWith(AndroidJUnit4::class)
 class CaptionDraftSlotDeviceTest {
+    /** 用真实TextView的最后一行基线核对宿主定位，草稿、诊断与正式内容换行都不能重设锚点。 */
+    @Test fun actualFinalBaselineRemainsFixedAcrossTransientAndFinalUpdates() = onMain {
+        for (fixed in listOf(false, true)) for (original in listOf(false, true)) {
+            val view = overlay(original)
+            val width = px(view, 260)
+            val height = px(view, 700)
+            view.setWindowHeightLimit(height)
+            view.setMaxContentHeight(height * 2 / 5, height / 5)
+            view.setCaptionHeight(if (fixed) px(view, 100) else 0)
+            val anchor = CaptionBaselineAnchor()
+            val host = FrameLayout(view.context)
+            host.addView(view, FrameLayout.LayoutParams(width, FrameLayout.LayoutParams.WRAP_CONTENT))
+            var baseline: Int? = null
+            val frames = listOf(
+                Triple("已经定稿", "", null),
+                Triple("已经定稿", "临时字幕", null),
+                Triple("已经定稿", "", "耗时信息\n状态第二行"),
+                Triple("已经定稿", "临时字幕".repeat(60), null),
+                Triple("换行后的正式文本".repeat(80), "", null),
+                Triple("短定稿", "", null),
+            )
+            for ((final, draft, stats) in frames) {
+                val lines = buildList {
+                    add(CaptionOverlayView.Line(final, if (original) "正式原文" else null, true))
+                    if (draft.isNotEmpty()) add(CaptionOverlayView.Line(draft, if (original) "临时原文" else null, false))
+                }
+                view.setLines(lines, stats)
+                view.setCardWidth(width)
+                view.measureCardHeight(width)
+                val top = anchor.position(height, view.finalLineBaselinePx(), height, view.measureCaptionBlockHeight(width))
+                (view.layoutParams as FrameLayout.LayoutParams).topMargin = top
+                host.measure(exact(width), exact(height))
+                host.layout(0, 0, width, height)
+                val text = body(view)
+                val placed = text.layout
+                val actual = view.top + view.getChildAt(0).top + text.top + text.baseline +
+                    placed.getLineBaseline(placed.lineCount - 1) - placed.getLineBaseline(0) - text.scrollY
+                if (baseline == null) baseline = actual else assertEquals("绿色定稿的最后一行不能因内容变化移动：$fixed/$original", baseline, actual)
+                assertEquals(anchor.baseline, actual)
+            }
+        }
+    }
+
+    /** 草稿必须被连续黑底包住；背景向下增长，定稿和预留窗口不能跟着移动。 */
+    @Test fun sharedBackgroundGrowsDownIntoReservedSpaceWithoutMovingFinals() = onMain {
+        for (original in listOf(false, true)) {
+            val view = overlay(original)
+            val width = px(view, 300)
+            val final = CaptionOverlayView.Line("定稿保持原位", if (original) "確定済み" else null, true)
+            view.setLines(listOf(final), null)
+            layout(view, width)
+            val stable = listOf(view.height, view.getChildAt(0).top, view.getChildAt(0).bottom, body(view).top, body(view).height)
+            val slot = view.getChildAt(1) as LinearLayout
+            val draft = slot.getChildAt(1) as TextView
+            val sampleX = px(view, 20)
+            val sampleY = view.getChildAt(0).bottom + px(view, 2)
+            val empty = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(empty))
+            assertEquals("没有草稿时只预留伸展空间", 0, Color.alpha(empty.getPixel(sampleX, sampleY)))
+            var shortBackgroundBottom = 0
+            for (text in listOf("短草稿", "实时翻译需要自然向下折行。".repeat(20))) {
+                view.setLines(listOf(final, CaptionOverlayView.Line(text, if (original) "認識中" else null, false)), null)
+                layout(view, width)
+                assertEquals("草稿出现不能把定稿往上顶", stable,
+                    listOf(view.height, view.getChildAt(0).top, view.getChildAt(0).bottom, body(view).top, body(view).height))
+                val bitmap = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(Canvas(bitmap))
+                assertTrue("原文和草稿必须在同一个背景内", Color.alpha(bitmap.getPixel(sampleX, sampleY)) > 0)
+                assertTrue("正文和草稿之间不能留下透明断缝", Color.alpha(bitmap.getPixel(sampleX, slot.top)) > 0)
+                val bottom = (0 until bitmap.height).last { Color.alpha(bitmap.getPixel(width / 2, it)) > 0 }
+                if (shortBackgroundBottom == 0) shortBackgroundBottom = bottom
+                else assertEquals("长短草稿都只能显示一行，背景高度保持一致", shortBackgroundBottom, bottom)
+            }
+            view.setLines(listOf(final), null)
+            layout(view, width)
+            val cleared = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(cleared))
+            assertEquals(0, Color.alpha(cleared.getPixel(sampleX, sampleY)))
+            assertEquals(stable.first(), view.height)
+        }
+    }
+
+    /** 临时字幕紧随正式正文；开启原文仍只有一行，不能恢复重复留白或多行草稿。 */
+    @Test fun oneLineDraftSitsImmediatelyAfterFinalText() = onMain {
+        for (original in listOf(false, true)) {
+            val view = overlay(original)
+            view.setLines(listOf(CaptionOverlayView.Line("正式字幕", null, true),
+                CaptionOverlayView.Line("临时译文".repeat(100), if (original) "仮の原文" else null, false)), null)
+            layout(view, px(view, 300))
+            val card = view.getChildAt(0) as FrameLayout
+            val column = card.getChildAt(0) as LinearLayout
+            val slot = view.getChildAt(1) as LinearLayout
+            val draft = slot.getChildAt(1) as TextView
+            val finalBottom = card.top + column.top + body(view).bottom
+            val draftTop = slot.top + slot.translationY.toInt() + draft.top
+            assertEquals("小字幕只保留自然的2dp行间距", px(view, 2), draftTop - finalBottom)
+            assertEquals(1, draft.lineCount)
+            assertEquals(0, (slot.getChildAt(0) as TextView).height)
+        }
+    }
+
     /** 低横屏与200%字号同时出现时，三块内容必须共享总高度预算，不把透明槽挤出屏幕。 */
     @Test fun shortLandscapeBudgetContainsCardStatusAndDraftAtLargeFont() = onMain {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -127,7 +228,7 @@ class CaptionDraftSlotDeviceTest {
         }
     }
 
-    /** 超长草稿保留末尾完整行，原文有独立固定一行，字号变化重新计算预留。 */
+    /** 超长草稿仅保留最新完整一行，原文合并其中，字号变化重新计算固定预算。 */
     @Test fun longDraftStaysInsideSlotAndReflowsOnStyleChanges() = onMain {
         val view = overlay(true)
         view.setLines(listOf(CaptionOverlayView.Line("很长的草稿。".repeat(100) + "最新结尾", "原文".repeat(100), false)), null)
@@ -137,9 +238,10 @@ class CaptionDraftSlotDeviceTest {
             val slot = view.getChildAt(1) as LinearLayout
             val source = slot.getChildAt(0) as TextView
             val draft = slot.getChildAt(1) as TextView
-            assertTrue(source.height > 0)
-            assertTrue(draft.text.endsWith("最新结尾"))
-            assertTrue(draft.lineCount <= 2)
+            assertEquals("原文不再独占额外一行", 0, source.height)
+            assertTrue("字号=$font，宽=$widthDp，高=${draft.height}，排版高=${draft.layout.height}，草稿=${draft.text}", draft.text.isNotEmpty() && draft.text.endsWith("尾") && ("很长的草稿。".repeat(100) + "最新结尾").endsWith(draft.text.toString()))
+            assertEquals("临时字幕最多一行", 1, draft.lineCount)
+            assertTrue("临时字幕须贴近正文，不能叠加底部留白", slot.translationY < 0)
             assertTrue("草稿必须整行容纳在透明区域内", draft.layout.height <= draft.height)
             assertTrue(draft.bottom <= slot.height)
             assertEquals(View.VISIBLE, draft.visibility)

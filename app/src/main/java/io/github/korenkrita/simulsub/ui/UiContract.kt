@@ -38,6 +38,16 @@ data class SimulSubUiState(
 /** 权限按钮只派发标识；授权结果由系统回到控制器后重新传入。 */
 data class PermissionUiState(val id: String, val title: String, val description: String, val granted: Boolean, val required: Boolean = true)
 
+/** 必需项固定存在；系统尚未返回授权快照时按未授权展示，不能把空列表当作全部允许。 */
+internal fun List<PermissionUiState>.withRequiredPermissions(): List<PermissionUiState> {
+    val required = listOf(
+        PermissionUiState("audio", "录制播放音频", "仅识别应用播放的媒体声音；系统会在开始时再次询问捕获范围。", false),
+        PermissionUiState("overlay", "显示悬浮字幕", "允许字幕显示在播放器、课程或直播应用上方。", false),
+    )
+    return required.map { item -> firstOrNull { it.id == item.id }?.copy(required = true) ?: item } +
+        filterNot { item -> required.any { it.id == item.id } }
+}
+
 /** 每句字幕保留原文和译文；未定稿状态与真实计时信息由服务提供。 */
 data class CaptionUiState(val id: String, val original: String, val translated: String, val isDraft: Boolean = false, val detail: String = "")
 
@@ -141,6 +151,8 @@ data class TranslationApiUiState(
     /** 只有本次真实测试成功的完整地址才可由页面按钮确认应用。 */
     val suggestedUrl: String = "",
     val hasUnsavedChanges: Boolean = false,
+    /** 来自持久化配置的就绪状态，草稿合法不代表已保存。 */
+    val hasSavedConfiguration: Boolean = false,
 )
 
 /** 自定义请求头以稳定标识编辑，合法性与持久化由控制器校验。 */
@@ -165,7 +177,7 @@ data class SubtitleStyleUiState(
     val minTextSp: Float = 10f,
     val maxTextSp: Float = 40f,
     val minWidthFraction: Float = 0.4f,
-    /** 显示句数包含草稿；keepSentences仅用于旧配置迁移，不参与新版保留策略。 */
+    /** 显示句数只统计正式字幕，临时草稿另计；keepSentences仅用于旧配置迁移。 */
     val maxSentences: Int = maxOf(3, keepSentences.coerceIn(1, 10)),
     val limitMode: CaptionLimitMode = CaptionLimitMode.SENTENCES,
 )

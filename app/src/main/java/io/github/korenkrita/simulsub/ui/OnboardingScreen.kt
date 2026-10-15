@@ -20,10 +20,10 @@ internal fun OnboardingScreen(state: SimulSubUiState, actions: SimulSubActions) 
     val onboarding = state.onboarding ?: return
     val step = onboarding.step
     var pendingStep by remember(step) { mutableStateOf<(() -> Unit)?>(null) }
-    val permissions = state.live.permissions.filter { it.required }
+    val permissions = state.live.permissions.withRequiredPermissions().filter { it.required }
     val ready = when (step) {
         OnboardingStep.PERMISSIONS -> permissions.all { it.granted }
-        OnboardingStep.API -> onboarding.apiReady
+        OnboardingStep.API -> onboarding.apiReady && !state.settings.api.hasUnsavedChanges
         OnboardingStep.MODEL -> onboarding.modelReady
     }
 

@@ -19,7 +19,6 @@ internal fun UpdateSettings(state: SettingsUiState, actions: SimulSubActions, wi
             SectionHeading("更新偏好")
             ToggleSetting("启动时检查更新", "每次启动检查一次，发现正式新版后提醒。", updates.autoCheck,
                 onChange = actions.onAutoUpdateChange)
-            SupportingText("关闭后仍可手动检查。更新由浏览器下载，安装需在系统中确认。")
             if (updates.skippedVersion.isNotEmpty()) SupportingText("已跳过版本：${updates.skippedVersion}")
             if (updates.laterVersion.isNotEmpty()) SupportingText("已延后提醒的版本：${updates.laterVersion}")
             if (updates.skippedVersion.isNotEmpty() || updates.laterVersion.isNotEmpty()) {

@@ -1,7 +1,11 @@
 package io.github.korenkrita.simulsub
 
 import android.app.Application
+import android.Manifest
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.korenkrita.simulsub.models.*
@@ -54,12 +58,12 @@ class AppController internal constructor(application: Application,
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         viewModelScope.launch { refresh() }
     }
-    private var permissions = emptyList<PermissionUiState>()
+    private var permissions = emptyList<PermissionUiState>().withRequiredPermissions()
 
     init {
         prefs.listen(prefListener)
         mutableState.update { it.copy(settings = it.settings.copy(api = savedApi())) }
-        refresh()
+        refreshPermissions()
         viewModelScope.launch { models.state.collect { refresh() } }
         viewModelScope.launch { CaptionService.state.collect { refresh() } }
         refreshRecords()
@@ -154,7 +158,7 @@ class AppController internal constructor(application: Application,
         },
         onDiscardApiDraft = { cancelProbe(); updateApi { savedApi() } },
         onSubtitleStyleChange = ::saveStyle,
-        onResetOverlayPosition = { prefs.overlayX = -1; prefs.overlayY = -1; message("字幕位置将在下次启动同传时恢复默认") },
+        onResetOverlayPosition = { prefs.overlayX = -1; prefs.overlayY = -1; prefs.overlayBaselineY = -1; message("字幕位置将在下次启动同传时恢复默认") },
         onThemeColorChange = { id ->
             if (id == "custom" || ThemePalettes.entries.any { it.id == id }) appearance.edit().putString("color", id).putBoolean("dynamic", false).apply()
             updateLauncherTheme(); refresh()
@@ -217,7 +221,21 @@ class AppController internal constructor(application: Application,
     }
 
     /** 接收系统授权状态，只展示系统实际授予的结果。 */
-    fun setPermissions(value: List<PermissionUiState>) { permissions = value; refresh() }
+    fun setPermissions(value: List<PermissionUiState>) { permissions = value.withRequiredPermissions(); refresh() }
+
+    /** 冷启动与授权返回共用系统实值；不缓存本次会话的屏幕捕获授权。 */
+    fun refreshPermissions() {
+        val context = getApplication<Application>().applicationContext
+        setPermissions(emptyList<PermissionUiState>().withRequiredPermissions().map { permission ->
+            permission.copy(granted = when (permission.id) {
+                "audio" -> context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                "overlay" -> Settings.canDrawOverlays(context)
+                else -> false
+            })
+        } + PermissionUiState("notifications", "下载与运行通知", "显示模型下载进度和字幕服务控制。",
+            Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
+            required = false))
+    }
 
     /** 引导不会隐式保存或下载；未准备好可明确跳过，最后一步结束后不再自动出现。 */
     private fun advanceOnboarding(skip: Boolean) {
@@ -383,10 +401,11 @@ class AppController internal constructor(application: Application,
     /** 格式化真实字节数，使用二进制单位。 */
     private fun size(bytes: Long): String = "%.1f MiB".format(bytes / 1048576.0)
 
-    /** 读取已保存配置；密钥不回填输入框，用保留标记表示。 */
+    /** 从加密存储恢复已保存值，保存与页面重建后仍能核对密钥，避免空白被误认为保存失败。 */
     private fun savedApi() = TranslationApiUiState(
         presetId = TranslationPresets.match(prefs.byokUrl),
-        url = prefs.byokUrl, model = prefs.byokModel, hasSavedKey = !prefs.byokKey.isNullOrBlank(),
+        url = prefs.byokUrl, model = prefs.byokModel, key = prefs.byokKey, hasSavedKey = !prefs.byokKey.isNullOrBlank(),
+        hasSavedConfiguration = prefs.byokReady,
         userAgent = prefs.byokUserAgent,
         headers = prefs.byokHeaders.map { HeaderUiState(UUID.randomUUID().toString(), it.first, it.second) },
         resolvedUrl = ByokTranslator.chatUrl(prefs.byokUrl).second.orEmpty(),
@@ -422,7 +441,8 @@ class AppController internal constructor(application: Application,
                 headers = if (endpointChanged) emptyList() else draft.headers,
                 userAgent = if (endpointChanged) "" else draft.userAgent,
                 suggestedUrl = "",
-                message = if (endpointChanged) UiMessage("服务地址已变更，请填写对应密钥；旧密钥和请求头不会带入。") else draft.message,
+                message = if (endpointChanged) UiMessage("服务地址已变更，请填写对应密钥；旧密钥和请求头不会带入。")
+                    else draft.message.takeUnless { it == previous.message },
             )
         }
     }
@@ -436,7 +456,13 @@ class AppController internal constructor(application: Application,
         val problem = error ?: if (url == null) "翻译地址无效" else if (draft.model.isBlank()) "请填写模型 ID" else headerError
         if (problem != null) { updateApi { it.copy(message = UiMessage(problem, true)) }; return false }
         cancelProbe()
-        prefs.saveByok(draft.url, draft.model, draft.key, draft.userAgent, headers)
+        // 新端点没有可保留的密钥时，即使输入框留空也必须清除旧端点凭据。
+        val key = draft.key ?: if (draft.hasSavedKey) null else ""
+        runCatching { prefs.saveByok(draft.url, draft.model, key, draft.userAgent, headers) }
+            .onFailure { error ->
+                updateApi { it.copy(message = UiMessage("翻译配置保存失败：${error.message ?: "请重试"}", true)) }
+                return false
+            }
         updateApi { savedApi().copy(message = UiMessage("翻译配置已保存")) }
         refresh()
         return true

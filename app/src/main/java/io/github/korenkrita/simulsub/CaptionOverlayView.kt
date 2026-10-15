@@ -4,6 +4,7 @@ import io.github.korenkrita.simulsub.ServiceStatus.Light
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Canvas
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
@@ -36,7 +37,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private val card = FrameLayout(ctx)
     private val text = CaptionTextView(ctx)
     private val stats = TextView(ctx)
-    /** 草稿区是黑框的兄弟视图，背景保持透明，尺寸只随样式和原文开关变化。 */
+    /** 草稿布局预留伸展空间，由统一背景包住可见文字，不改变定稿的位置。 */
     private val draftSlot = LinearLayout(ctx)
     private val draftSource = TextView(ctx)
     private val draftText = CaptionTextView(ctx)
@@ -46,6 +47,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private val corners = List(4) { android.widget.ImageView(ctx) }
     private val unlockBtn = ImageButton(ctx)
     private val toolbar = LinearLayout(ctx)
+    private var externalToolbar = false
     private val bg = GradientDrawable().apply { cornerRadius = dp(12f) }
 
     var textSp = 13f; private set
@@ -71,7 +73,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         minWidth = dp(48f).toInt()
         setOnClickListener { onToggleMode(); bumpToolbarTimer() }
     }
-    /** 同步工具栏模式及黑框外的草稿预留；仅定稿模式不占用草稿空间。 */
+    /** 同步工具栏与草稿伸展预算；仅定稿模式不占用草稿空间。 */
     fun setFinalOnly(v: Boolean) {
         setDraftSlotEnabled(!v)
         modeBtn.text = if (v) "说完再出" else "边听边出"
@@ -99,7 +101,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         b.setTextColor(if (on) Color.WHITE else 0xFF8B8B94.toInt())
         b.contentDescription = if (on) "${what}：开，点一下关掉" else "${what}：关，点一下打开"
     }
-    /** 同步原文和用时开关；原文预留高度由开关决定，不由当前草稿内容决定。 */
+    /** 同步原文和用时开关；临时原文与译文始终合并在同一行。 */
     fun setShown(ja: Boolean, stats: Boolean) {
         showSwitch(jaBtn, ja, "显示原文"); showSwitch(statsBtn, stats, "显示识别和翻译用时")
         if (draftOriginalShown != ja) {
@@ -109,7 +111,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         }
     }
 
-    /** 显式启用黑框外草稿槽；不依赖当前有没有草稿，宿主需重新计算窗口避让。 */
+    /** 显式启用草稿伸展预算；不依赖当前有没有草稿，宿主预先避让下沿。 */
     fun setDraftSlotEnabled(enabled: Boolean) {
         if (draftSlotEnabled == enabled) return
         draftSlotEnabled = enabled
@@ -117,10 +119,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         setLines(lastLines, lastStats)
     }
 
-    /** 窗口真正额外占用的透明草稿高度，包含黑框与草稿间距，不计工具栏。 */
+    /** 窗口固定预留的草稿高度，空闲时不绘制背景，不计工具栏。 */
     fun draftSlotHeightPx(): Int = if (draftSlotEnabled) draftSlot.layoutParams.height else 0
 
-    /** 返回黑框加透明草稿槽的实际总高度，供窗口贴屏和工具栏避让使用。 */
+    /** 返回正文与草稿预留的固定总高度，供窗口贴屏和工具栏避让使用。 */
     fun measureCaptionBlockHeight(widthPx: Int): Int = measureCardHeight(widthPx) + draftSlotHeightPx()
 
     private var windowHeightLimit = Int.MAX_VALUE
@@ -134,7 +136,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         updateDraftSlotHeight()
     }
 
-    /** 先扣除黑框外预留与内部边距，诊断区只能使用一行正文之外的剩余预算。 */
+    /** 先扣除草稿伸展预算与内部边距，诊断区只能使用一行正文之外的剩余预算。 */
     private fun applyWindowHeightBudget() {
         val column = card.getChildAt(0)
         val padding = (column?.paddingTop ?: 0) + (column?.paddingBottom ?: 0)
@@ -147,13 +149,20 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         applyCaptionHeight()
     }
 
-    /** 固定预留两行小字译文及可选的一行原文，禁止内容出现消失改变窗口高度。 */
+    /** 固定预留一行临时字幕；原文开启时合并在同一行，内容变化不改变窗口高度。 */
     private fun updateDraftSlotHeight() {
         val gap = dp(DRAFT_GAP_DP).toInt()
-        val natural = gap + draftText.lineHeight * 2 + if (draftOriginalShown) draftSource.lineHeight else 0
+        val bottom = dp(10f).toInt()
+        // 中日文字体回退的真实行高可能大于TextView的主字体lineHeight，不能把唯一一行误裁为空。
+        val sample = "国あAg🙂"
+        val sampleLayout = android.text.StaticLayout.Builder.obtain(sample, 0, sample.length, draftText.paint, 10000)
+            .setIncludePad(false).setUseLineSpacingFromFallbacks(true)
+            .setLineSpacing(draftText.lineSpacingExtra, draftText.lineSpacingMultiplier).build()
+        val singleLineHeight = maxOf(draftText.lineHeight, sampleLayout.height)
+        val natural = gap + bottom + singleLineHeight
         val budget = if (windowHeightLimit == Int.MAX_VALUE) natural else minOf(natural, (windowHeightLimit * 0.4f).toInt())
-        val sourceHeight = if (draftOriginalShown && budget >= gap + draftText.lineHeight + draftSource.lineHeight) draftSource.lineHeight else 0
-        val translatedHeight = minOf(draftText.lineHeight * 2, (budget - gap - sourceHeight).coerceAtLeast(0))
+        val sourceHeight = 0
+        val translatedHeight = minOf(singleLineHeight, (budget - gap - bottom).coerceAtLeast(0))
         draftText.layoutParams?.let { lp ->
             if (lp.height != translatedHeight) { lp.height = translatedHeight; draftText.layoutParams = lp }
         }
@@ -162,12 +171,36 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         }
         draftSource.visibility = if (sourceHeight > 0) VISIBLE else GONE
         draftSlot.layoutParams?.let { lp ->
-            val height = minOf(budget, gap + translatedHeight + sourceHeight)
+            val height = minOf(budget, gap + bottom + translatedHeight + sourceHeight)
             if (lp.height != height) { lp.height = height; draftSlot.layoutParams = lp }
         }
         draftSlot.visibility = if (draftSlotEnabled) VISIBLE else GONE
         applyWindowHeightBudget()
     }
+
+    /** 统一绘制正文和草稿的圆角背景；只有背景向下伸展，布局和定稿不随草稿改变。 */
+    override fun dispatchDraw(canvas: Canvas) {
+        val extension = if (draftSlotEnabled && draftText.visibility == VISIBLE) {
+            val textHeight = minOf(draftText.layout?.height ?: draftText.lineHeight, draftText.height)
+            (draftSlot.translationY.toInt() + draftText.top + textHeight + draftSlot.paddingBottom).coerceIn(0, draftSlot.height)
+        } else 0
+        bg.setBounds(card.left, card.top, card.right, if (extension > 0) draftSlot.top + extension else card.bottom)
+        bg.draw(canvas)
+        super.dispatchDraw(canvas)
+    }
+
+    /** 返回最后一行正式字幕的基线偏移，草稿与耗时信息不参与定位。 */
+    fun finalLineBaselinePx(): Int {
+        val placed = text.layout
+        val lines = placed?.lineCount ?: 0
+        val baseline = if (placed != null && lines > 0) {
+            text.measuredHeight - text.extendedPaddingBottom - (placed.height - placed.getLineBaseline(lines - 1))
+        } else text.baseline
+        return (card.getChildAt(0) as LinearLayout).paddingTop + baseline
+    }
+
+    /** 基线在整个悬浮窗口中的位置，包含工具栏或宿主布局引入的偏移。 */
+    internal fun finalLineBaselineInWindowPx(): Int = card.top + finalLineBaselinePx()
     private fun lightView() = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); setTextColor(0xFFDADCE0.toInt())
         gravity = Gravity.CENTER_VERTICAL; compoundDrawablePadding = dp(4f).toInt()
@@ -189,10 +222,19 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     fun setServices(mt: Light, jev: Light, mtWhy: String?, jevWhy: String?) {
         showLight(mtLight, "翻译", mt, mtWhy); showLight(jevLight, "Jev", jev, jevWhy)
     }
-    /** Toolbar opened/closed: the host widens the window while it is open so the toolbar is never clipped. */
+    /** 通知宿主切换工具栏独立浮层，不调整字幕窗口本身。 */
     var onToolbarShown: (Boolean) -> Unit = {}
 
-    /** 同步黑框和草稿槽的像素宽度；工具栏展开时外部窗口可能更宽。 */
+    /** 实际服务将工具栏交给独立浮层；预览与独立视图测试保留原有内部宿主。 */
+    internal fun takeToolbarForWindow(): View {
+        if (!externalToolbar) {
+            removeView(toolbar)
+            externalToolbar = true
+        }
+        return toolbar
+    }
+
+    /** 同步黑框和草稿槽的像素宽度，工具栏独立控制自身宽度。 */
     fun setCardWidth(px: Int) {
         val lp = card.layoutParams
         if (lp.width != px) { lp.width = px; card.layoutParams = lp }
@@ -205,6 +247,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         if (clp.marginStart != cardOffset) { clp.marginStart = cardOffset; card.layoutParams = clp }
         val dlp = draftSlot.layoutParams as LayoutParams
         if (dlp.marginStart != cardOffset) { dlp.marginStart = cardOffset; draftSlot.layoutParams = dlp }
+        if (externalToolbar) return
         val m = dp(TOOLBAR_GAP_DP).toInt() - overlapPx
         val tlp = toolbar.layoutParams as LayoutParams
         val top = if (toolbarAbove) 0 else m; val bottom = if (toolbarAbove) m else 0
@@ -303,7 +346,6 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             addView(text, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             addView(stats, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
-        card.background = bg
         card.addView(column, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
 
         // resize marks: a faint "›" in each corner, pointing out of the card, in the caption colour. Only drawn;
@@ -334,10 +376,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
         draftText.apply {
             includeFontPadding = false
-            gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+            gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
             typeface = this@CaptionOverlayView.text.typeface
             setLineSpacing(dp(2f), 1f)
-            captionLineLimit = 2
+            captionLineLimit = 1
         }
         draftSource.apply {
             includeFontPadding = false
@@ -346,9 +388,11 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         draftSlot.apply {
+            // 与原版一样紧接正文，抵消正文已有的底部留白，避免重复间距。
+            translationY = -dp(10f)
             orientation = VERTICAL
             clipChildren = true
-            setPadding(dp(18f).toInt(), dp(DRAFT_GAP_DP).toInt(), dp(18f).toInt(), 0)
+            setPadding(dp(18f).toInt(), dp(DRAFT_GAP_DP).toInt(), dp(18f).toInt(), dp(10f).toInt())
             addView(draftSource, LayoutParams(LayoutParams.MATCH_PARENT, 0))
             addView(draftText, LayoutParams(LayoutParams.MATCH_PARENT, 0))
             visibility = GONE
@@ -369,9 +413,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         draftSource.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp * 0.62f)
         draftText.setTextColor(colors.draft)
         draftSource.setTextColor(colors.ja)
-        // 草稿画在透明区域，独立阴影保证覆盖视频时仍可辨认。
-        draftText.setShadowLayer(dp(3f), 0f, dp(1f), 0xEE000000.toInt())
-        draftSource.setShadowLayer(dp(3f), 0f, dp(1f), 0xEE000000.toInt())
+        // 草稿与定稿共用背景；浅色配色不绘制深色阴影。
+        val draftShadow = if (colors.shadow) dp(3f) else 0f
+        draftText.setShadowLayer(draftShadow, 0f, dp(1f), 0xEE000000.toInt())
+        draftSource.setShadowLayer(draftShadow, 0f, dp(1f), 0xEE000000.toInt())
         updateDraftSlotHeight()
         applyCaptionHeight() // a fixed height is clamped to one line, which depends on the font size
         bg.setColor(colors.bg and 0x00FFFFFF or ((alpha * 255).toInt().coerceIn(0, 255) shl 24))
@@ -388,7 +433,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** Text / background colours of the captions; the background keeps the user's opacity. */
     class Palette(val id: String, val label: String, val zh: Int, val ja: Int, val draft: Int, val stats: Int, val bg: Int, val shadow: Boolean = true)
 
-    /** 切换字幕配色，并同步正式正文与外部草稿的样式。 */
+    /** 切换字幕配色，并同步正式正文与临时区域的样式。 */
     fun setColors(p: Palette) {
         if (p === colors) return
         colors = p
@@ -399,7 +444,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** One entry per visible line: Chinese text, optional Japanese, draft flag. */
     class Line(val zh: String, val ja: String?, val isFinal: Boolean)
 
-    /** 将草稿分流到透明兄弟区域；保留传入快照的句数和字数裁剪结果，不修改字幕板。 */
+    /** 草稿使用独立布局与统一背景；保留传入快照的显示裁剪结果，不修改字幕板。 */
     fun setLines(lines: List<Line>, statsLine: String?) {
         lastLines = lines; lastStats = statsLine
         val sb = SpannableStringBuilder()
@@ -425,11 +470,20 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         text.setCaption(sb)
         val draft = if (draftSlotEnabled) lines.lastOrNull { !it.isFinal } else null
         draftSource.text = draft?.ja ?: ""
-        draftText.setCaption(draft?.let { "… ${it.zh}" } ?: "")
+        val draftCaption = SpannableStringBuilder()
+        if (draft != null) {
+            if (draftOriginalShown && !draft.ja.isNullOrEmpty()) {
+                draftCaption.append(draft.ja.replace('\n', ' ')).append(" · ")
+                draftCaption.setSpan(ForegroundColorSpan(colors.ja), 0, draftCaption.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            draftCaption.append("… ").append(draft.zh.replace('\n', ' '))
+        }
+        draftText.setCaption(draftCaption)
         // 空槽仍参与测量，只隐藏字形；不能用 GONE 折叠整个草稿区。
         draftText.visibility = if (draft == null) INVISIBLE else VISIBLE
         stats.text = statsLine ?: ""
         stats.visibility = if (statsLine.isNullOrEmpty()) GONE else VISIBLE
+        invalidate()
     }
 
     /** 沿用 TextView 原生排版，仅在测量时从正文末尾选择能够完整容纳的实际行。 */
@@ -465,6 +519,27 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
                 text = text.subSequence(start, text.length)
                 shortened = true
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }
+
+        /** 不限行但高度不足时同步展示最新尾部，避免首帧与系统稍后滚动产生基线跳变。 */
+        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+            super.onLayout(changed, left, top, right, bottom)
+            keepLatestAtBottom()
+        }
+
+        /** TextView会在预绘制时再次滚动，必须在框架处理之后保持同一条最后基线。 */
+        override fun onPreDraw(): Boolean {
+            val ready = super.onPreDraw()
+            keepLatestAtBottom()
+            return ready
+        }
+
+        /** 同步底部对齐的绘制偏移，不截断或改写正式字幕内容。 */
+        private fun keepLatestAtBottom() {
+            if (captionLineLimit == 0 && (gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.BOTTOM) {
+                val room = height - compoundPaddingTop - compoundPaddingBottom
+                scrollTo(0, ((layout?.height ?: 0) - room).coerceAtLeast(0))
             }
         }
     }
@@ -638,8 +713,8 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         const val DEFAULT_ALPHA = 0.78f
         /** Space between the caption card and the toolbar. */
         const val TOOLBAR_GAP_DP = 6f
-        /** 黑框底边与透明草稿内容之间的小间距。 */
-        const val DRAFT_GAP_DP = 6f
+        /** 正式正文与临时字幕之间的小间距。 */
+        const val DRAFT_GAP_DP = 2f
 
         /** Caption colour schemes; the first is the default. ids are stored in prefs, keep them stable. */
         val PALETTES = listOf(

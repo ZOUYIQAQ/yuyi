@@ -711,7 +711,7 @@ class Pipeline(
  * 保存不可变定稿和一条独立草稿；Android服务通过setRetention选择互斥的句数或字数模式。
  * 以下构造参数与setLimits保留历史兼容：定稿超过 [maxFinals] 时淘汰最旧句；
  * 在最少到最多句数之间，仅当定稿译文超过 [maxChars] 个码点时继续收起旧句。
- * 快照的最多句数包含草稿，但草稿只挤占显示额度，不销毁已保存的定稿。
+ * 新版句数快照保留最多指定条定稿及一条独立草稿；旧范围接口仍让草稿占显示额度。
  * 仅接受更新的修订；已定稿或已淘汰的分段不能因迟到事件复活。
  */
 class CaptionBoard(minFinals: Int = DEFAULT_SENTENCES, maxChars: Int = DEFAULT_CHARS, maxFinals: Int = Int.MAX_VALUE) {

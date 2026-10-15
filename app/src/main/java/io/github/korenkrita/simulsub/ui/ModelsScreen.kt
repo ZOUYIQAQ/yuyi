@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
@@ -29,7 +30,10 @@ internal fun ModelsScreen(state: ModelsUiState, actions: SimulSubActions, wide: 
     }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val columns = if (wide && maxWidth >= 760.dp) 2 else 1
+        val states = LocalPageScrollStates.current
+        val listState = (if (columns == 2) states?.first else states?.single) ?: rememberLazyListState()
         LazyColumn(
+            state = listState,
             modifier = Modifier.widthIn(max = if (columns == 2) 1120.dp else 640.dp).fillMaxSize(),
             contentPadding = PaddingValues(horizontal = if (columns == 2) 24.dp else 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),

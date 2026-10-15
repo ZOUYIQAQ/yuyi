@@ -4,15 +4,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.animation.animateContentSize
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.*
@@ -20,6 +25,22 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.unit.dp
+
+/** 每种布局独立持有真实列表位置，不包含任何业务值或表单草稿。 */
+internal class PageScrollStates(val single: LazyListState, val first: LazyListState, val second: LazyListState)
+
+/** 将路由保存的位置传给实际列表；独立预览未提供时由列表自行管理。 */
+internal val LocalPageScrollStates = staticCompositionLocalOf<PageScrollStates?> { null }
+
+/** 仅把列表内置 Saver 注册到外层页面容器，禁止子控件把密钥或业务草稿纳入保存状态。 */
+@Composable
+internal fun PageScrollStateProvider(content: @Composable () -> Unit) {
+    val single = rememberLazyListState()
+    val first = rememberLazyListState()
+    val second = rememberLazyListState()
+    val states = remember(single, first, second) { PageScrollStates(single, first, second) }
+    CompositionLocalProvider(LocalPageScrollStates provides states, LocalSaveableStateRegistry provides null, content = content)
+}
 
 /** 内容居中限宽；窄屏连续阅读，宽屏两栏各自滚动且保留一致的起始边距。 */
 @Composable
@@ -29,6 +50,10 @@ internal fun PageColumns(
     second: LazyListScope.() -> Unit = {},
     header: (@Composable () -> Unit)? = null,
 ) {
+    val states = LocalPageScrollStates.current
+    val singleColumnState = states?.single ?: rememberLazyListState()
+    val firstColumnState = states?.first ?: rememberLazyListState()
+    val secondColumnState = states?.second ?: rememberLazyListState()
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val twoColumns = wide && maxWidth >= 720.dp
         val pagePadding = if (twoColumns) 24.dp else 16.dp
@@ -40,11 +65,13 @@ internal fun PageColumns(
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         Modifier.weight(1f).fillMaxHeight(),
+                        state = firstColumnState,
                         contentPadding = PaddingValues(start = pagePadding, end = 12.dp, top = 16.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp), content = first,
                     )
                     LazyColumn(
                         Modifier.weight(1f).fillMaxHeight(),
+                        state = secondColumnState,
                         contentPadding = PaddingValues(start = 12.dp, end = pagePadding, top = 16.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp), content = second,
                     )
@@ -52,6 +79,7 @@ internal fun PageColumns(
             } else {
                 LazyColumn(
                     Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(pagePadding),
+                    state = singleColumnState,
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     if (header != null) item("page-navigation") { header() }
@@ -183,16 +211,21 @@ internal fun ActionRow(content: @Composable () -> Unit) {
 /** 保留已存密钥与明确清空分开表达，输入值只交给控制器草稿。 */
 @Composable
 internal fun KeyEditor(value: String?, saved: Boolean, enabled: Boolean, onChange: (String?) -> Unit) {
+    var visible by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),
             value = value.orEmpty(), onValueChange = { onChange(it) }, enabled = enabled,
             label = { Text("API 密钥") },
-            supportingText = { Text(if (value == null && saved) "已保存密钥；不输入则保留。" else if (value == "" && saved) "保存后将清空密钥。" else "如服务需要密钥，在这里填写；使用 Android Keystore 加密保存在本机。") },
+            visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
+                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }, enabled = enabled) {
+                    Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (visible) "隐藏密钥" else "显示密钥")
+                }
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             singleLine = true, modifier = Modifier.fillMaxWidth(),
         )

@@ -5,9 +5,25 @@ enum class CaptionLimitMode(val title: String) { SENTENCES("按句数"), CHARACT
 
 /** 只裁剪显示快照，不改动原始定稿、会话记录或翻译上下文。 */
 object CaptionRetention {
-    /** 句数包含实时草稿；字数保留最新译文，超长单句也按码点安全截取尾部。 */
+    /** 句数只限制定稿，另保留最新一条草稿；字数保留最新译文并按码点安全截取尾部。 */
     fun apply(captions: List<Caption>, mode: CaptionLimitMode, sentences: Int, chars: Int): List<Caption> {
-        if (mode == CaptionLimitMode.SENTENCES) return captions.takeLast(sentences.coerceAtLeast(1))
+        if (mode == CaptionLimitMode.SENTENCES) {
+            var remainingFinals = sentences.coerceAtLeast(1)
+            var keptDraft = false
+            val visible = mutableListOf<Caption>()
+            for (caption in captions.asReversed()) {
+                if (caption.isFinal) {
+                    if (remainingFinals > 0) {
+                        visible += caption
+                        remainingFinals--
+                    }
+                } else if (!keptDraft) {
+                    visible += caption
+                    keptDraft = true
+                }
+            }
+            return visible.asReversed()
+        }
         var remaining = chars.coerceAtLeast(1)
         val visible = mutableListOf<Caption>()
         for (caption in captions.asReversed()) {

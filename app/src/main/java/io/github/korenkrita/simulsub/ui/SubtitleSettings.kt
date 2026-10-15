@@ -45,8 +45,11 @@ internal fun SubtitleSettings(style: SubtitleStyleUiState, actions: SimulSubActi
                         actions.onSubtitleStyleChange(style.copy(limitMode = CaptionLimitMode.valueOf(it)))
                     }
                     when (style.limitMode) {
-                        CaptionLimitMode.SENTENCES -> OptionPicker("显示句数", style.maxSentences.coerceIn(1, 10).toString(), (1..10).map { UiOption(it.toString(), "$it 句") }) {
-                            actions.onSubtitleStyleChange(style.copy(maxSentences = it.toInt()))
+                        CaptionLimitMode.SENTENCES -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SupportingText("只统计正式字幕，临时字幕不占句数。")
+                            OptionPicker("显示句数", style.maxSentences.coerceIn(1, 10).toString(), (1..10).map { UiOption(it.toString(), "$it 句") }) {
+                                actions.onSubtitleStyleChange(style.copy(maxSentences = it.toInt()))
+                            }
                         }
                         CaptionLimitMode.CHARACTERS -> {
                             ValueSlider("最多译文字数", style.keepChars.coerceIn(10, 300).toFloat(), 10f..300f,

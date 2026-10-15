@@ -14,8 +14,10 @@ Android floating subtitles for audio playing on your device. Speech recognition 
 
 Requires **Android 10 (API 29)+ and arm64-v8a**.
 
+First launch guides permissions, the translation API, and model download/activation in that order. Each step can be skipped, and the guide can be reopened from Settings. Cold starts read actual system permission grants; missing required permissions appear in an emphasized card at the top of Live.
+
 1. Open **设置 → 模型库 (Settings → Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
-2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
+2. Open **设置 → 翻译 API (Settings → Translation API)**. Select a preset or enter your OpenAI-compatible endpoint, model ID and API key, then save. Saving keeps the inputs and displays **已保存 (Saved)**. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
 3. On **同传 (Live)**, select source/target languages and a scene, grant the requested permissions and system capture authorization, then start subtitles.
 
 Capture depends on the source app, DRM, Android version and device implementation. Compatibility with every player or video is not guaranteed. Capture is not isolated by process: other eligible apps playing audio at the same time may also be transcribed.
@@ -41,6 +43,8 @@ Layout references [FlClash](https://github.com/chen08209/FlClash) for Material Y
 
 Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings home groups entries and each row opens a detail page (translation API, subtitle style, appearance, permissions, advanced, usage records, about), model management, or scene management; the top bar and system back handle returning. The settings preview is a sample, rather than an actual floating overlay.
 
+Each main route, Settings home and detail page, model library, and scene list remembers its own list position. Phone single- and two-column layouts keep separate positions. Form API keys are excluded from SavedState.
+
 ## Recognition and translation
 
 | Recognition package | Source languages | Download including VAD |
@@ -57,7 +61,7 @@ New installations start with **Camellia (山茶)**, sampled from the icon: orang
 ## Settings and controls
 
 - **场景术语 (Scenes and terms)** is under Settings for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
-- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy: sentence count (latest three sentences by default, configurable from 1–10 including a live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). Line limits and combined sentence/character thresholds are no longer applied. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Outside the finalized-caption background, a fixed transparent live-draft slot prevents bottom-position jitter when drafts appear or disappear. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
+- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy: sentence count (latest three final sentences by default, configurable from 1–10, plus one latest live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). No additional final-subtitle line limit or combined sentence/character thresholds apply. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Finals and drafts share one continuous rounded background. The draft follows finals with a 2dp gap and always occupies at most one line; enabling source text combines source and translation on that same line. The window reserves a fixed draft budget, so showing or hiding the draft leaves the last final line's baseline unchanged. Controls use a separate overlay window and do not move the main subtitles when shown or hidden. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
 - **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Camellia, Rose and Slate palettes, arbitrary RGB hex input and HSV sliders, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
 - **设置 → 高级设置 (Advanced)** contains translation context, join deduplication and optional Jev sentence/translation checks. Jev is off by default and sends text to a third-party service when enabled.
 - **设置 → 使用记录 (Usage records)** is off by default. Finished text logs can be shared, individually deleted after confirmation or cleared after confirmation. Active logs cannot be shared or deleted.

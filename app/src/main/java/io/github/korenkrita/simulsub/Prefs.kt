@@ -71,12 +71,44 @@ class Prefs(ctx: Context) {
         get() = sp.getInt("overlayY", -1)
         set(v) = sp.edit().putInt("overlayY", v).apply()
 
+    /** 原始基线兼容入口；单独写入无法确认所属区域，恢复时必须使用尺寸匹配入口。 */
+    var overlayBaselineY: Int
+        get() = sp.getInt("overlayBaselineY", -1)
+        set(v) = sp.edit().putInt("overlayBaselineY", v)
+            .putInt("overlayBaselineAreaWidth", -1).putInt("overlayBaselineAreaHeight", -1).apply()
+
+    /** 基线所属可用区域宽度，单位像素；旧配置或单独保存基线时为负一。 */
+    val overlayBaselineAreaWidth: Int
+        get() = sp.getInt("overlayBaselineAreaWidth", -1)
+
+    /** 基线所属可用区域高度，单位像素；必须与保存时的可用区域宽度配对。 */
+    val overlayBaselineAreaHeight: Int
+        get() = sp.getInt("overlayBaselineAreaHeight", -1)
+
+    /** 定位完成后一次保存基线及扣除系统边距的可用区域，旋转重置后也使用此入口。 */
+    fun saveOverlayBaseline(baselineY: Int, availableWidth: Int, availableHeight: Int) {
+        require(baselineY >= 0) { "字幕基线不能为负数" }
+        require(availableWidth > 0 && availableHeight > 0) { "字幕可用区域宽高必须为正数" }
+        sp.edit().putInt("overlayBaselineY", baselineY)
+            .putInt("overlayBaselineAreaWidth", availableWidth)
+            .putInt("overlayBaselineAreaHeight", availableHeight).apply()
+    }
+
+    /** 同一快照中的宽高都匹配才恢复基线；缺少尺寸、尺寸改变或区域无效时返回空值。 */
+    fun overlayBaselineForArea(availableWidth: Int, availableHeight: Int): Int? {
+        if (availableWidth <= 0 || availableHeight <= 0) return null
+        val values = sp.all
+        if (values["overlayBaselineAreaWidth"] != availableWidth ||
+            values["overlayBaselineAreaHeight"] != availableHeight) return null
+        return (values["overlayBaselineY"] as? Int)?.takeIf { it >= 0 }
+    }
+
     /** 最少保留句数，继续使用旧键；提高最少值时同步扩展最多值。 */
     var keepSentences: Int
         get() = sentenceRange().first
         set(v) = setSentenceRange(v, maxSentences)
 
-    /** 显示最多句数包含草稿，范围为最少句数到十句。 */
+    /** 历史区间上限仅用于兼容迁移，不参与新版草稿计数。 */
     var maxSentences: Int
         get() = sentenceRange().last
         set(v) = setSentenceRange(keepSentences, v)

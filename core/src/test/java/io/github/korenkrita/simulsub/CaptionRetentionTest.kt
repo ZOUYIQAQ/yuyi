@@ -66,12 +66,102 @@ class CaptionRetentionTest {
         assertEquals(2,board.snapshot().size)
     }
 
-    /** 仅按句数时草稿占额度，却不销毁仅定稿模式下的最近定稿。 */
-    @Test fun sentenceDraftUsesDisplaySlotWithoutDeletingFinal() {
+    /** 一句上限只限制定稿，草稿更新和消失都不挤掉该定稿。 */
+    @Test fun sentenceDraftHasIndependentSlotWithoutDeletingFinal() {
         val board=CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES,1,1) }
         board.accept(cap(1,"定稿"));board.accept(cap(2,"草稿",false))
-        assertEquals("草稿",board.snapshot().single().zh)
+        assertEquals(listOf("定稿","草稿"),board.snapshot().map { it.zh })
         assertEquals("定稿",board.snapshot(false).single().zh)
+        board.accept(cap(2,"草稿更新",false).copy(revision=2))
+        assertEquals(listOf("定稿","草稿更新"),board.snapshot().map { it.zh })
+        board.accept(cap(2,""))
+        assertEquals("定稿",board.snapshot().single().zh)
+        board.accept(cap(3,"下一句定稿"))
+        assertEquals("下一句定稿",board.snapshot().single().zh)
+    }
+
+    /** 三句设置在草稿出现、更新、隐藏和消失期间始终保留最近三条完整定稿。 */
+    @Test fun threeFinalsSurviveDraftLifecycleBeforeRetentionIsApplied() {
+        val board=CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES,3,1) }
+        (1L..4L).forEach { board.accept(cap(it,"定稿$it")) }
+        val finals=board.snapshot(false)
+        assertEquals(listOf(2L,3L,4L),finals.map { it.segmentId })
+        board.accept(cap(5,"草稿",false))
+        assertEquals(finals + cap(5,"草稿",false),board.snapshot())
+        board.accept(cap(5,"草稿更新",false).copy(revision=2))
+        assertEquals(finals,board.snapshot().filter { it.isFinal })
+        assertEquals("草稿更新",board.snapshot().last().zh)
+        assertEquals(finals,board.snapshot(false))
+        board.accept(cap(5,""))
+        assertEquals(finals,board.snapshot())
+        board.accept(cap(6,"下一句草稿",false))
+        board.accept(cap(6,"下一句定稿").copy(revision=2))
+        assertEquals(listOf(3L,4L,6L),board.snapshot().map { it.segmentId })
+        assertTrue(board.snapshot().all { it.isFinal })
+    }
+
+    /** 多条草稿只取输入中最后一条，并保持与定稿的原始先后关系。 */
+    @Test fun sentenceModeKeepsOnlyLatestDraftInInputOrder() {
+        val captions=listOf(cap(9,"最早草稿",false),cap(8,"旧定稿"),
+            cap(7,"草稿旧版",false),cap(7,"草稿新版",false).copy(revision=2),
+            cap(6,"第二定稿"),cap(5,"最新定稿"))
+        assertEquals(listOf(captions[3],captions[5]),
+            CaptionRetention.apply(captions,CaptionLimitMode.SENTENCES,1,1))
+        assertEquals(listOf(captions[1],captions[3],captions[4],captions[5]),
+            CaptionRetention.apply(captions,CaptionLimitMode.SENTENCES,3,1))
+    }
+
+    /** 只有草稿时同样保留最新一条，不按分段编号或对象相等判断新旧。 */
+    @Test fun sentenceModeWithOnlyDraftsKeepsLatestEntry() {
+        val first=cap(8,"旧草稿",false)
+        val latest=cap(2,"新草稿",false)
+        assertEquals(listOf(latest),CaptionRetention.apply(listOf(first,latest),CaptionLimitMode.SENTENCES,3,1))
+        assertEquals(listOf(first),CaptionRetention.apply(listOf(first,first),CaptionLimitMode.SENTENCES,1,1))
+    }
+
+    /** 只裁剪显示列表，原始字幕的文本、修订、时间和对象均不改动。 */
+    @Test fun sentenceRetentionDoesNotMutateSourceCaptions() {
+        val captions=mutableListOf(cap(1,"第一定稿"),cap(2,"第二定稿"),cap(3,"草稿",false))
+        val original=captions.toList()
+        val visible=CaptionRetention.apply(captions,CaptionLimitMode.SENTENCES,1,1)
+        assertEquals(original,captions)
+        assertSame(captions[1],visible[0])
+        assertSame(captions[2],visible[1])
+    }
+
+    /** 空列表在两种显示策略和非正数额度下均安全返回空列表。 */
+    @Test fun emptyInputRemainsEmptyInBothModes() {
+        for (mode in CaptionLimitMode.values()) {
+            assertTrue(CaptionRetention.apply(emptyList(),mode,3,100).isEmpty())
+            assertTrue(CaptionRetention.apply(emptyList(),mode,0,0).isEmpty())
+        }
+        val board=CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES,3,100) }
+        assertTrue(board.snapshot().isEmpty())
+        assertTrue(board.snapshot(false).isEmpty())
+    }
+
+    /** 无草稿时仍按原先规则保留最近定稿；非正数句数仍回退为一条定稿。 */
+    @Test fun finalsOnlyAndInvalidSentenceCountsKeepExistingBehavior() {
+        val captions=(1L..5L).map { cap(it,"定稿$it") }
+        for (limit in listOf(-1,0,1,3,8)) {
+            assertEquals(captions.takeLast(limit.coerceAtLeast(1)),
+                CaptionRetention.apply(captions,CaptionLimitMode.SENTENCES,limit,1))
+        }
+        val draft=cap(6,"草稿",false)
+        assertEquals(listOf(captions.last(),draft),
+            CaptionRetention.apply(captions + draft,CaptionLimitMode.SENTENCES,0,1))
+    }
+
+    /** 旧范围接口继续让草稿占显示额度，切换新版策略后草稿获得独立槽位。 */
+    @Test fun legacySnapshotLimitRemainsCompatibleUntilNewPolicyIsSelected() {
+        val board=CaptionBoard(minFinals=1,maxChars=1000,maxFinals=3)
+        (1L..3L).forEach { board.accept(cap(it,"定稿$it")) }
+        board.accept(cap(4,"草稿",false))
+        assertEquals(listOf(2L,3L,4L),board.snapshot().map { it.segmentId })
+        assertEquals(listOf(1L,2L,3L),board.snapshot(false).map { it.segmentId })
+        assertTrue(board.setRetention(CaptionLimitMode.SENTENCES,3,1))
+        assertEquals(listOf(1L,2L,3L,4L),board.snapshot().map { it.segmentId })
+        assertEquals(listOf(1L,2L,3L),board.snapshot(false).map { it.segmentId })
     }
 
     /** 完全相同设置不报告虚假变化，非正数额度安全回退。 */

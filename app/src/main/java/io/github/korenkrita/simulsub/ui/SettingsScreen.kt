@@ -13,9 +13,12 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 
 /** 设置入口与详情使用独立页面，返回路径由顶栏和系统返回统一处理。 */
 internal enum class SettingsSection(val title: String, val detail: String) {
@@ -33,22 +36,27 @@ internal enum class SettingsSection(val title: String, val detail: String) {
 @Composable
 internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean,
     selected: SettingsSection? = null, finalOnly: Boolean = false, onSelect: (SettingsSection) -> Unit = {}) {
+    val pageStateHolder = rememberSaveableStateHolder()
     androidx.compose.animation.AnimatedContent(
         targetState = selected,
         transitionSpec = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) togetherWith
             androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(100)) },
         label = "设置页面切换",
     ) { page ->
-        when (page) {
-            null -> SettingsHome(wide, actions, onSelect)
-            SettingsSection.API -> TranslationApiSettings(state.api, sessionBusy, actions, wide, null)
-            SettingsSection.SUBTITLE -> SubtitleSettings(state.subtitle, actions, wide, null, finalOnly)
-            SettingsSection.APPEARANCE -> AppearanceSettings(state, actions, wide, null)
-            SettingsSection.PERMISSIONS -> PermissionsSettings(state.permissions, actions, wide)
-            SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, null)
-            SettingsSection.RECORDS -> UsageRecords(state, actions, wide, null)
-            SettingsSection.UPDATES -> UpdateSettings(state, actions, wide)
-            SettingsSection.ABOUT -> AboutSettings(state, actions, wide, null)
+        pageStateHolder.SaveableStateProvider(page?.name ?: "settings-home") {
+            PageScrollStateProvider {
+                when (page) {
+                    null -> SettingsHome(wide, actions, onSelect)
+                    SettingsSection.API -> TranslationApiSettings(state.api, sessionBusy, actions, wide, null)
+                    SettingsSection.SUBTITLE -> SubtitleSettings(state.subtitle, actions, wide, null, finalOnly)
+                    SettingsSection.APPEARANCE -> AppearanceSettings(state, actions, wide, null)
+                    SettingsSection.PERMISSIONS -> PermissionsSettings(state.permissions, actions, wide)
+                    SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, null)
+                    SettingsSection.RECORDS -> UsageRecords(state, actions, wide, null)
+                    SettingsSection.UPDATES -> UpdateSettings(state, actions, wide)
+                    SettingsSection.ABOUT -> AboutSettings(state, actions, wide, null)
+                }
+            }
         }
     }
 }
@@ -114,19 +122,19 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("连接信息", style = MaterialTheme.typography.titleMedium)
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTPS 基础地址或完整聊天接口地址，均可编辑。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTPS 基础地址或完整聊天接口地址，均可编辑。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
-                    KeyEditor(api.key, api.hasSavedKey, editable) { actions.onApiDraftChange(api.copy(key = it)) }
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    TranslationKeyEditor(api, editable) { actions.onApiDraftChange(api.copy(key = it)) }
                     if (api.testing || api.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(when {
+                        api.hasUnsavedChanges -> "保存状态：有未保存的修改"
+                        api.hasSavedConfiguration -> "保存状态：已保存"
+                        else -> "保存状态：未保存"
+                    }, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     ActionRow {
                         Button(onClick = actions.onSaveApi, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (api.saving) "正在保存…" else "保存翻译配置") }
                         FilledTonalButton(onClick = actions.onTestApi, enabled = editable && api.canTest && !sessionBusy, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (api.testing) "正在测试…" else "测试连接") }
@@ -158,27 +166,18 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
                     SectionHeading("附加请求参数", "一般无需填写。修改后需再次保存翻译配置。")
                     if (api.resolvedUrl.isNotEmpty()) SupportingText("实际请求地址：${api.resolvedUrl}")
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = api.userAgent, onValueChange = { actions.onApiDraftChange(api.copy(userAgent = it)) }, label = { Text("User-Agent（可选）") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = api.userAgent, onValueChange = { actions.onApiDraftChange(api.copy(userAgent = it)) }, label = { Text("User-Agent（可选）") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                 }
             }
             items(api.headers, key = { "header:${it.id}" }) { header ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = header.name, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(name = value) else it })) }, label = { Text("请求头名称") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = header.name, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(name = value) else it })) }, label = { Text("请求头名称") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     TextField(
-                        shape = MaterialTheme.shapes.medium,
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),value = header.value, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(value = value) else it })) }, label = { Text("请求头值") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                        shape = TextFieldDefaults.shape,
+                        colors = TextFieldDefaults.colors(),value = header.value, onValueChange = { value -> actions.onApiDraftChange(api.copy(headers = api.headers.map { if (it.id == header.id) it.copy(value = value) else it })) }, label = { Text("请求头值") }, enabled = editable, modifier = Modifier.fillMaxWidth())
                     TextButton(onClick = { actions.onRemoveHeader(header.id) }, enabled = editable, modifier = Modifier.heightIn(min = 48.dp)) { Text("移除此请求头") }
                 }
             }
@@ -187,6 +186,39 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
             }
         }
     })
+}
+
+/** 输入框留空保留旧密钥，显式清空按钮才派发空串；已保存值由控制器回填。 */
+@Composable
+private fun TranslationKeyEditor(api: TranslationApiUiState, enabled: Boolean, onChange: (String?) -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextField(
+            value = api.key.orEmpty(), onValueChange = { value ->
+                onChange(if (value.isBlank()) { if (api.hasSavedKey) null else "" } else value)
+            },
+            label = { Text("API 密钥") },
+            enabled = enabled, singleLine = true,
+            visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
+                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }, enabled = enabled) {
+                    Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                        contentDescription = if (visible) "隐藏密钥" else "显示密钥")
+                }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            shape = TextFieldDefaults.shape,
+            colors = TextFieldDefaults.colors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        ActionRow {
+            if (api.hasSavedKey && api.key != null) TextButton(onClick = { onChange(null) }, enabled = enabled,
+                modifier = Modifier.heightIn(min = 48.dp)) { Text("保留已存密钥") }
+            if (api.hasSavedKey || !api.key.isNullOrEmpty()) TextButton(onClick = { onChange("") }, enabled = enabled,
+                modifier = Modifier.heightIn(min = 48.dp)) { Text("清空密钥") }
+        }
+    }
 }
 
 /** 展示真实使用记录，删除必须先确认，正在写入的记录不允许分享或删除。 */

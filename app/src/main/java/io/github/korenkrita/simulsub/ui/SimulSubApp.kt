@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
+    val pageStateHolder = rememberSaveableStateHolder()
     if (state.onboarding != null) {
         OnboardingScreen(state, actions)
         return
@@ -189,13 +191,16 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                 AnimatedContent(targetState = state.destination,
                                     transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) }, label = "主页面切换") { destination ->
-                                    when (destination) {
-                                        UiDestination.LIVE -> LiveScreen(state.live, routedActions, wide)
-                                        UiDestination.SUBTITLE -> SubtitleSettings(state.settings.subtitle, routedActions, wide, null, state.live.finalOnly)
-                                        UiDestination.MODELS -> ModelsScreen(state.models, routedActions, wide)
-                                        UiDestination.SCENES -> ScenesScreen(state.scenes, routedActions, wide)
-                                        UiDestination.SETTINGS -> SettingsScreen(state.settings, state.live.running || state.live.busy, routedActions, wide,
-                                            selected = settingsSection, finalOnly = state.live.finalOnly, onSelect = { settingsSection = it })
+                                    // 页面退出动画组合后仍按稳定路由保留位置，业务状态继续仅由控制器持有。
+                                    pageStateHolder.SaveableStateProvider(destination.name) {
+                                        when (destination) {
+                                            UiDestination.LIVE -> PageScrollStateProvider { LiveScreen(state.live, routedActions, wide) }
+                                            UiDestination.SUBTITLE -> PageScrollStateProvider { SubtitleSettings(state.settings.subtitle, routedActions, wide, null, state.live.finalOnly) }
+                                            UiDestination.MODELS -> PageScrollStateProvider { ModelsScreen(state.models, routedActions, wide) }
+                                            UiDestination.SCENES -> ScenesScreen(state.scenes, routedActions, wide)
+                                            UiDestination.SETTINGS -> SettingsScreen(state.settings, state.live.running || state.live.busy, routedActions, wide,
+                                                selected = settingsSection, finalOnly = state.live.finalOnly, onSelect = { settingsSection = it })
+                                        }
                                     }
                                 }
                             }
