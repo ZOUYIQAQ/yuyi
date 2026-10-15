@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.korenkrita.simulsub.Caption
+import io.github.korenkrita.simulsub.ByokTranslator
 import io.github.korenkrita.simulsub.CaptionOverlayView
 import io.github.korenkrita.simulsub.CaptionRetention
 import io.github.korenkrita.simulsub.CaptionService
@@ -140,8 +141,8 @@ private fun subtitleWatchingArea(context: Context): IntSize {
 /** 样例复用生产保留规则；所有原始样例都是不可变数据，字数按译文 Unicode 码点计算。 */
 internal fun subtitlePreviewLines(style: SubtitleStyleUiState, finalOnly: Boolean = false): List<CaptionOverlayView.Line> {
     val examples = List(10) { index ->
-        Caption(index.toLong(), 1, index < 9, "字幕の設定を変えると、表示もすぐに変わります。",
-            if (index == 9) "正在说的这一句会继续更新，字幕内容会随识别结果修正。" else "第${index + 1}句示例：调整字幕文字、背景和尺寸，预览会立即显示观看效果。",
+        Caption(index.toLong(), 1, index < 9, ByokTranslator.PROBE_TEXT,
+            "这个v是什么人？真是令人在意的v",
             Timing(0, 0, 0, 0, 0, 0, 0))
     }
     return CaptionRetention.apply(if (finalOnly) examples.filter { it.isFinal } else examples,

@@ -101,8 +101,8 @@ private fun ThemePreviewCard() {
             }
             Surface(shape = MaterialTheme.shapes.large, color = colors.primaryContainer) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("听见声音，看见译文", style = MaterialTheme.typography.titleMedium, color = colors.onPrimaryContainer)
-                    Text("主题预览", style = MaterialTheme.typography.bodyMedium, color = colors.onPrimaryContainer)
+                    Text("花朵绽放出来吧", style = MaterialTheme.typography.titleMedium, color = colors.onPrimaryContainer)
+                    Text("花が咲くでしょう～", style = MaterialTheme.typography.bodyMedium, color = colors.onPrimaryContainer)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

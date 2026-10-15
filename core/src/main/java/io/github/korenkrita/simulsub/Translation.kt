@@ -621,7 +621,7 @@ class ByokTranslator(
     private fun fatal(r: MtResult) = r.http in listOf(401, 403, 404, 405, 429) || (r.http == 0 && r.error?.startsWith("deadline") != true)
 
     companion object {
-        const val PROBE_TEXT = "こんにちは、今日もよろしくお願いします。"
+        const val PROBE_TEXT = "このV何者気になるV、他とは違うVだから"
         /** Stored instead of a variant when the service answered but every switch still thought: do not probe again. */
         const val NONE_WORKED = "-"
         /** Sent when the user set none: "SimulSub/<version>", set by each app at start. */

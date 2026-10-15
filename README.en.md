@@ -4,11 +4,9 @@
 
 **Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
 
-An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**, current version **1.4.0**. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**, current version **1.5.0**. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
 
 The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
-
-![Yuyi icon](docs/images/icon.png)
 
 Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
 
@@ -24,39 +22,24 @@ Capture depends on the source app, DRM, Android version and device implementatio
 
 ## Screens
 
-| Live | Model library | Translation API |
+| Live | Model library | Subtitle style preview |
 |---|---|---|
-| ![Live](docs/images/screens/home.png) | ![Models](docs/images/screens/models.png) | ![Translation API](docs/images/screens/translate.png) |
+| ![Live](docs/images/screens/home.png) | ![Models](docs/images/screens/models.png) | ![Subtitle style preview](docs/images/screens/subtitle.png) |
 
-| Actual floating overlay | Style preview in settings | Appearance |
-|---|---|---|
-| ![Actual overlay](docs/images/screens/caption.png) | ![Settings preview](docs/images/screens/subtitle.png) | ![Appearance](docs/images/screens/appearance.png) |
+<details>
+<summary>Tablet live</summary>
 
-| Scenes and terms | Dark theme |
-|---|---|
-| ![Scenes](docs/images/screens/scenes.png) | ![Dark theme](docs/images/screens/dark.png) |
+![Tablet live](docs/images/screens/tablet-home.png)
 
-| Tablet live | Tablet models | Tablet settings |
-|---|---|---|
-| ![Tablet live](docs/images/screens/tablet-home.png) | ![Tablet models](docs/images/screens/tablet-models.png) | ![Tablet settings](docs/images/screens/tablet-settings.png) |
+</details>
 
-| Settings home | Subtitle retention | About |
-|---|---|---|
-| ![Settings home](docs/images/screens/settings.png) | ![Subtitle retention](docs/images/screens/sentence-range.png) | ![About](docs/images/screens/about.png) |
+Only four representative screenshots are displayed here; screenshot files and historical QA records are retained.
 
-| Landscape preview (original-size crop) | Icon colors | Custom theme color |
-|---|---|---|
-| ![Landscape preview](docs/images/screens/subtitle-landscape.png) | ![Icon colors](docs/images/screens/icon-colors.png) | ![Custom theme color](docs/images/screens/custom-color.png) |
-
-| Character retention | Scene editor with fixed back button |
-|---|---|
-| ![Character retention](docs/images/screens/character-limit.png) | ![Scene editor](docs/images/screens/scene-editor.png) |
-
-Current interface screenshots show Yuyi 1.4.0 on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The actual overlay was also captured in this iteration using real audio capture and offline recognition with a fixed local translation fixture; it does not demonstrate cloud translation quality.
+Current interface screenshots show Yuyi 1.5.0 on the local API 35 emulator on 2026-10-15, including tablet-sized windows. The subtitle screenshot shows the settings preview.
 
 Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
 
-Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings home groups entries and each row opens a detail page (translation API, subtitle style, appearance, permissions, advanced, usage records, about), model management, or scene management; the top bar and system back handle returning. The settings preview is a sample; the actual overlay is shown separately above.
+Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings home groups entries and each row opens a detail page (translation API, subtitle style, appearance, permissions, advanced, usage records, about), model management, or scene management; the top bar and system back handle returning. The settings preview is a sample, rather than an actual floating overlay.
 
 ## Recognition and translation
 
@@ -74,7 +57,7 @@ New installations start with **Camellia (山茶)**, sampled from the icon: orang
 ## Settings and controls
 
 - **场景术语 (Scenes and terms)** is under Settings for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
-- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy: sentence count (default, 1–10 including a live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). Line limits and combined sentence/character thresholds are no longer applied. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Outside the finalized-caption background, a fixed transparent live-draft slot prevents bottom-position jitter when drafts appear or disappear. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
+- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy: sentence count (latest three sentences by default, configurable from 1–10 including a live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). Line limits and combined sentence/character thresholds are no longer applied. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Outside the finalized-caption background, a fixed transparent live-draft slot prevents bottom-position jitter when drafts appear or disappear. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
 - **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Camellia, Rose and Slate palettes, arbitrary RGB hex input and HSV sliders, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
 - **设置 → 高级设置 (Advanced)** contains translation context, join deduplication and optional Jev sentence/translation checks. Jev is off by default and sends text to a third-party service when enabled.
 - **设置 → 使用记录 (Usage records)** is off by default. Finished text logs can be shared, individually deleted after confirmation or cleared after confirmation. Active logs cannot be shared or deleted.
@@ -83,22 +66,10 @@ Tap the floating subtitles to reveal controls, drag to move, or resize from the 
 
 ## Updates and development
 
-**设置 → 关于 → 检查更新 (About → Check updates)** reads only this fork's [latest release endpoint](https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest) and displays its tag. **打开本 Fork 仓库 (Open fork repository)** opens the project page for manual review/download. There is no automatic checking, in-app APK download/install, update proxy fallback or skipped-version preference in the current flow.
+**Settings → App updates** checks for updates at startup by default, with an option to disable automatic checks and a manual check action. It supports reminding later, skipping a specific version, and restoring reminders. The update button will open this fork’s GitHub APK download link in the browser, or the [release page](https://github.com/ZOUYIQAQ/yuyi/releases) if no APK is available. The app will not download or install updates internally. Available releases are those actually published on GitHub.
 
 See [Build](docs/build.md) for `:core` and `:app`. macOS/Windows builds are no longer distributed. More: [Architecture](docs/architecture.md), [Privacy](docs/privacy.md), [Logs](docs/logs.md), [Jev](docs/jev.md).
 
 Application code: [MIT](LICENSE). Thanks to [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ReazonSpeech](https://github.com/reazon-research/ReazonSpeech), [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) and [Silero VAD](https://github.com/snakers4/silero-vad). Models and dependencies retain their own licenses; Jev is an optional cloud service.
 
 The three main destinations are Live, Subtitles, and Settings. Model and scene management are inside Settings, with shortcuts on Live. First launch guides only permissions, the translation API, and model download/activation; every step can be skipped and the guide can be reopened from Settings. The home screen hides granted permissions and no longer displays in-memory session text. Session files are created only after recording is explicitly enabled.
-
-| 首次权限配置 | 翻译 API 配置 | 下载启用模型 |
-|---|---|---|
-| ![权限引导](docs/images/screens/onboarding-permissions.png) | ![API引导](docs/images/screens/onboarding-api.png) | ![模型引导](docs/images/screens/onboarding-model.png) |
-
-| 模型删除确认 | 可用地址确认 | 未保存退出确认 |
-|---|---|---|
-| ![模型删除](docs/images/screens/model-delete.png) | ![地址确认](docs/images/screens/api-endpoint.png) | ![退出确认](docs/images/screens/api-unsaved.png) |
-
-| 暖色冷启动 | 深色冷启动 |
-|---|---|
-| ![暖色启动](docs/images/screens/startup-warm.png) | ![深色启动](docs/images/screens/startup-dark.png) |

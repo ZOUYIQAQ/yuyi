@@ -49,13 +49,13 @@ class CaptionDefaultsDeviceTest {
             assertFalse(style.showStats)
             render(stage, style)
             val defaultText = visibleText(stage)
-            assertTrue(defaultText.contains("第9句示例"))
-            assertFalse(defaultText.contains("字幕の設定"))
+            assertTrue(defaultText.contains("这个v是什么人？真是令人在意的v"))
+            assertFalse(defaultText.contains("このV何者気になるV、他とは違うVだから"))
             assertFalse(defaultText.contains("识别 120ms"))
             render(stage, style.copy(showOriginal = true, showStats = true))
             val enabledText = visibleText(stage)
-            assertTrue(enabledText.contains("第9句示例"))
-            assertTrue(enabledText.contains("字幕の設定"))
+            assertTrue(enabledText.contains("这个v是什么人？真是令人在意的v"))
+            assertTrue(enabledText.contains("このV何者気になるV、他とは違うVだから"))
             assertTrue(enabledText.contains("识别 120ms · 翻译 320ms"))
         }
     }

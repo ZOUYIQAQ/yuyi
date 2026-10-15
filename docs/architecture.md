@@ -60,9 +60,10 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 | `ui/` | Jetpack Compose Material 3 界面：同传、模型库、场景、设置与记录，按窗口宽度在底部导航与侧边导航之间切换 |
 | `CaptionOverlayView.kt` | 悬浮字幕视图、四角拖拽缩放与工具栏交互 |
 | `MainActivity.kt` | Compose 宿主、系统权限与采集授权、日志分享和外部链接 |
-| `AppController.kt` | 页面状态与业务动作、翻译草稿保存与测试、模型库协调、场景编辑、日志索引与清理、手动检查发行版 |
+| `AppController.kt` | 页面状态与业务动作、翻译草稿保存与测试、模型库协调、场景编辑、日志索引与清理、启动／手动检查发行版 |
 | `Prefs.kt` | 设置持久化与 Android Keystore 密钥加密 |
-| `AppUpdater.kt` | 保留的旧更新实现，当前 Compose 关于页不使用其自动检查、下载或安装流程 |
+| `updates/` | 本Fork正式发行元数据解析、数字版本比较与浏览器更新Intent；提醒偏好由AppController管理 |
+| `AppUpdater.kt` | 保留的旧更新实现，当前客户端不接入其自动检查、下载或安装流程 |
 
 ## 草稿与定稿策略
 
@@ -103,9 +104,9 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 
 ## 当前更新入口
 
-`AppController.checkUpdate()` 仅在用户点击时 GET `https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest`，15 秒总超时；成功显示 `tag_name`，404 提示尚未发行，其他错误显示失败信息。它不比较版本号，不下载 `update.json` 或 APK。另一个「打开本 Fork 仓库」动作通过外部应用打开 `https://github.com/ZOUYIQAQ/yuyi`。
+`MainActivity.onResume()`通知保留的AppController启动会话，控制器在首次引导完成后最多自动请求一次；旋转和权限返回复用同一标记。`updates/ReleaseUpdates.kt`负责有界、可取消的GitHub元数据请求及纯版本／链接解析；控制器负责自动开关、稍后、跳过和恢复提醒的持久化，并用请求代次丢弃取消后的结果。
 
-旧更新类、权限或 Provider 的保留不代表当前 UI 接通自动更新；当前没有自动检查、代理回退下载、应用内安装或跳过版本偏好。
+设置内的应用更新页提供手动检查和结果。根Compose仅在未编辑API、未编辑场景、未运行同传且没有退出确认时呈现新版提示；提醒操作按版本保存。点击更新只将已验证的GitHub APK链接交给浏览器选择器，无APK则打开版本页，不运行旧AppUpdater下载或安装逻辑。
 
 
 ### 自定义主题与桌面图标

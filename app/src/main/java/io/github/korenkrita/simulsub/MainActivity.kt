@@ -62,14 +62,14 @@ class MainActivity : ComponentActivity() {
         refreshPermissions()
         setContent {
             val state = controller.state.collectAsStateWithLifecycle().value
-            SimulSubApp(state, controller.actions(::beginCapture, ::requestPermission, ::shareRecord, ::openUrl))
+            SimulSubApp(state, controller.actions(::beginCapture, ::requestPermission, ::shareRecord, ::openUrl, ::openUpdateUrl))
         }
     }
 
     /** 从系统权限页返回时重新读取实际状态。 */
     override fun onResume() {
         super.onResume()
-        if (::controller.isInitialized) { controller.restoreLauncherIcon(); refreshPermissions() }
+        if (::controller.isInitialized) { controller.restoreLauncherIcon(); refreshPermissions(); controller.onAppStarted() }
         if (::splashTheme.isInitialized && ::controller.isInitialized) {
             splashTheme.synchronize(SplashTheme.Appearance.from(controller.state.value.settings))
         }
@@ -146,4 +146,10 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             .onFailure { controller.message("没有可打开链接的应用", true) }
     }
+    /** 更新明确交给浏览器打开，失败时只显示提示，不调用应用内安装器。 */
+    private fun openUpdateUrl(url: String) {
+        runCatching { startActivity(io.github.korenkrita.simulsub.updates.updateBrowserIntent(url)) }
+            .onFailure { controller.message("没有可用的浏览器，请先安装或启用浏览器", true) }
+    }
+
 }

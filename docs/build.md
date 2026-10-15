@@ -58,12 +58,11 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 
 ## 当前更新与发行
 
-「设置 → 关于」有两个独立动作：
+「设置 → 应用更新」集中管理更新；默认每次启动检查一次，首次引导结束后才请求，旋转或返回系统授权页不重复检查。可关闭自动检查，手动检查始终可用。发现新版可立即更新、稍后24小时提醒、跳过本版或关闭自动检查；设置中可恢复版本提醒。
 
-1. 「检查更新」调用 `AppController.checkUpdate()`，只读取 `https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest`，总超时 15 秒。成功显示发行标签；404 提示 Fork 尚无安装包；其他错误显示失败信息。
-2. 「打开本 Fork 仓库」打开 `https://github.com/ZOUYIQAQ/yuyi`，用户自行查看发行版并下载安装。
+`GithubReleaseUpdateSource`只请求本Fork的GitHub正式发行元数据，按数字组件比较版本，跳过草稿和预发行；404表示尚未发布。单次调用最多15秒、响应上限256KiB，可取消，不复用翻译密钥或请求参数。关闭自动检查取消未完成的自动请求并忽略迟到结果；自动失败只在更新设置保留结果，不弹错误打断使用。
 
-当前不比较 `versionCode` 判断新旧，不读取 `update.json`，没有自动检查、应用内 APK 下载/安装、多代理回退，也没有「跳过版本」「稍后提醒」「永不检查」等偏好。仓库保留的 `AppUpdater.kt`、旧 Provider 与安装权限不是当前 UI 已启用功能，不应据此恢复旧更新协议说明。
+「更新」通过系统浏览器打开该发行版的arm64 APK下载链接，无APK时打开其发布页。不在应用内下载或安装，不申请新的安装权限。服务端只需发布正确版本标签（如v1.5.0）并附APK，无需`update.json`。接口字段与下载地址来自[GitHub官方发行API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)。浏览器选择器参考[Android Intent文档](https://developer.android.com/reference/android/content/Intent#CATEGORY_APP_BROWSER)。保留的旧AppUpdater类与Provider不接入当前流程，安装APK权限已移除。
 
 ## 签名与发布前检查
 

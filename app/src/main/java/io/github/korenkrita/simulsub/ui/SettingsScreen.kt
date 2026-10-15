@@ -25,6 +25,7 @@ internal enum class SettingsSection(val title: String, val detail: String) {
     PERMISSIONS("系统权限", "录音、悬浮字幕与通知授权"),
     ADVANCED("高级设置", "上下文与在线辅助"),
     RECORDS("使用记录", "保存、分享与清理文字记录"),
+    UPDATES("应用更新", "启动检测、版本提醒与手动检查"),
     ABOUT("关于", "Fork来源、原作者与许可")
 }
 
@@ -46,6 +47,7 @@ internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, action
             SettingsSection.PERMISSIONS -> PermissionsSettings(state.permissions, actions, wide)
             SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, null)
             SettingsSection.RECORDS -> UsageRecords(state, actions, wide, null)
+            SettingsSection.UPDATES -> UpdateSettings(state, actions, wide)
             SettingsSection.ABOUT -> AboutSettings(state, actions, wide, null)
         }
     }
@@ -71,6 +73,7 @@ private fun SettingsHome(wide: Boolean, actions: SimulSubActions, onSelect: (Set
             SettingsLink("首次配置引导", "重新检查使用前的必要配置", Icons.Outlined.AutoFixHigh, actions.onRestartOnboarding)
             SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.Tune, onSelect)
             SettingsEntry(SettingsSection.RECORDS, Icons.Outlined.History, onSelect)
+            SettingsEntry(SettingsSection.UPDATES, Icons.Outlined.SystemUpdate, onSelect)
             SettingsEntry(SettingsSection.ABOUT, Icons.Outlined.Info, onSelect)
         } }
     })

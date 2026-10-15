@@ -5,6 +5,8 @@ import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.korenkrita.simulsub.models.*
+import io.github.korenkrita.simulsub.updates.*
+import kotlinx.coroutines.CancellationException
 import io.github.korenkrita.simulsub.icons.LauncherIcons
 import io.github.korenkrita.simulsub.ui.*
 import kotlinx.coroutines.Dispatchers
@@ -18,11 +20,22 @@ import java.io.File
 import java.util.UUID
 
 /** 连接 Compose 页面与原有业务；草稿保存在 ViewModel，旋转和窗口调整不会丢失输入。 */
-class AppController(application: Application) : AndroidViewModel(application) {
+class AppController internal constructor(application: Application,
+    private val releaseSource: ReleaseUpdateSource,
+    private val updateClock: () -> Long,
+) : AndroidViewModel(application) {
+    /** 生产入口保持AndroidViewModel所需的单参数构造器，测试可以注入网络与时钟。 */
+    constructor(application: Application) : this(application, GithubReleaseUpdateSource(), System::currentTimeMillis)
     private val prefs = Prefs(application)
     private val models = ModelRepository.get(application)
     private val launcherIcons = LauncherIcons(application)
     private val appearance = application.getSharedPreferences("appearance", 0)
+    private val updatePreferences = application.getSharedPreferences("updates", 0)
+    private var updateJob: Job? = null
+    private var updateGeneration = 0
+    private var updateManual = false
+    private var appEntered = false
+    private var startupUpdateChecked = false
     private val mutableState = MutableStateFlow(SimulSubUiState())
     val state = mutableState.asStateFlow()
     private var probe: ByokTranslator? = null
@@ -58,6 +71,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
         permission: (String) -> Unit,
         share: (File) -> Unit,
         openUrl: (String) -> Unit,
+        openUpdateUrl: (String) -> Unit = openUrl,
     ) = SimulSubActions(
         onNavigate = { destination -> mutableState.update { it.copy(destination = destination) } },
         onOnboardingNext = { advanceOnboarding(false) },
@@ -168,7 +182,22 @@ class AppController(application: Application) : AndroidViewModel(application) {
         },
         onDeleteRecord = ::deleteRecord,
         onDeleteAllRecords = ::deleteAllRecords,
-        onCheckUpdate = ::checkUpdate,
+        onCheckUpdate = { checkUpdate(true) },
+        onAutoUpdateChange = ::setAutomaticUpdates,
+        onOpenUpdate = {
+            val release = state.value.settings.updates.let { it.prompt ?: it.latest }
+            if (release != null && !state.value.settings.checkingUpdate) {
+                laterUpdate()
+                openUpdateUrl(release.downloadUrl ?: release.releaseUrl)
+            }
+        },
+        onOpenReleasePage = { openUpdateUrl("$REPOSITORY/releases") },
+        onLaterUpdate = ::laterUpdate,
+        onSkipUpdate = ::skipUpdate,
+        onRestoreUpdateReminders = {
+            updatePreferences.edit().remove("skipped_version").remove("later_version").remove("later_until").apply()
+            refreshUpdatePreferences()
+        },
         onOpenRepository = { openUrl(REPOSITORY) },
         onOpenUpstreamRepository = { openUrl("https://github.com/KorenKrita/simul-subtitle") },
         onDismissMessage = { mutableState.update { it.copy(message = null) } },
@@ -209,6 +238,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
             mutableState.update { it.copy(destination = UiDestination.LIVE) }
         }
         refresh()
+        if (onboardingStep == null && appEntered) checkStartupUpdate()
     }
 
     /** 给界面发布具体操作结果。 */
@@ -299,6 +329,7 @@ class AppController(application: Application) : AndroidViewModel(application) {
                     themeColorId = appearance.getString("color", ThemePalettes.DEFAULT_ID) ?: ThemePalettes.DEFAULT_ID,
                     customThemeSeed = appearance.getInt("custom_color", ThemePalettes.DEFAULT_CUSTOM_SEED),
                     launcherIcon = launcherIcons.current,
+                    updates = updatePreferenceState(old.settings.updates),
                     permissions = permissions,
                     subtitle = styleState(),
                     keepLogs = prefs.keepLogs,
@@ -627,27 +658,99 @@ class AppController(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 检查 Fork 的发行信息，不向上游自动覆盖安装本分支。 */
-    private fun checkUpdate() {
-        if (state.value.settings.checkingUpdate) return
-        mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = true, updateMessage = "正在检查安卓版本…")) }
-        viewModelScope.launch {
-            val text = withContext(Dispatchers.IO) {
-                runCatching {
-                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest").build()
-                    okhttp3.OkHttpClient.Builder().callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
-                        if (response.code == 404) "此 Fork 还没有发布安装包，当前版本 ${BuildConfig.VERSION_NAME}"
-                        else if (!response.isSuccessful) "检查失败：HTTP ${response.code}，可在项目页面查看版本"
-                        else "最新发行版：${org.json.JSONObject(response.body?.string().orEmpty()).optString("tag_name")}；可在项目页面查看并下载安装"
-                    }
-                }.getOrElse { "检查失败：${it.message}" }
+    /** 每次Activity会话只检查一次；旋转与系统授权返回会复用同一个控制器。 */
+    fun onAppStarted() { appEntered = true; checkStartupUpdate() }
+
+    /** 首次引导结束后才检查，关闭开关时不发网络请求。 */
+    private fun checkStartupUpdate() {
+        if (startupUpdateChecked || onboardingStep != null) return
+        startupUpdateChecked = true
+        if (updatePreferences.getBoolean("auto", true)) checkUpdate(false)
+    }
+
+    /** 把提醒偏好叠加到已有结果，字幕刷新不会清除检查状态。 */
+    private fun updatePreferenceState(old: AppUpdateUiState): AppUpdateUiState {
+        val checked = updatePreferences.getLong("last_checked", 0L)
+        return old.copy(autoCheck = updatePreferences.getBoolean("auto", true),
+            skippedVersion = updatePreferences.getString("skipped_version", "").orEmpty(),
+            laterVersion = updatePreferences.getString("later_version", "").orEmpty(),
+            laterUntil = updatePreferences.getLong("later_until", 0L),
+            lastChecked = if (checked > 0) java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(checked)) else "")
+    }
+
+    /** 只刷新更新分区，不改翻译草稿或导航位置。 */
+    private fun refreshUpdatePreferences() {
+        mutableState.update { it.copy(settings = it.settings.copy(updates = updatePreferenceState(it.settings.updates))) }
+    }
+
+    /** 停用自动检查同时作废其请求；手动发起的检查不受自动开关约束。 */
+    private fun setAutomaticUpdates(enabled: Boolean) {
+        updatePreferences.edit().putBoolean("auto", enabled).apply()
+        if (!enabled && !updateManual) {
+            updateGeneration++
+            updateJob?.cancel(); updateJob = null
+            mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = false)) }
+        }
+        mutableState.update { it.copy(settings = it.settings.copy(
+            updates = updatePreferenceState(it.settings.updates).copy(prompt = if (enabled) it.settings.updates.prompt else null))) }
+    }
+
+    /** 稍后提醒以版本为单位，新的发行版不会被旧版的延期隐藏。 */
+    private fun laterUpdate() {
+        val release = state.value.settings.updates.let { it.prompt ?: it.latest } ?: return
+        updatePreferences.edit().putString("later_version", release.versionName)
+            .putLong("later_until", updateClock() + 24 * 60 * 60 * 1000L).apply()
+        mutableState.update { it.copy(settings = it.settings.copy(updates = updatePreferenceState(it.settings.updates).copy(prompt = null))) }
+    }
+
+    /** 跳过仅作用于当前版本，手动检查仍可再次查看。 */
+    private fun skipUpdate() {
+        val release = state.value.settings.updates.let { it.prompt ?: it.latest } ?: return
+        updatePreferences.edit().putString("skipped_version", release.versionName).apply()
+        mutableState.update { it.copy(settings = it.settings.copy(updates = updatePreferenceState(it.settings.updates).copy(prompt = null))) }
+    }
+
+    /** 检查本Fork正式发行版，自动失败不打断使用，手动结果在更新页明确展示。 */
+    private fun checkUpdate(manual: Boolean) {
+        if (updateJob?.isActive == true) { if (manual) updateManual = true; return }
+        if (!manual && !updatePreferences.getBoolean("auto", true)) return
+        val generation = ++updateGeneration
+        updateManual = manual
+        mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = true,
+            updateMessage = "正在检查更新…", updates = it.settings.updates.copy(latest = null, prompt = null, checkFailed = false))) }
+        updateJob = viewModelScope.launch {
+            try {
+                val release = releaseSource.latest()
+                if (generation != updateGeneration) return@launch
+                val newer = release != null && ReleaseVersions.isNewer(release.versionName, BuildConfig.VERSION_NAME)
+                val ui = release?.takeIf { newer }?.let { UpdateReleaseUiState(it.versionName, it.notes, it.releaseUrl, it.downloadUrl) }
+                val current = updatePreferenceState(state.value.settings.updates)
+                val offer = newer && (updateManual || (current.autoCheck && current.skippedVersion != release!!.versionName &&
+                    (current.laterVersion != release.versionName || updateClock() >= current.laterUntil)))
+                updatePreferences.edit().putLong("last_checked", updateClock()).apply()
+                val text = when {
+                    release == null -> "此 Fork 尚未发布正式版本，当前版本 ${BuildConfig.VERSION_NAME}"
+                    !newer -> "已是最新版本（${BuildConfig.VERSION_NAME}）"
+                    else -> "发现新版本 ${release.versionName}"
+                }
+                mutableState.update { it.copy(settings = it.settings.copy(updateMessage = text,
+                    updates = updatePreferenceState(it.settings.updates).copy(latest = ui, prompt = if (offer) ui else null, checkFailed = false))) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (generation == updateGeneration) mutableState.update { it.copy(settings = it.settings.copy(
+                    updateMessage = "暂时无法检查更新，请稍后重试，或打开 GitHub 发布页查看。",
+                    updates = it.settings.updates.copy(checkFailed = true))) }
+            } finally {
+                if (generation == updateGeneration) {
+                    updateManual = false
+                    mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = false)) }
+                }
             }
-            mutableState.update { it.copy(settings = it.settings.copy(checkingUpdate = false, updateMessage = text)) }
         }
     }
 
     /** 销毁控制器时取消探测，避免离开应用后继续发送连接测试请求。 */
-    override fun onCleared() { prefs.unlisten(prefListener); cancelProbe(); generation?.cancel(); super.onCleared() }
+    override fun onCleared() { prefs.unlisten(prefListener); cancelProbe(); generation?.cancel(); updateJob?.cancel(); super.onCleared() }
 
     companion object { const val REPOSITORY = "https://github.com/ZOUYIQAQ/yuyi" }
 }

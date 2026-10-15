@@ -98,7 +98,7 @@ class FloatingSubtitlePreviewDeviceTest {
         compose.runOnIdle {
             assertFalse(style.showOriginal)
             assertFalse(style.showStats)
-            assertFalse(caption(stage).text.toString().contains("字幕の"))
+            assertFalse(caption(stage).text.toString().contains("このV何者気になるV、他とは違うVだから"))
             assertEquals(View.GONE, status(stage).visibility)
             assertEquals(2, subtitlePreviewLines(style).size)
             assertEquals("自动正文高度必须与服务的四成上限一致", (stage.watchingHeightPx * CaptionService.MAX_CAPTION_FRAC).toInt(), caption(stage).maxHeight)
@@ -116,7 +116,7 @@ class FloatingSubtitlePreviewDeviceTest {
             assertEquals(stage.watchingWidthPx * 0.8f, stage.captionView.measuredWidth.toFloat(), 1f)
             assertEquals(stage.watchingHeightPx * 0.2f, stage.captionView.captionHeightPx().toFloat(), 1f)
             assertEquals(10, subtitlePreviewLines(style).sumOf { it.zh.codePointCount(0, it.zh.length) })
-            assertTrue("字数额度只剩草稿时，原文应显示在黑框外", draftSource(stage).text.toString().contains("字幕の"))
+            assertTrue("字数额度只剩草稿时，原文应显示在黑框外", draftSource(stage).text.toString().contains("このV何者気になるV、他とは違うVだから"))
             assertEquals(View.VISIBLE, status(stage).visibility)
             style = style.copy(limitMode = CaptionLimitMode.SENTENCES, maxSentences = 5, keepChars = 10)
         }
@@ -140,8 +140,8 @@ class FloatingSubtitlePreviewDeviceTest {
             assertEquals(cardHeight + slotHeight, view.height)
             assertEquals(view.getChildAt(0).bottom, view.getChildAt(1).top)
             assertNull(view.getChildAt(1).background)
-            assertFalse("草稿不得出现在正式黑框里", caption(stage).text.contains("正在说"))
-            assertTrue(draftSource(stage).text.contains("字幕の"))
+            assertFalse("草稿不得出现在正式黑框里", caption(stage).text.contains("… "))
+            assertTrue(draftSource(stage).text.contains("このV何者気になるV、他とは違うVだから"))
             finalOnly = true
         }
         compose.waitForIdle()

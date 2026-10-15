@@ -16,14 +16,18 @@ import java.util.UUID
 /** 在隔离偏好上验证句数范围、旧配置迁移和控制器绑定，不启动字幕服务。 */
 @RunWith(AndroidJUnit4::class)
 class SentenceRangeDeviceTest {
-    /** 首次使用沿用旧最少默认值，最多默认四句，重建偏好后保持一致。 */
+    /** 新版默认保留三句，旧区间默认值不变，重建偏好后保持一致。 */
     @Test fun defaultsPersistAcrossPrefsRecreation() = withPreferences { application, stored ->
         val prefs = Prefs(application)
         assertEquals(CaptionBoard.DEFAULT_SENTENCES..4, prefs.sentenceRange())
         assertEquals(CaptionBoard.DEFAULT_SENTENCES, stored.getInt("keepSentences", -1))
         assertEquals(4, stored.getInt("maxSentences", -1))
         assertEquals(prefs.sentenceRange(), Prefs(application).sentenceRange())
-        assertEquals(4, SubtitleStyleUiState().maxSentences)
+        assertEquals(3, prefs.captionSentenceCount)
+        assertEquals(3, stored.getInt("captionSentenceCount", -1))
+        assertEquals(3, Prefs(application).captionSentenceCount)
+        assertEquals(CaptionLimitMode.SENTENCES, prefs.captionLimitMode)
+        assertEquals(3, SubtitleStyleUiState().maxSentences)
         assertEquals(8, SubtitleStyleUiState(keepSentences = 8).maxSentences)
     }
 
@@ -41,6 +45,8 @@ class SentenceRangeDeviceTest {
     ) { application, stored ->
         val prefs = Prefs(application)
         assertEquals(8..8, prefs.sentenceRange())
+        assertEquals(8, prefs.captionSentenceCount)
+        assertEquals(8, Prefs(application).captionSentenceCount)
         assertEquals(237, prefs.keepChars)
         assertEquals(22f, prefs.textSp, 0f)
         assertEquals(7, prefs.maxCaptionLines)
@@ -57,7 +63,9 @@ class SentenceRangeDeviceTest {
     @Test fun legacySmallMinimumKeepsDefaultMaximum() = withPreferences(
         seed = { putInt("keepSentences", 1) },
     ) { application, _ ->
-        assertEquals(1..4, Prefs(application).sentenceRange())
+        val prefs = Prefs(application)
+        assertEquals(1..4, prefs.sentenceRange())
+        assertEquals(4, prefs.captionSentenceCount)
     }
 
     /** 已存最多值不能在重新创建偏好对象时被迁移默认值覆盖。 */
@@ -66,8 +74,26 @@ class SentenceRangeDeviceTest {
     ) { application, _ ->
         val prefs = Prefs(application)
         assertEquals(3..9, prefs.sentenceRange())
+        assertEquals(9, prefs.captionSentenceCount)
+        assertEquals(9, Prefs(application).captionSentenceCount)
         prefs.setSentenceRange(2, 6)
         assertEquals(2..6, Prefs(application).sentenceRange())
+    }
+
+    /** 已有新版句数和字数模式优先于旧区间，三句默认不会覆盖显式选择。 */
+    @Test fun explicitRetentionOverridesLegacyMaximum() = withPreferences(
+        seed = {
+            putInt("maxSentences", 9)
+            putInt("captionSentenceCount", 7)
+            putString("captionLimitMode", CaptionLimitMode.CHARACTERS.name)
+            putInt("keepChars", 211)
+        },
+    ) { application, _ ->
+        val prefs = Prefs(application)
+        assertEquals(7, prefs.captionSentenceCount)
+        assertEquals(CaptionLimitMode.CHARACTERS, prefs.captionLimitMode)
+        assertEquals(211, prefs.keepChars)
+        assertEquals(7, Prefs(application).captionSentenceCount)
     }
 
     /** 迁移时修正旧越界值和反向区间，并持久化合法的两个端点。 */
@@ -151,6 +177,7 @@ class SentenceRangeDeviceTest {
     @Test fun freshDefaultsAndExplicitPreferencesArePreserved() = withPreferences { application, _ ->
         val prefs=Prefs(application)
         assertEquals(CaptionLimitMode.SENTENCES,prefs.captionLimitMode)
+        assertEquals(3,prefs.captionSentenceCount)
         assertFalse(prefs.showJa)
         assertFalse(prefs.showStats)
         prefs.showJa=true;prefs.showStats=true

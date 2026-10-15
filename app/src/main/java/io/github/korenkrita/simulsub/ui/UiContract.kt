@@ -166,7 +166,7 @@ data class SubtitleStyleUiState(
     val maxTextSp: Float = 40f,
     val minWidthFraction: Float = 0.4f,
     /** 显示句数包含草稿；keepSentences仅用于旧配置迁移，不参与新版保留策略。 */
-    val maxSentences: Int = maxOf(4, keepSentences.coerceIn(1, 10)),
+    val maxSentences: Int = maxOf(3, keepSentences.coerceIn(1, 10)),
     val limitMode: CaptionLimitMode = CaptionLimitMode.SENTENCES,
 )
 
@@ -189,6 +189,21 @@ data class AdvancedUiState(
 /** 使用记录由本地日志索引提供；share 只传记录标识，由控制器创建分享 Intent。 */
 data class UsageRecordUiState(val id: String, val title: String, val timeLabel: String, val detail: String, val sharing: Boolean = false, val active: Boolean = false)
 
+/** 更新提示只使用已经核对来源的发行数据，链接由控制器交给系统浏览器。 */
+data class UpdateReleaseUiState(val versionName: String, val notes: String, val releaseUrl: String, val downloadUrl: String? = null)
+
+/** 自动提醒与检查结果独立，关闭自动检查后仍可手动查看发行版。 */
+data class AppUpdateUiState(
+    val autoCheck: Boolean = true,
+    val skippedVersion: String = "",
+    val laterVersion: String = "",
+    val laterUntil: Long = 0L,
+    val lastChecked: String = "",
+    val checkFailed: Boolean = false,
+    val latest: UpdateReleaseUiState? = null,
+    val prompt: UpdateReleaseUiState? = null,
+)
+
 /** 设置分区的草稿与持久化状态由控制器统一维护。 */
 data class SettingsUiState(
     val api: TranslationApiUiState = TranslationApiUiState(),
@@ -205,6 +220,7 @@ data class SettingsUiState(
     val recordsLoading: Boolean = false,
     val recordsMessage: UiMessage? = null,
     val version: String = "",
+    val updates: AppUpdateUiState = AppUpdateUiState(),
     val updateMessage: String = "",
     val checkingUpdate: Boolean = false,
 )
@@ -273,6 +289,12 @@ data class SimulSubActions(
     val onDeleteRecord: (String) -> Unit = {},
     val onDeleteAllRecords: () -> Unit = {},
     val onCheckUpdate: () -> Unit = {},
+    val onAutoUpdateChange: (Boolean) -> Unit = {},
+    val onOpenUpdate: () -> Unit = {},
+    val onOpenReleasePage: () -> Unit = {},
+    val onLaterUpdate: () -> Unit = {},
+    val onSkipUpdate: () -> Unit = {},
+    val onRestoreUpdateReminders: () -> Unit = {},
     val onOpenRepository: () -> Unit = {},
     val onOpenUpstreamRepository: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},

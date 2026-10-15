@@ -9,6 +9,11 @@ class Prefs(ctx: Context) {
     init {
         ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
         val range = sentenceRange()
+        // 在旧区间补齐前区分新安装与旧配置；新版显式选择始终优先。
+        if (!sp.contains("captionSentenceCount")) {
+            val sentences = if (sp.contains("maxSentences") || sp.contains("keepSentences")) range.last else 3
+            sp.edit().putInt("captionSentenceCount", sentences).apply()
+        }
         if (!sp.contains("maxSentences") || sp.getInt("keepSentences", CaptionBoard.DEFAULT_SENTENCES) != range.first ||
             sp.getInt("maxSentences", range.last) != range.last) {
             setSentenceRange(range.first, range.last)
@@ -95,9 +100,9 @@ class Prefs(ctx: Context) {
     val captionLimitMode: CaptionLimitMode
         get() = runCatching { CaptionLimitMode.valueOf(sp.getString("captionLimitMode", null).orEmpty()) }.getOrDefault(CaptionLimitMode.SENTENCES)
 
-    /** 保留旧区间的上限作为新句数值，不再使用区间下限。 */
+    /** 新安装默认三句；旧区间上限在初始化时迁移，已保存值保持不变。 */
     val captionSentenceCount: Int
-        get() = sp.getInt("captionSentenceCount", sentenceRange().last).coerceIn(1, 10)
+        get() = sp.getInt("captionSentenceCount", 3).coerceIn(1, 10)
 
     /** 同一编辑原子保存模式及两个独立记忆值，切换模式不会丢失另一种设置。 */
     fun setCaptionRetention(mode: CaptionLimitMode, sentences: Int, chars: Int) {

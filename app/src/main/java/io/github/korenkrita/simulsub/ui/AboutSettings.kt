@@ -48,11 +48,9 @@ internal fun AboutSettings(state: SettingsUiState, actions: SimulSubActions, wid
             SupportingText("语音模型与其他依赖遵循各自许可，模型许可可在模型库查看。")
         } }
         item { SettingsCard {
-            SectionHeading("项目与更新", "识别模型在本机运行，翻译服务由你选择。")
+            SectionHeading("项目", "更新检查与提醒在「设置 → 应用更新」中管理。")
             OutlinedButton(onClick = actions.onOpenRepository, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("打开本 Fork 仓库") }
-            Button(onClick = actions.onCheckUpdate, enabled = !state.checkingUpdate, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(if (state.checkingUpdate) "正在检查…" else "检查更新") }
-            if (state.checkingUpdate) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (state.updateMessage.isNotEmpty()) MessagePanel(UiMessage(state.updateMessage))
+
         } }
     })
     if (showLicense) AlertDialog(onDismissRequest = { showLicense = false }, title = { Text("MIT License") },

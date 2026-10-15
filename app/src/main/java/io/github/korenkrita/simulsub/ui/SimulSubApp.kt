@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
@@ -74,7 +75,18 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
     val isDetail = state.destination == UiDestination.MODELS || state.destination == UiDestination.SCENES
     BackHandler(enabled = isDetail && !(state.destination == UiDestination.SCENES && state.scenes.editor != null), onBack = returnFromDetail)
     BackHandler(enabled = state.destination == UiDestination.SETTINGS && settingsSection != null, onBack = returnToSettings)
+    val updatePrompt = state.settings.updates.prompt
+    val canShowUpdate = updatePrompt != null && !state.live.running && !state.live.busy &&
+        !editingApi && pendingApiExit == null && state.scenes.editor == null
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    var updateDialogOpened by remember(updatePrompt?.versionName) { mutableStateOf(false) }
+    // 已有对话框会让Activity窗口失焦；更新自身取得焦点后保留打开状态，避免反复开关。
+    LaunchedEffect(canShowUpdate, windowFocused, updatePrompt?.versionName) {
+        if (!canShowUpdate) updateDialogOpened = false
+        else if (windowFocused) updateDialogOpened = true
+    }
     SimulSubTheme(state.settings) {
+        if (canShowUpdate && updateDialogOpened) UpdatePrompt(updatePrompt!!, routedActions)
         if (pendingApiExit != null) {
             AlertDialog(
                 onDismissRequest = { pendingApiExit = null },

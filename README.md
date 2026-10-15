@@ -4,11 +4,9 @@
 
 **仅支持 Android 手机和平板。** 本 Fork 已移除其他平台客户端与专属工具，不提供 Windows、macOS 或其他平台版本。
 
-基于 [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle) 的安卓 Fork，原作者为 **KorenKrita**，由 **ZOUYIQAQ** 维护本分支，当前版本 **1.4.0**。保留原项目的 MIT 版权与许可声明。应用包名为 `io.github.zouyiqaq.yuyi`，可与原版 `io.github.korenkrita.simulsub` 共存，数据与权限独立。
+基于 [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle) 的安卓 Fork，原作者为 **KorenKrita**，由 **ZOUYIQAQ** 维护本分支，当前版本 **1.5.0**。保留原项目的 MIT 版权与许可声明。应用包名为 `io.github.zouyiqaq.yuyi`，可与原版 `io.github.korenkrita.simulsub` 共存，数据与权限独立。
 
 默认图标采用用户提供的矢量轮廓，保留变色背景、山茶花与飘落装饰。在「设置 → 外观」选择彩色或纯色样式、背景及飘落花瓣；开关同时控制右下绿叶。纯色提供10种预设色，默认跟随主题相近色，也可手动固定。支持 Android 自适应裁切与系统主题图标。
-
-![羽译图标](docs/images/icon.png)
 
 在 Android 上识别正在播放的声音，通过你自己的翻译 API 显示悬浮字幕。语音识别与静音检测在设备本地运行，翻译服务接收文字。支持手机和平板；仓库只保留 Android 产品及其共享核心。
 
@@ -27,51 +25,24 @@
 
 ## 界面
 
-| 同传 | 模型库 | 翻译 API |
+| 同传 | 模型库 | 字幕样式预览 |
 |---|---|---|
-| ![同传首页](docs/images/screens/home.png) | ![模型库](docs/images/screens/models.png) | ![翻译 API](docs/images/screens/translate.png) |
+| ![同传首页](docs/images/screens/home.png) | ![模型库](docs/images/screens/models.png) | ![字幕样式预览](docs/images/screens/subtitle.png) |
 
-| 实际悬浮字幕 | 字幕设置预览 | 外观 |
-|---|---|---|
-| ![实际悬浮字幕](docs/images/screens/caption.png) | ![字幕设置中的预览示例](docs/images/screens/subtitle.png) | ![外观设置](docs/images/screens/appearance.png) |
+<details>
+<summary>平板同传</summary>
 
-| 场景术语 | 深色界面 |
-|---|---|
-| ![场景术语](docs/images/screens/scenes.png) | ![深色界面](docs/images/screens/dark.png) |
+![平板同传](docs/images/screens/tablet-home.png)
 
-| 平板同传 | 平板模型库 | 平板设置 |
-|---|---|---|
-| ![平板同传](docs/images/screens/tablet-home.png) | ![平板模型库](docs/images/screens/tablet-models.png) | ![平板设置](docs/images/screens/tablet-settings.png) |
+</details>
 
-| 设置首页 | 字幕保留方式 | 关于页 |
-|---|---|---|
-| ![设置首页](docs/images/screens/settings.png) | ![字幕保留方式](docs/images/screens/sentence-range.png) | ![关于页](docs/images/screens/about.png) |
+本文仅展示4张代表截图，截图文件与历史验收记录保留。
 
-| 横屏预览（原大局部） | 图标选色 | 自定义主题色 |
-|---|---|---|
-| ![横屏字幕局部预览](docs/images/screens/subtitle-landscape.png) | ![纯色图标选色](docs/images/screens/icon-colors.png) | ![自定义主题色](docs/images/screens/custom-color.png) |
-
-| 按字数保留 | 场景编辑固定返回 |
-|---|---|
-| ![按字数保留字幕](docs/images/screens/character-limit.png) | ![场景编辑左上返回](docs/images/screens/scene-editor.png) |
-
-当前界面图为羽译 1.4.0 在 2026-10-15 本机 API 35 模拟器的真实截图，平板图使用平板窗口尺寸；实际悬浮字幕图也来自本轮真实内录与离线识别，译文由本地固定响应夹具提供，不代表云服务翻译质量。
+当前界面图为羽译 1.5.0 在 2026-10-15 本机 API 35 模拟器的真实截图，平板图使用平板窗口尺寸。字幕样式图为设置预览。
 
 界面编排参考[FlClash](https://github.com/chen08209/FlClash)的Material You层级与卡片组织，保留本项目自身的Compose技术栈，使用官方Compose Material3 1.4.0稳定组件；容器按层级使用描边与分割线，同一层级保持一致，未统一去除边框。
 
-窄屏为底部导航，宽屏为侧边导航；页面按可用宽度排布。设置首页以分组列表汇总入口，主导航为「同传／字幕／设置」；模型库、场景与术语、权限管理和首次配置引导归入设置。点按分组条目进入独立详情页，返回由顶栏与系统返回统一处理。字幕设置中的示例用于预览样式，实际浮窗见上方「实际悬浮字幕」。
-
-| 首次权限配置 | 翻译 API 配置 | 下载启用模型 |
-|---|---|---|
-| ![权限引导](docs/images/screens/onboarding-permissions.png) | ![API引导](docs/images/screens/onboarding-api.png) | ![模型引导](docs/images/screens/onboarding-model.png) |
-
-| 模型删除确认 | 可用地址确认 | 未保存退出确认 |
-|---|---|---|
-| ![模型删除](docs/images/screens/model-delete.png) | ![地址确认](docs/images/screens/api-endpoint.png) | ![退出确认](docs/images/screens/api-unsaved.png) |
-
-| 暖色冷启动 | 深色冷启动 |
-|---|---|
-| ![暖色启动](docs/images/screens/startup-warm.png) | ![深色启动](docs/images/screens/startup-dark.png) |
+窄屏为底部导航，宽屏为侧边导航；页面按可用宽度排布。设置首页以分组列表汇总入口，主导航为「同传／字幕／设置」；模型库、场景与术语、权限管理和首次配置引导归入设置。点按分组条目进入独立详情页，返回由顶栏与系统返回统一处理。字幕设置中的示例仅用于预览样式，不代表实际悬浮字幕。
 
 ## 模型与翻译
 
@@ -90,7 +61,7 @@ APK 不内置 ASR 或 VAD 权重。模型下载到应用私有目录，校验字
 
 - **同传**：选择原声、译文语言和场景，切换「仅显示定稿」。原声选项随已启用模型变化；目标语言也可自行填写。
 - **设置 → 场景与术语**：编辑入口，编辑背景、固定译名，或调用自己的翻译服务生成术语；生成后需检查并保存。
-- **字幕**（设置也可进入）：配色、字号、透明度、宽高与字幕保留方式。默认只显示译文、不显示耗时；原文和耗时可独立开启。非仅定稿模式在黑框外固定预留实时草稿区域，避免底部浮窗随草稿出现消失而抖动。显示限制二选一：默认「按句数」显示最近1–10句（包含草稿）；「按字数」保留最多10–300个译文字数，按Unicode码点计数，超长句保留最新尾部。没有行数、最少句数或字数阈值叠加；实际可见内容仍受屏幕及字幕框物理尺寸约束。只影响显示，不改日志、原始定稿或翻译上下文。页面内的可拖动悬浮预览持续更新，可切换横屏/竖屏画幅。
+- **字幕**（设置也可进入）：配色、字号、透明度、宽高与字幕保留方式。默认只显示译文、不显示耗时；原文和耗时可独立开启。非仅定稿模式在黑框外固定预留实时草稿区域，避免底部浮窗随草稿出现消失而抖动。显示限制二选一：默认「按句数」保留最近3句，可选1–10句（包含草稿）；「按字数」保留最多10–300个译文字数，按Unicode码点计数，超长句保留最新尾部。没有行数、最少句数或字数阈值叠加；实际可见内容仍受屏幕及字幕框物理尺寸约束。只影响显示，不改日志、原始定稿或翻译上下文。页面内的可拖动悬浮预览持续更新，可切换横屏/竖屏画幅。
 - **设置 → 外观**：海蓝、松绿、鸢尾、山茶、蔷薇、岩灰六色，也可输入任意六位十六进制颜色或使用色相、饱和度、明度滑杆自定义，Android 12 及以上可动态取色，旧系统回退所选配色。浅色、深色或跟随系统独立设置，应用外观与字幕配色分开。
 - **设置 → 高级设置**：结合上文翻译、衔接重复字处理、Jev 智能断句与译文检查。Jev 默认关闭，开启后发送文字到第三方服务，可能计费或限速。
 - **设置 → 系统权限**：查看和调整录音、悬浮字幕与通知授权；首页仅提示尚未完成的必要权限。
@@ -100,7 +71,7 @@ APK 不内置 ASR 或 VAD 权重。模型下载到应用私有目录，校验字
 
 ## 更新与构建
 
-「设置 → 关于 → 检查更新」只读取 [ZOUYIQAQ/yuyi 的 latest release](https://api.github.com/repos/ZOUYIQAQ/yuyi/releases/latest) 并显示发行标签；「打开本 Fork 仓库」打开项目页，由用户自行查看与下载。当前没有自动检查、应用内下载或安装、更新代理回退、跳过版本或关闭自动检查的开关。
+「设置 → 应用更新」：默认在启动时检测更新，可关闭自动检查，也可手动检查；支持稍后提醒、跳过指定版本和恢复提醒。更新按钮通过浏览器打开本 Fork 的 GitHub APK 下载链接，缺少 APK 时打开[发布页](https://github.com/ZOUYIQAQ/yuyi/releases)，不在应用内下载或安装。发行版列表以GitHub实际发布为准。
 
 自行构建见[构建与开发](docs/build.md)。当前构建入口为 `:core` 与 `:app`，不分发 macOS / Windows 版本。
 
