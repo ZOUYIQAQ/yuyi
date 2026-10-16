@@ -8,10 +8,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/** 主操作固定在导航栏上方，手机占满可用宽度，平板限宽居中，滚动时仍可触达。 */
+/** 主操作嵌入会话控制舱，以紧凑圆角大按钮保持辨识度，大字号允许文案换行增高。 */
 @Composable
 internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     val missingPermission = state.permissions.firstOrNull { it.required && !it.granted }
@@ -29,21 +31,18 @@ internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
         missingPermission != null -> ({ actions.onPermission(missingPermission.id) })
         else -> actions.onStart
     }
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.widthIn(max = 512.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
-                Button(
-                    onClick = action, enabled = !state.busy,
-                    modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().heightIn(min = 72.dp).testTag("live-primary-action"),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp),
-                ) {
-                    Icon(if (state.running) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, Modifier.size(32.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleLarge)
-                }
-            }
+    Button(
+        onClick = action, enabled = !state.busy,
+        modifier = Modifier.widthIn(max = if (LocalDensity.current.fontScale >= 1.5f) 240.dp else 160.dp)
+            .fillMaxWidth().heightIn(min = 148.dp).testTag("live-primary-action"),
+        shape = MaterialTheme.shapes.extraLarge,
+        contentPadding = PaddingValues(16.dp),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(if (state.running) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, Modifier.size(40.dp))
+            Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center)
         }
     }
 }

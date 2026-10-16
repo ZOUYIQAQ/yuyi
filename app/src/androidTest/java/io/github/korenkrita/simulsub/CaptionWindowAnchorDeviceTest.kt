@@ -102,6 +102,7 @@ class CaptionWindowAnchorDeviceTest {
         val wm = context.getSystemService(WindowManager::class.java)
         val frames = CopyOnWriteArrayList<Pair<Int, Int>>()
         val details = CopyOnWriteArrayList<String>()
+        val heights = CopyOnWriteArrayList<Int>()
         var phase = 0
         var attached = false
         lateinit var view: CaptionOverlayView
@@ -158,6 +159,7 @@ class CaptionWindowAnchorDeviceTest {
                     origin.aligned(screenLocation[1], params.y, view.finalLineBaselineInWindowPx(), anchor.baseline ?: 0)
                 }
                 drawing = ViewTreeObserver.OnDrawListener {
+                    heights += view.captionHeightPx()
                     val text = ((view.getChildAt(0) as FrameLayout).getChildAt(0) as LinearLayout).getChildAt(0) as TextView
                     val location = IntArray(2)
                     text.getLocationOnScreen(location)
@@ -197,6 +199,8 @@ class CaptionWindowAnchorDeviceTest {
                 awaitFrame(frames, index + 1)
                 Thread.sleep(80)
                 assertTrue("底部悬浮窗出现偏移帧：${frames.toList()}；详情：$details", frames.all { it.second == expected })
+                // 草稿背景允许200ms伸展；贴底像素在过渡结束后检查，基线仍逐帧保持不动。
+                if (index in listOf(0, 1)) Thread.sleep(250)
                 if (index in listOf(0, 1)) instrumentation.runOnMainSync {
                     view.getLocationOnScreen(screenLocation)
                     assertEquals("有草稿时字幕窗口必须真正贴到可用区域底部", areaTop + availableHeight,
@@ -211,6 +215,25 @@ class CaptionWindowAnchorDeviceTest {
                 }
             }
             assertTrue(frames.size >= examples.size + 1)
+            // 先建立确定的起点，不能把前面自动高度的未完过渡误当作本次配置起点。
+            instrumentation.runOnMainSync { view.setCaptionHeight((context.resources.displayMetrics.density * 100).toInt(), animate = false) }
+            awaitStableWindow(view, params, areaTop, expected)
+            // 同一生产守卫下验证高度过渡，不能只在没有定位守卫的Activity中看到动画。
+            for (targetDp in listOf(150, 60)) {
+                var initial = 0
+                val target = (context.resources.displayMetrics.density * targetDp).toInt()
+                instrumentation.runOnMainSync {
+                    heights.clear()
+                    initial = view.captionHeightPx()
+                    view.setCaptionHeight(target)
+                }
+                val deadline = System.currentTimeMillis() + 3_000
+                while (view.captionHeightPx() != target && System.currentTimeMillis() < deadline) Thread.sleep(16)
+                assertTrue("生产浮窗必须画出中间高度：$initial → $heights → $target",
+                    heights.any { it in (minOf(initial, target) + 1) until maxOf(initial, target) })
+                assertEquals(target, view.captionHeightPx())
+                assertTrue("高度动画不能移动正式末行锚点：$details", frames.all { it.second == expected })
+            }
             // 阶段标记可能先记录上一份排版的绘制；长文换短文后还须等待系统应用新窗口位置。
             // 每一帧基线断言仍保留，不能把尚未完成的文本重排误算为点击工具栏造成的位移。
             val stableWindow = awaitStableWindow(view, params, areaTop, expected)

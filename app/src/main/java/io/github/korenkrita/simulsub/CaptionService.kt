@@ -557,7 +557,7 @@ class CaptionService : Service() {
         sessionState.value = SessionSnapshot(running, status, shown)
         val v = overlay ?: return@post
         val showJa = prefs.showJa
-        val lines = shown.map { CaptionOverlayView.Line(it.zh, if (showJa) it.ja else null, it.isFinal) }
+        val lines = shown.map { CaptionOverlayView.Line(it.zh, if (showJa) it.ja else null, it.isFinal, it.segmentId) }
         // status messages (loading, errors, overload) always show; timings only when enabled in settings
         val diag = buildString {
             if (status.isNotEmpty()) append(status)
@@ -693,11 +693,11 @@ class CaptionService : Service() {
             if (captionH == 0) captionH = v.captionHeightPx() // start from what is on screen (also when auto)
             val maxCap = (sh * MAX_CAPTION_FRAC).toInt()
             var want = (captionH + if (top) -dy else dy).coerceIn(v.minCaptionPx(), maxCap.coerceAtLeast(v.minCaptionPx()))
-            v.setCaptionHeight(want)
+            v.setCaptionHeight(want, animate = false)
             // the card may not grow past the screen edge it is growing toward
             val newH = v.measureCardHeight(cardW)
             val limit = if (top) fixedBottom else sh - fixedTop - v.draftSlotHeightPx()
-            if (newH > limit) { want = (want - (newH - limit)).coerceAtLeast(v.minCaptionPx()); v.setCaptionHeight(want) }
+            if (newH > limit) { want = (want - (newH - limit)).coerceAtLeast(v.minCaptionPx()); v.setCaptionHeight(want, animate = false) }
             captionH = want
             cardY = if (top) fixedBottom - v.measureCardHeight(cardW) else fixedTop
             baselineAnchor.reset()

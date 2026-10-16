@@ -35,7 +35,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
     private val card = FrameLayout(ctx)
-    private val text = CaptionTextView(ctx)
+    private val text = CaptionTextView(ctx, animateChanges = true)
     private val stats = TextView(ctx)
     /** 草稿布局预留伸展空间，由统一背景包住可见文字，不改变定稿的位置。 */
     private val draftSlot = LinearLayout(ctx)
@@ -43,6 +43,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private val draftText = CaptionTextView(ctx)
     private var draftSlotEnabled = false
     private var reserveDraftSpace = false
+    private var draftBackgroundFraction = 0f
+    private var draftBackgroundTarget = false
+    private var draftBackgroundAnimator: android.animation.ValueAnimator? = null
     private var draftOriginalShown = false
     /** resize marks, one per corner: top-left, top-right, bottom-right, bottom-left */
     private val corners = List(4) { android.widget.ImageView(ctx) }
@@ -133,6 +136,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     fun setReserveDraftSpace(enabled: Boolean) {
         if (reserveDraftSpace == enabled) return
         reserveDraftSpace = enabled
+        updateDraftBackground()
         invalidate()
     }
 
@@ -166,6 +170,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             minOf(requestedStatusMax, (room - minCaptionPx()).coerceAtLeast(0))
         if (stats.maxHeight != statusCap) stats.maxHeight = statusCap
         captionMaxPx = if (room == Int.MAX_VALUE) requestedCaptionMax else minOf(requestedCaptionMax, room - statusCap)
+        text.animationHeightLimit = captionMaxPx.coerceAtLeast(0)
         applyCaptionHeight()
     }
 
@@ -198,13 +203,51 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         applyWindowHeightBudget()
     }
 
-    /** 统一绘制正文和草稿的圆角背景；只有背景向下伸展，布局和定稿不随草稿改变。 */
+    /** 临时背景单独过渡，不改变草稿布局预算或正式文字位置。 */
+    private fun updateDraftBackground() {
+        val target = draftSlotEnabled && (reserveDraftSpace || draftText.visibility == VISIBLE)
+        if (draftBackgroundTarget == target) return
+        draftBackgroundTarget = target
+        val from = draftBackgroundFraction
+        draftBackgroundAnimator?.cancel()
+        draftBackgroundAnimator = null
+        val to = if (target) 1f else 0f
+        if (!isAttachedToWindow || !isLaidOut || !android.animation.ValueAnimator.areAnimatorsEnabled()) {
+            draftBackgroundFraction = to
+            return
+        }
+        draftBackgroundAnimator = android.animation.ValueAnimator.ofFloat(from, to).apply {
+            duration = 200L
+            interpolator = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener { draftBackgroundFraction = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    /** 统一绘制连续圆角背景；正文由视口高度过渡，草稿只改变背景下沿。 */
     override fun dispatchDraw(canvas: Canvas) {
-        val bottom = if (draftSlotEnabled && (reserveDraftSpace || draftText.visibility == VISIBLE))
-            maxOf(card.bottom, draftSlot.bottom) else card.bottom
+        val extension = if (draftSlotEnabled) (draftSlot.bottom - card.bottom).coerceAtLeast(0) else 0
+        val bottom = card.bottom + (extension * draftBackgroundFraction).toInt()
         bg.setBounds(card.left, card.top, card.right, bottom)
         bg.draw(canvas)
         super.dispatchDraw(canvas)
+    }
+
+    /** 伸展中的背景没有覆盖到的草稿先裁切，文字始终位于黑框内，工具栏保持独立。 */
+    override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+        if (child !== draftSlot) return super.drawChild(canvas, child, drawingTime)
+        val save = canvas.save()
+        canvas.clipRect(bg.bounds)
+        val drawn = super.drawChild(canvas, child, drawingTime)
+        canvas.restoreToCount(save)
+        return drawn
+    }
+
+    /** 离开页面或停止服务立即停止背景回调，重新附着时显示已选择的最终状态。 */
+    override fun onDetachedFromWindow() {
+        draftBackgroundAnimator?.cancel(); draftBackgroundAnimator = null
+        draftBackgroundFraction = if (draftBackgroundTarget) 1f else 0f
+        super.onDetachedFromWindow()
     }
 
     /** 返回最后一行正式字幕的基线偏移，草稿与耗时信息不参与定位。 */
@@ -310,11 +353,11 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         text.requestLayout()
     }
 
-    /**
-     * Fixed caption area height in px (0 = fit the text, up to the max height). Text stays bottom-aligned, so
-     * when it does not fit the newest lines are shown and older ones are cut off at the top.
-     */
-    fun setCaptionHeight(px: Int) { captionFixedPx = px; applyCaptionHeight() }
+    /** 固定正文高度，零为自动；超出后显示最新尾部，手指缩放可关闭补间以保持跟手。 */
+    fun setCaptionHeight(px: Int, animate: Boolean = true) {
+        if (!animate) text.followResizeGesture()
+        captionFixedPx = px; applyCaptionHeight()
+    }
     /** 限行时严格遵守高度上限；不限行时保留原有的最小一行及固定高度行为。 */
     private fun applyCaptionHeight() {
         if (text.captionLineLimit > 0) {
@@ -427,6 +470,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 应用字号和背景样式，同时重建原文的绝对字号 Span 以便重新排版。 */
     fun applyStyle(sizeSp: Float, alpha: Float) {
+        if (textSp != sizeSp) text.finishTransitions()
+        text.refreshSpanStyle()
+        draftText.refreshSpanStyle()
         textSp = sizeSp; bgAlpha = alpha
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
         draftText.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp * 0.85f)
@@ -456,22 +502,31 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** 切换字幕配色，并同步正式正文与临时区域的样式。 */
     fun setColors(p: Palette) {
         if (p === colors) return
+        text.finishTransitions()
         colors = p
         text.setTextColor(p.zh); stats.setTextColor(p.stats)
         applyStyle(textSp, bgAlpha)
     }
 
-    /** One entry per visible line: Chinese text, optional Japanese, draft flag. */
-    class Line(val zh: String, val ja: String?, val isFinal: Boolean)
+    /** 一条字幕包含译文、可选原文、定稿标记与稳定段编号；长句仍按原生规则换行。 */
+    class Line(val zh: String, val ja: String?, val isFinal: Boolean, val key: Long? = null)
 
     /** 草稿使用独立布局与统一背景；保留传入快照的显示裁剪结果，不修改字幕板。 */
     fun setLines(lines: List<Line>, statsLine: String?) {
+        val before = lastLines.filter { it.isFinal }
+        val after = lines.filter { it.isFinal }
+        val newTail = after.lastOrNull()
+        val priorTail = before.lastOrNull()
+        val added = newTail != null && (priorTail == null || if (newTail.key != null && priorTail.key != null)
+            newTail.key != priorTail.key else before.any { old -> after.any { it.zh == old.zh } } && newTail.zh != priorTail.zh)
         lastLines = lines; lastStats = statsLine
+        var enteringOffset: Int? = null
         val sb = SpannableStringBuilder()
         val jaPx = (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSp * 0.62f, resources.displayMetrics)).toInt()
         for (l in lines) {
             if (draftSlotEnabled && !l.isFinal) continue
             if (sb.isNotEmpty()) sb.append('\n')
+            if (added && l === newTail) enteringOffset = sb.length
             if (!l.ja.isNullOrEmpty()) {
                 val s = sb.length
                 sb.append(l.ja).append('\n')
@@ -487,7 +542,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
                 sb.setSpan(android.text.style.RelativeSizeSpan(0.85f), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
-        text.setCaption(sb)
+        text.setCaption(sb, enteringOffset)
         val draft = if (draftSlotEnabled) lines.lastOrNull { !it.isFinal } else null
         draftSource.text = draft?.ja ?: ""
         val draftCaption = SpannableStringBuilder()
@@ -501,67 +556,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         draftText.setCaption(draftCaption)
         // 空槽仍参与测量，只隐藏字形；不能用 GONE 折叠整个草稿区。
         draftText.visibility = if (draft == null) INVISIBLE else VISIBLE
+        updateDraftBackground()
         stats.text = statsLine ?: ""
         stats.visibility = if (statsLine.isNullOrEmpty()) GONE else VISIBLE
         invalidate()
-    }
-
-    /** 沿用 TextView 原生排版，仅在测量时从正文末尾选择能够完整容纳的实际行。 */
-    private class CaptionTextView(ctx: Context) : androidx.appcompat.widget.AppCompatTextView(ctx) {
-        var captionLineLimit = 0
-        private var fullCaption: CharSequence = ""
-        private var shortened = false
-
-        /** 保存未截取的完整富文本，供宽度、字号和高度改变后重新排版。 */
-        fun setCaption(value: CharSequence) {
-            fullCaption = value
-            shortened = false
-            text = value
-        }
-
-        /** 使用真实行起点截取；再次测量截取结果，保证混合字号和首行字体留白也完整装入。 */
-        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            if (shortened) {
-                text = fullCaption
-                shortened = false
-            }
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            if (captionLineLimit == 0) return
-            scrollTo(0, 0)
-            while (text.isNotEmpty()) {
-                val placed = layout ?: break
-                val available = measuredHeight - compoundPaddingTop - compoundPaddingBottom
-                val first = (placed.lineCount - captionLineLimit).coerceAtLeast(0)
-                if (first == 0 && placed.height <= available) break
-                // 先按行数跳过旧行；高度仍不足时再移走最旧的一行，直至整行可见。
-                val skip = first.coerceAtLeast(1)
-                val start = if (skip < placed.lineCount) placed.getLineStart(skip) else text.length
-                text = text.subSequence(start, text.length)
-                shortened = true
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            }
-        }
-
-        /** 不限行但高度不足时同步展示最新尾部，避免首帧与系统稍后滚动产生基线跳变。 */
-        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-            super.onLayout(changed, left, top, right, bottom)
-            keepLatestAtBottom()
-        }
-
-        /** TextView会在预绘制时再次滚动，必须在框架处理之后保持同一条最后基线。 */
-        override fun onPreDraw(): Boolean {
-            val ready = super.onPreDraw()
-            keepLatestAtBottom()
-            return ready
-        }
-
-        /** 同步底部对齐的绘制偏移，不截断或改写正式字幕内容。 */
-        private fun keepLatestAtBottom() {
-            if (captionLineLimit == 0 && (gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.BOTTOM) {
-                val room = height - compoundPaddingTop - compoundPaddingBottom
-                scrollTo(0, ((layout?.height ?: 0) - room).coerceAtLeast(0))
-            }
-        }
     }
 
     /**

@@ -16,6 +16,71 @@ import java.util.UUID
 
 /** 使用独立偏好验证新增预设和外观设置，不修改设备上的用户配置。 */
 class RefinementDeviceTest {
+    /** 空偏好与界面契约均默认固定两成观看高度，并预留实时字幕背景。 */
+    @Test fun emptyPreferencesDefaultToFixedHeightAndReservedDraftSpace() = withController { controller, prefs, _ ->
+        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertTrue(prefs.reserveDraftSpace)
+        assertEquals(0.2f, controller.state.value.settings.subtitle.heightFraction, 0f)
+        assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace)
+        assertEquals(0.2f, SubtitleStyleUiState().heightFraction, 0f)
+        assertTrue(SubtitleStyleUiState().reserveDraftSpace)
+    }
+
+    /** 旧版显式自动高度迁移为固定高度，保留显式预留选择，其他已存样式保持原值。 */
+    @Test fun legacyAutoHeightMigratesWithoutChangingOtherPreferences() = withController(
+        configureRawPrefs = {
+            it.edit().putFloat("heightFrac", 0f).putBoolean("reserveDraftSpace", false)
+                .putFloat("textSp", 24f).putFloat("bgAlpha", 0.6f).putBoolean("showJa", true).apply()
+        },
+    ) { controller, prefs, _ ->
+        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertFalse(prefs.reserveDraftSpace)
+        assertEquals(24f, prefs.textSp, 0f)
+        assertEquals(0.6f, prefs.bgAlpha, 0f)
+        assertTrue(prefs.showJa)
+        assertEquals(0.2f, controller.state.value.settings.subtitle.heightFraction, 0f)
+        assertFalse(controller.state.value.settings.subtitle.reserveDraftSpace)
+    }
+
+    /** 旧版从未保存高度时也按自动高度迁移，不依赖高度键是否存在。 */
+    @Test fun legacyMissingHeightMigratesAndEnablesReservation() = withController(
+        configureRawPrefs = {
+            it.edit().putString("theme", "dark").apply()
+        },
+    ) { _, prefs, _ ->
+        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertTrue(prefs.reserveDraftSpace)
+        assertEquals("dark", prefs.theme)
+    }
+
+    /** 旧版固定高度及显式关闭预留均保留；之后选回自动也不会再次迁移。 */
+    @Test fun legacyFixedHeightAndDisabledReservationRemainUnchanged() = withController(
+        configureRawPrefs = {
+            it.edit().putFloat("heightFrac", 0.35f).putBoolean("reserveDraftSpace", false).apply()
+        },
+    ) { controller, prefs, _ ->
+        assertEquals(0.35f, prefs.heightFrac, 0f)
+        assertFalse(prefs.reserveDraftSpace)
+        assertEquals(0.35f, controller.state.value.settings.subtitle.heightFraction, 0f)
+        assertFalse(controller.state.value.settings.subtitle.reserveDraftSpace)
+        prefs.heightFrac = 0f
+        val restored = Prefs(controller.getApplication())
+        assertEquals(0f, restored.heightFrac, 0f)
+        assertFalse(restored.reserveDraftSpace)
+    }
+
+    /** 一次迁移后用户恢复自动并关闭预留，新建偏好实例仍尊重这两个选择。 */
+    @Test fun manualAutoHeightAndDisabledReservationPersistAfterMigration() = withController(
+        configureRawPrefs = { it.edit().putFloat("heightFrac", 0f).apply() },
+    ) { controller, prefs, actions ->
+        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertTrue(prefs.reserveDraftSpace)
+        actions.onSubtitleStyleChange(controller.state.value.settings.subtitle.copy(heightFraction = 0f, reserveDraftSpace = false))
+        val restored = Prefs(controller.getApplication())
+        assertEquals(0f, restored.heightFrac, 0f)
+        assertFalse(restored.reserveDraftSpace)
+    }
+
     /** 无显式选择时默认B站直播，之后手动选通用仍能保存并回填。 */
     @Test fun defaultSceneIsBilibiliAndManualSelectionPersists() = withController { controller, prefs, actions ->
         assertEquals(Scene.VTUBER.id, prefs.scene.id)
@@ -41,8 +106,10 @@ class RefinementDeviceTest {
         assertEquals("用户的直播背景", prefs.scene.background)
     }
 
-    /** 新选项默认关闭，保存、其他样式修改和定稿模式切换均保持同一持久化选择。 */
-    @Test fun draftBackgroundReservationPersistsWithoutChangingOtherDefaults() = withController { controller, prefs, actions ->
+    /** 显式关闭后仍可开关预留，其他样式修改和定稿模式切换均保持持久化选择。 */
+    @Test fun draftBackgroundReservationPersistsWithoutChangingOtherDefaults() = withController(
+        configurePrefs = { it.reserveDraftSpace = false },
+    ) { controller, prefs, actions ->
         assertFalse(prefs.reserveDraftSpace)
         assertFalse(controller.state.value.settings.subtitle.reserveDraftSpace)
         val initial = controller.state.value.settings.subtitle
@@ -153,12 +220,12 @@ class RefinementDeviceTest {
         assertEquals("RefinementTest/1.0", prefs.byokUserAgent)
     }
 
-    /** 行数持久化有边界，配色切换会退出动态色，旧视图可继续读取同一偏好。 */
-    @Test fun captionLimitAndThemePreferencesPersist() = withController { controller, prefs, actions ->
+    /** 旧行数输入不再叠加新保留逻辑；旧存储仍有限界，手动配色退出动态色。 */
+    @Test fun legacyLineLimitStaysDisabledAndThemePreferencesPersist() = withController { controller, prefs, actions ->
         assertEquals(0, prefs.maxCaptionLines)
         actions.onSubtitleStyleChange(controller.state.value.settings.subtitle.copy(maxLines = 3))
-        assertEquals(3, prefs.maxCaptionLines)
-        assertEquals(3, controller.state.value.settings.subtitle.maxLines)
+        assertEquals(0, prefs.maxCaptionLines)
+        assertEquals(0, controller.state.value.settings.subtitle.maxLines)
         prefs.maxCaptionLines = 99
         assertEquals(20, prefs.maxCaptionLines)
         prefs.maxCaptionLines = -1
@@ -185,7 +252,11 @@ class RefinementDeviceTest {
     }
 
     /** 在主线程预置隔离偏好并创建真实控制器，测试结束释放全部监听。 */
-    private fun withController(configurePrefs: (Prefs) -> Unit = {}, body: (AppController, Prefs, SimulSubActions) -> Unit) {
+    private fun withController(
+        configureRawPrefs: (SharedPreferences) -> Unit = {},
+        configurePrefs: (Prefs) -> Unit = {},
+        body: (AppController, Prefs, SimulSubActions) -> Unit,
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val token = UUID.randomUUID().toString()
@@ -198,6 +269,8 @@ class RefinementDeviceTest {
             override fun getExternalFilesDir(type: String?): File = File(context.cacheDir, "改进回归-$token")
         }
         instrumentation.runOnMainSync {
+            // 必须先写旧版原始偏好，再创建会执行迁移的偏好实例。
+            configureRawPrefs(application.getSharedPreferences("jpsub", Context.MODE_PRIVATE))
             val prefs = Prefs(application).also(configurePrefs)
             val controller = AppController(application)
             val store = ViewModelStore().apply { put("改进回归", controller) }

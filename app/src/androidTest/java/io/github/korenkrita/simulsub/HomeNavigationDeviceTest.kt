@@ -66,6 +66,8 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
         listOf("本次字幕", "内存原文不得展示", "内存译文不得展示", "内存耗时不得展示").forEach {
             compose.onNodeWithText(it).assertDoesNotExist()
         }
+        // 控制舱随内容滚动，先回到它；首屏位置由专门的主操作测试覆盖。
+        scrollToText("停止同传")
         compose.onNodeWithText("停止同传").assertIsDisplayed()
     }
 
@@ -114,6 +116,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
             compose.runOnIdle { assertEquals(destination, state.destination) }
             compose.onNodeWithContentDescription("返回同传").assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(UiDestination.LIVE, state.destination) }
+            scrollToText("开始同传")
             compose.onNodeWithText("开始同传").assertIsDisplayed()
         }
     }
@@ -162,6 +165,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
             assertEquals(UiDestination.LIVE, state.destination)
         }
         navigation("同传").assertIsSelected()
+        scrollToText("开始同传")
         compose.onNodeWithText("开始同传").assertIsDisplayed()
     }
 

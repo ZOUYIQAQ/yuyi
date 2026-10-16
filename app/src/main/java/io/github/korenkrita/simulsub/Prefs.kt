@@ -8,6 +8,17 @@ class Prefs(ctx: Context) {
     // 会话、测试连接和生成术语均先读取偏好，再发送模型请求。
     init {
         ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
+        // 仅首次将旧版自动高度（含未保存高度）迁移为固定两成高度；固定高度保持原值。
+        // 默认值与完成标记原子写入，显式预留选择保留，此后选回自动也不再覆盖。
+        if (!sp.contains("fixedCaptionHeightDefaultMigrated")) {
+            sp.edit().apply {
+                if (sp.getFloat("heightFrac", 0f) == 0f) {
+                    putFloat("heightFrac", 0.2f)
+                    if (!sp.contains("reserveDraftSpace")) putBoolean("reserveDraftSpace", true)
+                }
+                putBoolean("fixedCaptionHeightDefaultMigrated", true)
+            }.apply()
+        }
         val range = sentenceRange()
         // 在旧区间补齐前区分新安装与旧配置；新版显式选择始终优先。
         if (!sp.contains("captionSentenceCount")) {
@@ -48,9 +59,9 @@ class Prefs(ctx: Context) {
         get() = sp.getFloat("widthFrac", DEFAULT_WIDTH)
         set(v) = sp.edit().putFloat("widthFrac", v).apply()
 
-    /** Caption area height as a fraction of the usable screen height; 0 = fit the text (default) */
+    /** 字幕区域默认为可用观看高度的两成；零仍表示用户手动选择的自动高度。 */
     var heightFrac: Float
-        get() = sp.getFloat("heightFrac", 0f)
+        get() = sp.getFloat("heightFrac", 0.2f)
         set(v) = sp.edit().putFloat("heightFrac", v).apply()
 
     /** Show the recognised Japanese above the Chinese line */
@@ -63,9 +74,9 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("showStats", false)
         set(v) = sp.edit().putBoolean("showStats", v).apply()
 
-    /** 实时字幕消失后仍绘制一行背景；默认关闭，沿用原有自动收缩行为。 */
+    /** 默认预留实时字幕背景，避免临时字幕消失时黑底收缩；用户可手动关闭。 */
     var reserveDraftSpace: Boolean
-        get() = sp.getBoolean("reserveDraftSpace", false)
+        get() = sp.getBoolean("reserveDraftSpace", true)
         set(v) = sp.edit().putBoolean("reserveDraftSpace", v).apply()
 
     /** Overlay position (top-left, px); -1 = default */

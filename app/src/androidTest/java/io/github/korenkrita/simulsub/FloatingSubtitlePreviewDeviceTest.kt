@@ -28,7 +28,7 @@ class FloatingSubtitlePreviewDeviceTest {
 
     /** 开关在实时模式可操作，定稿模式置灰且不丢选择；实际预览立即更新空槽背景。 */
     @Test fun draftReservationSwitchIsDisabledForFinalOnlyAndUpdatesNativePreview() {
-        var style by mutableStateOf(SubtitleStyleUiState())
+        var style by mutableStateOf(SubtitleStyleUiState(reserveDraftSpace = false))
         var finalOnly by mutableStateOf(false)
         compose.setContent {
             SimulSubTheme(SettingsUiState()) {
@@ -147,7 +147,7 @@ class FloatingSubtitlePreviewDeviceTest {
 
     /** 同一真实字幕视图实时接收所有样式和互斥保留规则，旧行数和最少句数不能叠加。 */
     @Test fun nativePreviewUpdatesStyleAndExclusiveRetentionWithoutPersistence() {
-        var style by mutableStateOf(SubtitleStyleUiState(widthFraction = 0.42f, maxSentences = 2))
+        var style by mutableStateOf(SubtitleStyleUiState(widthFraction = 0.42f, heightFraction = 0f, maxSentences = 2))
         compose.setContent { SimulSubTheme(SettingsUiState()) { FloatingSubtitlePreview(style) } }
         val stage = nativeStage()
         compose.runOnIdle {

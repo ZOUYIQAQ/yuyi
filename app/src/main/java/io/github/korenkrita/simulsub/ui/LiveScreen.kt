@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
@@ -17,83 +18,127 @@ import androidx.compose.material.icons.outlined.Security
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 
-/** 同传页把会话主操作、语言配置与字幕分开编排，所有动作仍交回控制器。 */
+/** 手机把控制舱放在语言之后的首屏中部，平板拆为左侧配置与右侧控制，全部内容可滚动。 */
 @Composable
 internal fun LiveScreen(state: LiveUiState, actions: SimulSubActions, wide: Boolean) {
+    val missingPermissions = state.permissions.filter { it.required && !it.granted }
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("live-control-viewport")) {
+        val twoColumns = wide && maxWidth >= 720.dp
+        val controlsFirst = !twoColumns && (maxHeight < 520.dp || LocalDensity.current.fontScale >= 1.5f)
+        val compactControl = maxHeight < 600.dp
+        val controlHeight = (maxHeight * 0.44f).coerceIn(184.dp, 360.dp)
+        PageColumns(twoColumns, first = {
+            if (missingPermissions.isNotEmpty()) item("permissions") {
+                LivePermissionWarning(missingPermissions, !state.busy, actions)
+            }
+            if (controlsFirst) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            item("languages") { LiveLanguagePickers(state, actions) }
+            if (!twoColumns && !controlsFirst) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            item("configuration") { LiveSceneOptions(state, actions) }
+        }, second = {
+            if (twoColumns) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            item("services") { LiveServices(state, actions) }
+        })
+    }
+}
+
+/** 语言选择优先展示，常规手机并排节省首屏高度，窄屏或大字号改为逐行排列。 */
+@Composable
+private fun LiveLanguagePickers(state: LiveUiState, actions: SimulSubActions) {
+    Column(Modifier.testTag("live-language-controls"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeading("声音与译文")
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth >= 280.dp && LocalDensity.current.fontScale < 1.5f) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.weight(1f)) { OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, actions.onSourceLanguage) }
+                    Box(Modifier.weight(1f)) { OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, actions.onTargetLanguage) }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, actions.onSourceLanguage)
+                    OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, actions.onTargetLanguage)
+                }
+            }
+        }
+    }
+}
+
+/** 状态与主操作共享控制舱，低矮窗口并排节省高度，大字号自然增高而非裁切。 */
+@Composable
+private fun LiveControlPanel(state: LiveUiState, actions: SimulSubActions, minHeight: Dp, compact: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("live-control-panel"), shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (compact && maxWidth >= 320.dp && LocalDensity.current.fontScale < 1.5f) {
+                Row(Modifier.fillMaxWidth().heightIn(min = minHeight).padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    LiveSessionStatus(state, Modifier.weight(1f))
+                    LivePrimaryAction(state, actions)
+                }
+            } else {
+                Column(Modifier.fillMaxWidth().heightIn(min = minHeight).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    LiveSessionStatus(state, Modifier.fillMaxWidth())
+                    LivePrimaryAction(state, actions)
+                }
+            }
+        }
+    }
+}
+
+/** 会话状态只呈现一次，计时与忙碌进度直接来自业务状态，窄栏允许完整换行。 */
+@Composable
+private fun LiveSessionStatus(state: LiveUiState, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(state.statusTitle, style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite })
+        if (state.statusDetail.isNotEmpty()) SupportingText(state.statusDetail)
+        if (state.elapsed.isNotEmpty()) Text("本次时长：${state.elapsed}", style = MaterialTheme.typography.labelLarge)
+        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    }
+}
+
+/** 场景与进阶语言入口位于主操作之后，平板集中到左栏，所有配置继续交由原动作处理。 */
+@Composable
+private fun LiveSceneOptions(state: LiveUiState, actions: SimulSubActions) {
     val editable = !state.busy
     var customLanguageOpen by rememberSaveable { mutableStateOf(false) }
-    val missingPermission = state.permissions.firstOrNull { it.required && !it.granted }
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-    PageColumns(wide, first = {
-        if (missingPermission != null) item("permissions") {
-            LivePermissionWarning(state.permissions.filter { it.required && !it.granted }, !state.busy, actions)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (state.running) SupportingText("语言与场景调整将用于后续句子。")
+        OptionPicker("内容场景", state.sceneId, state.sceneOptions, editable, actions.onSelectScene)
+        TextButton(onClick = { actions.onNavigate(UiDestination.SCENES) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("管理场景与术语") }
+        TextButton(onClick = { customLanguageOpen = !customLanguageOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(if (customLanguageOpen) "收起其他语言" else "使用其他字幕语言")
         }
-        item("session") {
-            Card(
-                modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(state.statusTitle, style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    SupportingText(state.statusDetail)
-                    if (state.elapsed.isNotEmpty()) Text("本次时长：${state.elapsed}", style = MaterialTheme.typography.labelLarge)
-                    if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (customLanguageOpen) {
+            TextField(
+                shape = TextFieldDefaults.shape,
+                colors = TextFieldDefaults.colors(),
+                value = state.customTarget, onValueChange = actions.onCustomTargetChange, enabled = editable,
+                label = { Text("自定义字幕语言") }, supportingText = { Text("输入语言名称后应用。") }, modifier = Modifier.fillMaxWidth(),
+            )
+            FilledTonalButton(onClick = actions.onApplyCustomTarget, enabled = editable && state.customTarget.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("应用自定义语言") }
+        }
+        ToggleSetting("仅显示定稿", "关闭后显示实时修正的草稿。", state.finalOnly, editable, actions.onFinalOnly)
+    }
+}
 
-                }
-            }
+/** 服务摘要仅出现一次，平板归入控制面板下方，保留模型与翻译设置直达入口。 */
+@Composable
+private fun LiveServices(state: LiveUiState, actions: SimulSubActions) {
+    Card(
+        modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SectionHeading("当前服务")
+            LiveServiceRow("识别模型", state.modelLabel, "模型库") { actions.onNavigate(UiDestination.MODELS) }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            LiveServiceRow("翻译服务", state.translationLabel, "翻译设置") { actions.onNavigate(UiDestination.SETTINGS) }
         }
-        item("configuration") {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionHeading("声音与译文", if (state.running) "语言与场景调整将用于后续句子。" else "选择原声、字幕语言与内容场景。")
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    if (maxWidth >= 340.dp && LocalDensity.current.fontScale < 1.5f) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Box(Modifier.weight(1f)) { OptionPicker("原声语言", state.sourceId, state.sourceOptions, editable, actions.onSourceLanguage) }
-                            Box(Modifier.weight(1f)) { OptionPicker("字幕语言", state.targetId, state.targetOptions, editable, actions.onTargetLanguage) }
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OptionPicker("原声语言", state.sourceId, state.sourceOptions, editable, actions.onSourceLanguage)
-                            OptionPicker("字幕语言", state.targetId, state.targetOptions, editable, actions.onTargetLanguage)
-                        }
-                    }
-                }
-                TextButton(onClick = { customLanguageOpen = !customLanguageOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(if (customLanguageOpen) "收起其他语言" else "使用其他字幕语言")
-                }
-                if (customLanguageOpen) {
-                    TextField(
-                        shape = TextFieldDefaults.shape,
-                        colors = TextFieldDefaults.colors(),
-                        value = state.customTarget, onValueChange = actions.onCustomTargetChange, enabled = editable,
-                        label = { Text("自定义字幕语言") }, supportingText = { Text("输入语言名称后应用。") }, modifier = Modifier.fillMaxWidth(),
-                    )
-                    FilledTonalButton(onClick = actions.onApplyCustomTarget, enabled = editable && state.customTarget.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("应用自定义语言") }
-                }
-                OptionPicker("内容场景", state.sceneId, state.sceneOptions, editable, actions.onSelectScene)
-                TextButton(onClick = { actions.onNavigate(UiDestination.SCENES) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("管理场景与术语") }
-                ToggleSetting("仅显示定稿", "关闭后显示实时修正的草稿。", state.finalOnly, !state.busy, actions.onFinalOnly)
-            }
-        }
-    }, second = {
-        item("services") {
-            Card(
-                modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SectionHeading("当前服务")
-                    LiveServiceRow("识别模型", state.modelLabel, "模型库") { actions.onNavigate(UiDestination.MODELS) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    LiveServiceRow("翻译服务", state.translationLabel, "翻译设置") { actions.onNavigate(UiDestination.SETTINGS) }
-                }
-            }
-        }
-    })
-        }
-        LivePrimaryAction(state, actions)
     }
 }
 

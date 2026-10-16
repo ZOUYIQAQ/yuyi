@@ -21,11 +21,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
-/** 在手机和平板、明暗主题下验证置顶强调卡与固定主操作，不改变系统授权。 */
+/** 在手机和平板、明暗主题下验证置顶强调卡与可找回的控制舱，不改变系统授权。 */
 @RunWith(Parameterized::class)
 class LivePermissionPriorityDeviceTest(private val wide: Boolean, private val dark: Boolean) {
     @get:Rule val compose = createComposeRule()
-    private var state by mutableStateOf(LiveUiState(statusTitle = "会话状态", permissions = listOf(
+    private var state by mutableStateOf(LiveUiState(statusTitle = "会话状态",
+        modelLabel = "ReazonSpeech", translationLabel = "测试翻译服务", permissions = listOf(
         PermissionUiState("audio", "录制播放音频", "录音权限说明", false),
         PermissionUiState("overlay", "显示悬浮字幕", "悬浮权限说明", false),
         PermissionUiState("notifications", "可选通知", "通知说明", false, false))))
@@ -42,7 +43,7 @@ class LivePermissionPriorityDeviceTest(private val wide: Boolean, private val da
         }
     }
 
-    /** 强调卡先于会话卡，授权与查看全部可直接点击，主操作滚动前后保持固定。 */
+    /** 强调卡位于配置滚动内容最前，授权可直接点击，滚动后可找回安全区域内的主控制。 */
     @Test fun missingPermissionsLeadWithThemeEmphasisAndDirectActions() {
         show()
         val card = compose.onNodeWithTag("live-permission-warning").assertIsDisplayed()
@@ -52,27 +53,40 @@ class LivePermissionPriorityDeviceTest(private val wide: Boolean, private val da
         assertNotEquals("强调底色必须区别于普通卡片", surfaceColor, emphasisColor)
         assertTrue("权限文案与强调底色对比应达到正常文字要求",
             ColorUtils.calculateContrast(contentColor.toArgb(), emphasisColor.toArgb()) >= 4.5)
+        val lists = compose.onAllNodes(hasScrollToIndexAction())
+        val configuration = lists.onFirst()
+        val controls = if (wide) lists.onLast() else configuration
+        val languages = compose.onNodeWithTag("live-language-controls").fetchSemanticsNode().boundsInRoot
+        assertTrue("必需授权必须位于语言与场景配置之前", bounds.bottom <= languages.top)
         compose.onAllNodesWithText("去允许").onFirst().performScrollTo().performClick()
         compose.onNodeWithText("查看全部权限").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("audio", "all"), events) }
-        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed()
-        val before = action.fetchSemanticsNode().boundsInRoot
-        val list = compose.onAllNodes(hasScrollToIndexAction()).onFirst()
-        list.performScrollToNode(hasText("会话状态"))
+        // 常规窗口中控制舱是手机第三项、平板右栏首项，回到该项即可避开底部字幕。
+        controls.performScrollToIndex(if (wide) 0 else 2)
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(144.dp)
         val session = compose.onNodeWithText("会话状态").fetchSemanticsNode().boundsInRoot
         assertTrue("权限卡必须位于会话卡之前", session.top >= bounds.top)
-        list.performScrollToNode(hasText("声音与译文"))
-        assertEquals("滚动不能改变底部主操作位置", before, action.assertIsDisplayed().fetchSemanticsNode().boundsInRoot)
+        configuration.performScrollToNode(hasText("仅显示定稿"))
+        controls.performScrollToIndex(if (wide) 0 else 2)
+        val viewport = compose.onNodeWithTag("live-control-viewport").fetchSemanticsNode().boundsInRoot
+        val control = action.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue("找回的主控制必须完整位于页面内", control.left >= viewport.left && control.right <= viewport.right &&
+            control.top >= viewport.top && control.bottom <= viewport.bottom)
+        assertTrue("主控制应避开底部字幕区域", control.bottom <= viewport.top + viewport.height * 2f / 3f)
+        configuration.performScrollToIndex(0)
+        compose.onNodeWithTag("live-permission-warning").assertIsDisplayed()
     }
 
     /** 返回后更新必需授权即隐藏卡片，可选通知拒绝不继续提醒或阻断。 */
     @Test fun grantingRequiredPermissionsHidesWarningImmediately() {
         show()
         compose.onNodeWithTag("live-permission-warning").assertIsDisplayed()
-        compose.runOnIdle { state = state.copy(permissions = state.permissions.map { if (it.required) it.copy(granted = true) else it }) }
+        compose.runOnIdle { state = state.copy(canStart = true,
+            permissions = state.permissions.map { if (it.required) it.copy(granted = true) else it }) }
         compose.onNodeWithTag("live-permission-warning").assertDoesNotExist()
         compose.onNodeWithText("查看全部权限").assertDoesNotExist()
-        compose.onNodeWithTag("live-primary-action").assertIsDisplayed()
+        compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithText("开始同传").assertIsDisplayed()
     }
 
     /** 控件仍使用真实主题与可滚动布局，只替换系统动作回调。 */

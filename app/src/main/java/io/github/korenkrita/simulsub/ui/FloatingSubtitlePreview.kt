@@ -151,7 +151,7 @@ internal fun subtitlePreviewLines(style: SubtitleStyleUiState, finalOnly: Boolea
     }
     return CaptionRetention.apply(if (finalOnly) examples.filter { it.isFinal } else examples,
         style.limitMode, style.maxSentences.coerceIn(1, 10), style.keepChars.coerceIn(10, 300))
-        .map { CaptionOverlayView.Line(it.zh, if (style.showOriginal) it.ja else null, it.isFinal) }
+        .map { CaptionOverlayView.Line(it.zh, if (style.showOriginal) it.ja else null, it.isFinal, it.segmentId) }
 }
 
 /** 在真实观看尺寸下排版原生字幕，再将整个画幅等比缩小；没有系统悬浮窗或服务。 */
