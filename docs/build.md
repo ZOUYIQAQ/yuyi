@@ -62,7 +62,7 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 
 `GithubReleaseUpdateSource`只请求本Fork的GitHub正式发行元数据，按数字组件比较版本，跳过草稿和预发行；404表示尚未发布。单次调用最多15秒、响应上限256KiB，可取消，不复用翻译密钥或请求参数。关闭自动检查取消未完成的自动请求并忽略迟到结果；自动失败只在更新设置保留结果，不弹错误打断使用。
 
-「更新」通过系统浏览器打开该发行版的arm64 APK下载链接，无APK时打开其发布页。不在应用内下载或安装，不申请新的安装权限。服务端只需发布正确版本标签（如v1.5.0）并附APK，无需`update.json`。接口字段与下载地址来自[GitHub官方发行API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)。浏览器选择器参考[Android Intent文档](https://developer.android.com/reference/android/content/Intent#CATEGORY_APP_BROWSER)。保留的旧AppUpdater类与Provider不接入当前流程，安装APK权限已移除。
+「更新」通过系统浏览器打开该发行版的arm64 APK下载链接，无APK时打开其发布页。不在应用内下载或安装，不申请新的安装权限。服务端只需发布正确版本标签（如v1.8.4）并附APK，无需`update.json`。接口字段与下载地址来自[GitHub官方发行API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)。浏览器选择器参考[Android Intent文档](https://developer.android.com/reference/android/content/Intent#CATEGORY_APP_BROWSER)。保留的旧AppUpdater类与Provider不接入当前流程，安装APK权限已移除。
 
 ## 签名与发布前检查
 
@@ -70,7 +70,7 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 
 未配置正式签名时，Debug和CI照常构建，Release只生成`app-release-unsigned.apk`；显式指定的配置文件不存在或缺字段时直接报错。发布前必须通过`apksigner verify --print-certs`核对签名。签名配置参考[Android官方签名文档](https://developer.android.com/studio/publish/app-signing)。
 
-首个正式发行版从v1.5.0开始使用这把独立密钥；此前未发布的本机测试包为Debug签名，不能直接覆盖为正式版。本机测试包及数据保持不动。后续正式版必须沿用首发私钥以支持覆盖升级；维护者需要妥善备份整个`~/.android/yuyi/`目录，换机时通过上述配置指定原密钥。
+首个正式发行版v1.8.4使用这把独立密钥；此前未发布的本机测试包为Debug签名，不能直接覆盖为正式版。本机测试包及数据保持不动。后续正式版必须沿用首发私钥以支持覆盖升级；维护者需要妥善备份整个`~/.android/yuyi/`目录，换机时通过上述配置指定原密钥。
 
 构建后使用已安装 SDK 的 `apksigner` 核对证书，使用 `aapt` 或 `apkanalyzer` 核对包名与版本；与实际目标旧包比较。不要把旧文档的证书指纹或旧上游仓库发行流程作为本 Fork 已验证事实。发布说明、标签和 APK 版本应一致；发布后回读安装包核对哈希。当前客户端不要求上传 `update.json`。
 

@@ -2,15 +2,15 @@
 
 羽译是面向 **Android 直播与视频的悬浮听译字幕工具**：在设备本地识别正在播放的语音，通过你自己配置的文字翻译 API，将译文显示在其他应用上方。
 
-[下载测试版](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml) · [快速上手](#快速上手) · [使用文档](docs/README.md) · [English](README.en.md)
+[下载正式版](https://github.com/ZOUYIQAQ/yuyi/releases/latest) · [快速上手](#快速上手) · [使用文档](docs/README.md) · [English](README.en.md)
 
 仅支持 **Android 10 及以上、arm64-v8a 手机和平板**。APK 不内置识别模型，安装后选择下载并启用。
 
 ## 下载
 
-目前没有可用的 GitHub Release。请进入本 Fork 的 [Actions 构建页面](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml)，选择最近一次成功构建，在 **Artifacts** 中下载「**安卓安装包**」，解压后安装 `app-debug.apk`。下载 Artifacts 需要登录 GitHub。
+进入 [最新正式版](https://github.com/ZOUYIQAQ/yuyi/releases/latest)，下载 `yuyi-v1.8.4-android-arm64-v8a.apk` 或后续版本对应的 APK，直接安装即可。每个版本同时提供 `SHA256SUMS.txt` 校验文件。
 
-后续发行版可在本 Fork 的 [Releases 页面](https://github.com/ZOUYIQAQ/yuyi/releases)查看。
+如果此前安装的是 Actions 或本地测试包，因正式版签名不同，无法直接覆盖安装。请先保留需要的配置和记录，再自行卸载测试版并安装正式版。卸载会清除本地配置、已下载模型和记录；后续正式版使用同一签名更新。
 
 ## 界面
 

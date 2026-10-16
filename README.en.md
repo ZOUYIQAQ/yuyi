@@ -2,15 +2,15 @@
 
 Yuyi provides **floating translated subtitles for live streams and videos on Android**. It recognizes playback audio locally on your device, sends the recognized text to your own translation API, and displays subtitles over other apps.
 
-[Download test build](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
+[Download release](https://github.com/ZOUYIQAQ/yuyi/releases/latest) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
 
 **Android only**: supports **Android 10+ phones and tablets with arm64-v8a**. Recognition models are downloaded and activated after installation; they are not bundled in the APK.
 
 ## Download
 
-There is currently no GitHub Release available. Open this fork's [Actions workflow](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml), select the most recent successful run, and download **安卓安装包** (Android installation package) under **Artifacts**. Extract it and install `app-debug.apk`. You must sign in to GitHub to download artifacts.
+Open the [latest release](https://github.com/ZOUYIQAQ/yuyi/releases/latest), download `yuyi-v1.8.4-android-arm64-v8a.apk` or the APK for a later version, and install it directly. Each release includes a `SHA256SUMS.txt` checksum file.
 
-Future releases will be listed on this fork's [Releases page](https://github.com/ZOUYIQAQ/yuyi/releases).
+Actions builds and earlier local test builds use a different signing certificate and cannot be updated directly to the official release. Keep any configuration and records you need before uninstalling the test build yourself and installing the release. Uninstalling removes local configuration, downloaded models, and records. Future official releases will use the same signing certificate.
 
 ## Screens
 
