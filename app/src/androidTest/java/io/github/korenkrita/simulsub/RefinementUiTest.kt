@@ -44,8 +44,8 @@ class RefinementUiTest {
         compose.onNodeWithContentDescription("暂时收起字幕预览").performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("显示句数"))
         compose.onNodeWithText("显示句数").performClick()
-        compose.onNodeWithText("3 句").performClick()
-        compose.runOnIdle { assertEquals(3, state.settings.subtitle.maxSentences) }
+        compose.onNode(hasText("4 句") and hasAnyAncestor(isPopup())).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(4, state.settings.subtitle.maxSentences) }
         compose.onNodeWithContentDescription("返回设置").performClick()
         compose.onNodeWithText("外观").performScrollTo().performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("松绿"))

@@ -51,13 +51,13 @@ private fun LiveLanguagePickers(state: LiveUiState, actions: SimulSubActions) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             if (maxWidth >= 280.dp && LocalDensity.current.fontScale < 1.5f) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.weight(1f)) { OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, actions.onSourceLanguage) }
-                    Box(Modifier.weight(1f)) { OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, actions.onTargetLanguage) }
+                    Box(Modifier.weight(1f)) { OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, onSelect = actions.onSourceLanguage) }
+                    Box(Modifier.weight(1f)) { OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, onSelect = actions.onTargetLanguage) }
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, actions.onSourceLanguage)
-                    OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, actions.onTargetLanguage)
+                    OptionPicker("原声语言", state.sourceId, state.sourceOptions, !state.busy, onSelect = actions.onSourceLanguage)
+                    OptionPicker("字幕语言", state.targetId, state.targetOptions, !state.busy, onSelect = actions.onTargetLanguage)
                 }
             }
         }
@@ -107,7 +107,7 @@ private fun LiveSceneOptions(state: LiveUiState, actions: SimulSubActions) {
     var customLanguageOpen by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (state.running) SupportingText("语言与场景调整将用于后续句子。")
-        OptionPicker("内容场景", state.sceneId, state.sceneOptions, editable, actions.onSelectScene)
+        OptionPicker("内容场景", state.sceneId, state.sceneOptions, editable, onSelect = actions.onSelectScene)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedButton(onClick = { actions.onNavigate(UiDestination.SCENES) }, enabled = editable,
                 modifier = Modifier.heightIn(min = 48.dp)) {

@@ -2,7 +2,7 @@
 
 ## 版本与上游来源
 
-当前为 **羽译1.8.1（versionCode 33，2026-10-16）**，正常合并 [KorenKrita/simul-subtitle main `585ad36`](https://github.com/KorenKrita/simul-subtitle/commit/585ad36)（上游1.0.4）。保留上游完整提交历史，以及原作者 **KorenKrita** 的署名与MIT许可。合并时保留本Fork的Compose界面、安装后下载模型、独立包名及仅安卓范围。
+当前为 **羽译1.8.2（versionCode 34，2026-10-16）**，正常合并 [KorenKrita/simul-subtitle main `585ad36`](https://github.com/KorenKrita/simul-subtitle/commit/585ad36)（上游1.0.4）。保留上游完整提交历史，以及原作者 **KorenKrita** 的署名与MIT许可。合并时保留本Fork的Compose界面、安装后下载模型、独立包名及仅安卓范围。
 
 | 上游提交 | 集成内容与本分支边界 |
 |---|---|
@@ -124,6 +124,8 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 `CaptionOverlayView`用于实际浮窗与设置预览，实际服务不再使用手动行数上限；仅保留屏高40%和用户固定高度等物理约束。新安装默认showJa=false、showStats=false，显式保存的用户开关仍保留。设置预览是页面内可拖动面板，可切横屏/竖屏画幅，持续接收样式变化；离开设置页面销毁，不启动录音、模型或真正字幕服务。
 
 `FloatingSubtitlePreview`在可用宽度至少600dp且未拖动时默认左下，窄屏默认右下；拖动后沿用自定位置，尺寸变化只将其收敛到可见区域。`LiveScreen`在常规手机布局中将会话控制卡放在语言选择之后、场景配置之前，位于首屏中部；单列且可用高度小于520dp或字号至少1.5倍时优先显示控制卡，必要权限卡仍在最前。宽屏布局且页面可用宽度至少720dp时，左侧放语言与场景，右侧放独立控制卡和服务摘要。两栏内容均可滚动。`LivePrimaryAction`使用横向圆角按钮，宽度最多360dp、高度至少72dp，文案可换行增高；控制卡使用primaryContainer，而权限强调卡使用primary/onPrimary。窗口高度小于400dp、卡片内宽度至少480dp且字号小于1.5倍时，状态与220dp宽按钮并排，避免多行说明把主操作推入底部字幕区。场景与其他语言入口使用带图标的OutlinedButton，FlowRow在窄屏或大字号下自动折行。运行后原位切换停止，缺少模型、翻译配置或权限时沿用相应补齐入口。
+
+`OptionPicker`统一使用Material3的ExposedDropdownMenuBox／ExposedDropdownMenu和PrimaryNotEditable锚点，保留圆角ListItem入口。菜单匹配入口宽度，上限360dp并接受系统可用高度约束；底部空间不足时向上展开。选中项有勾选和selected语义，描述自然换行；所有选项位于官方可滚动菜单中。禁用或空列表不能打开，展开时禁用会关闭并清除展开状态。选择后关闭且派发一次原动作，取消不改业务配置；系统返回优先关闭菜单，不穿透页面导航；不再使用ModalBottomSheet或自定义抽屉停靠点。字幕配色通过可选optionContent复用同一菜单；每项展示名称和两种真实文字色，背景透明度沿用生产替换Alpha并截断到整数的规则，叠于中性棋盘格，浏览不派发保存，选择时只修改paletteId。
 
 `ThemePalettes.kt` 提供海蓝、松绿、鸢尾、山茶、蔷薇、岩灰六种配色；Android 12 起可用动态色，旧系统回退手动配色。新安装默认取自图标原图的山茶（amber），已有手动选择保留，动态取色默认关闭。浅深模式独立选择，应用主题不改字幕配色。
 

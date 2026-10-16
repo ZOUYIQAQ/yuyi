@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.korenkrita.simulsub.ui.*
@@ -18,78 +21,157 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 
-/** 在真实系统抽屉中反复快速滑动，核对选择与关闭，同时保留动画后的实际像素。 */
+/** 沿用历史测试类名，改为验证官方下拉菜单的锚定、滚动、选择和关闭。 */
 class OptionSheetGestureDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    // 必须在打开菜单前连接无障碍测试服务，避免连接本身改变窗口焦点并收起菜单。
+    private val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+    private val choices = listOf(UiOption("ja", "日语"), UiOption("en", "英语"), UiOption("auto", "自动识别"))
 
-    /** 短列表不能被快速上滑拉成全屏，长列表仍可正常滚动并选择末项。 */
-    @Test fun fastUpwardFlingKeepsShortAndLongSheetsStable() {
-        var choices by mutableStateOf(listOf(
-            UiOption("ja", "日语"), UiOption("en", "英语"), UiOption("auto", "自动识别")))
+    /** 短菜单贴着选择框展开，选中项有状态，选择后只回调一次并自动收起。 */
+    @Test fun shortDropdownIsAnchoredAndSelectionClosesIt() {
         var selected by mutableStateOf("ja")
+        val events = mutableListOf<String>()
+        show { OptionPicker("原声语言", selected, choices) { selected = it; events += it } }
+        val anchor = screenBounds(compose.onNodeWithText("原声语言"))
+        compose.onNodeWithText("原声语言").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        val menu = screenBounds(compose.onNode(isPopup()).assertIsDisplayed())
+        assertEquals("菜单应匹配选择框宽度", anchor.width, menu.width, 2f)
+        assertTrue("有空间时菜单应紧邻选择框下方", kotlin.math.abs(menu.top - anchor.bottom) < 8f)
+        option("日语").assertIsSelected()
+        option("英语").assertIsNotSelected().performClick()
+        compose.runOnIdle { assertEquals("en", selected); assertEquals(listOf("en"), events) }
+        compose.onNode(isPopup()).assertDoesNotExist()
+        compose.onNodeWithText("英语").assertIsDisplayed()
+        screenshot("short-selected")
+    }
+
+    /** 长菜单快速滑动只滚动内容，不能变成全屏抽屉；末项仍能选择。 */
+    @Test fun fastFlingKeepsLongDropdownStableAndLastOptionSelectable() {
+        var selected by mutableStateOf("1")
+        val options = (1..30).map { UiOption("$it", "选项 $it", if (it % 3 == 0) "较长说明，用于验证菜单内的换行与滚动。" else "") }
+        show { OptionPicker("测试选项", selected, options) { selected = it } }
+        compose.onNodeWithText("测试选项").performClick()
+        val original = compose.onNode(isPopup()).fetchSemanticsNode().boundsInWindow
+        repeat(4) {
+            compose.onNode(hasScrollAction()).performTouchInput { swipeUp(durationMillis = 80) }
+            assertSettled(original)
+        }
+        option("选项 30").performScrollTo().assertIsDisplayed()
+        repeat(3) {
+            compose.onNode(hasScrollAction()).performTouchInput { swipeUp(durationMillis = 50) }
+            assertSettled(original)
+        }
+        screenshot("long-menu")
+        option("选项 30").performClick()
+        compose.runOnIdle { assertEquals("30", selected) }
+        compose.onNode(isPopup()).assertDoesNotExist()
+    }
+
+    /** 系统返回只关闭菜单，不选择其他值；禁用和空列表不能打开菜单。 */
+    @Test fun backDisabledAndEmptyOptionsDoNotChangeSelection() {
+        var enabled by mutableStateOf(true)
+        var options by mutableStateOf(choices)
+        var calls = 0
+        show { OptionPicker("测试选项", "ja", options, enabled) { calls++ } }
+        compose.onNodeWithText("测试选项").performClick()
+        compose.onNode(isPopup()).assertIsDisplayed()
+        // 等菜单完成渲染后再返回，不能在点击状态尚未提交时直接退出测试宿主。
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitUntil(3_000) { compose.onAllNodes(isPopup()).fetchSemanticsNodes().isEmpty() }
+        compose.onNode(isPopup()).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, calls); enabled = false }
+        compose.onNodeWithText("测试选项").assertIsNotEnabled()
+        compose.onNodeWithText("测试选项").performTouchInput { click() }
+        compose.onNode(isPopup()).assertDoesNotExist()
+        compose.runOnIdle { enabled = true; options = emptyList() }
+        compose.onNodeWithText("测试选项").assertIsNotEnabled()
+        compose.onNodeWithText("测试选项").performTouchInput { click() }
+        compose.onNode(isPopup()).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, calls) }
+    }
+
+    /** 菜单展开时进入忙碌状态应关闭；恢复可编辑后不能自行重新弹出。 */
+    @Test fun disablingAnOpenPickerDoesNotReopenWhenEnabledAgain() {
+        var enabled by mutableStateOf(true)
+        show { OptionPicker("测试选项", "ja", choices, enabled) {} }
+        compose.onNodeWithText("测试选项").performClick()
+        compose.onNode(isPopup()).assertIsDisplayed()
+        compose.runOnIdle { enabled = false }
+        compose.onNode(isPopup()).assertDoesNotExist()
+        compose.runOnIdle { enabled = true }
+        compose.onNode(isPopup()).assertDoesNotExist()
+    }
+
+    /** 大字号和较长说明可以自然换行，菜单在小屏幕上仍可滚动到最后一个选项。 */
+    @Test fun largeTextDescriptionsRemainReachable() {
+        var selected by mutableStateOf("1")
+        show(fontScale = 2f) {
+            OptionPicker("长说明选项", selected, (1..12).map { UiOption("$it", "语言 $it", "这段说明需要换行，不应被固定高度裁掉。") }) { selected = it }
+        }
+        compose.onNodeWithText("长说明选项").performClick()
+        option("语言 12").performScrollTo().assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals("12", selected) }
+        compose.onNode(isPopup()).assertDoesNotExist()
+    }
+
+    /** 靠近屏幕底边的选择框应向上展开，保持下拉菜单完整可见。 */
+    @Test fun bottomPickerOpensUpwardWithinTheScreen() {
+        show(atBottom = true) { OptionPicker("底部选项", "ja", choices) {} }
+        val anchor = screenBounds(compose.onNodeWithText("底部选项"))
+        compose.onNodeWithText("底部选项").performClick()
+        val menu = screenBounds(compose.onNode(isPopup()).assertIsDisplayed())
+        assertTrue("底部菜单应紧邻选择框向上展开：$anchor，$menu", kotlin.math.abs(menu.bottom - anchor.top) < 8f)
+        assertTrue("菜单不能越过屏幕顶边", menu.top >= 0f)
+        screenshot("bottom-menu")
+    }
+
+    /** 真实主题与窗口承载选择框，状态只在内存中，不触碰用户配置。 */
+    private fun show(fontScale: Float = 1f, atBottom: Boolean = false, content: @Composable () -> Unit) {
         compose.runOnUiThread { compose.activity.enableEdgeToEdge() }
         compose.setContent {
-            SimulSubTheme(SettingsUiState()) {
-                Column(Modifier.fillMaxSize().padding(24.dp)) {
-                    Text("抽屉手势验收")
-                    OptionPicker("测试选项", selected, choices, onSelect = { selected = it })
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                SimulSubTheme(SettingsUiState()) {
+                    Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp)) {
+                        Text("下拉菜单验收")
+                        if (atBottom) Spacer(Modifier.weight(1f))
+                        content()
+                    }
                 }
             }
         }
-        compose.onNodeWithText("测试选项").performClick()
-        val title = compose.onNodeWithText("测试选项").filterToOneDialogTitle()
-        val before = title.fetchSemanticsNode().boundsInWindow
-        repeat(4) {
-            title.performTouchInput { swipe(Offset(center.x, height + 80f), Offset(center.x, -100f), 80) }
-            assertSettled(title, before.top, "短列表快速上滑$it")
-        }
-        screenshot("short")
-        compose.onNode(isDialog()).performTouchInput { click(Offset(8f, 8f)) }
-        compose.onNodeWithText("测试选项").assertIsDisplayed()
-        compose.runOnIdle {
-            choices = (1..30).map { UiOption("$it", "选项 $it", if (it % 3 == 0) "较长说明，用于核对滚动后列表和抽屉的高度不会反复变化。" else "") }
-            selected = "1"
-        }
-        compose.onNodeWithText("测试选项").performClick()
-        val longTitle = compose.onNodeWithText("测试选项").filterToOneDialogTitle()
-        val original = longTitle.fetchSemanticsNode().boundsInWindow
-        repeat(4) {
-            compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp(durationMillis = 80) }
-            assertSettled(longTitle, original.top, "长列表快速上滑$it")
-        }
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("选项 30"))
-        repeat(4) {
-            compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp(durationMillis = 50) }
-            assertSettled(longTitle, original.top, "末项边界高速上滑$it")
-        }
-        screenshot("long")
-        compose.onNodeWithText("选项 30").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals("30", selected) }
-        compose.onNode(isDialog()).assertDoesNotExist()
     }
 
-    /** 区分页面入口与独立抽屉中的同名标题，避免命中背景节点。 */
-    private fun SemanticsNodeInteraction.filterToOneDialogTitle(): SemanticsNodeInteraction =
-        compose.onNode(hasText("测试选项") and hasAnyAncestor(isDialog()))
+    /** 相同标签也可能出现在背景选择框中，操作只定位独立菜单内的选项。 */
+    private fun option(label: String): SemanticsNodeInteraction =
+        compose.onNode(hasText(label) and hasAnyAncestor(isPopup()))
 
-    /** 松手后等待正常回弹结束，连续真实帧中标题必须回到相同位置。 */
-    private fun assertSettled(title: SemanticsNodeInteraction, expected: Float, stage: String) {
+    /** 弹出菜单拥有独立窗口，以屏幕坐标比较锚点，不能混用各窗口的局部原点。 */
+    private fun screenBounds(node: SemanticsNodeInteraction): Rect {
+        val info = node.fetchSemanticsNode().layoutInfo
+        val coordinates = info.getModifierInfo().first().coordinates
+        val position = coordinates.positionOnScreen()
+        return Rect(position, androidx.compose.ui.geometry.Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat()))
+    }
+
+    /** 连续绘制帧中的菜单边界应相同，快速滑动不能改变锚点或面板高度。 */
+    private fun assertSettled(expected: Rect) {
         compose.waitForIdle()
-        Thread.sleep(500)
-        val positions = List(12) {
-            val y = title.fetchSemanticsNode().boundsInWindow.top
+        val positions = List(8) {
             Thread.sleep(32)
-            y
+            compose.onNode(isPopup()).fetchSemanticsNode().boundsInWindow
         }
-        assertTrue("$stage：抽屉未稳定或改变高度：$positions，原始=$expected", positions.all { kotlin.math.abs(it - expected) <= 1f })
+        assertTrue("菜单快速滑动后位置或高度改变：$positions，原始=$expected", positions.all {
+            kotlin.math.abs(it.top - expected.top) <= 1f && kotlin.math.abs(it.bottom - expected.bottom) <= 1f
+        })
     }
 
-    /** 保存系统合成结果供手机和平板逐图核对。 */
+    /** 保存系统合成结果供手机和平板逐图检查。 */
     private fun screenshot(name: String) {
-        Thread.sleep(400)
-        val i = InstrumentationRegistry.getInstrumentation()
-        val bitmap = checkNotNull(i.uiAutomation.takeScreenshot())
-        val dir = File(compose.activity.externalCacheDir, "sheet-gestures/${bitmap.width}x${bitmap.height}").apply { mkdirs() }
+        val bitmap = checkNotNull(automation.takeScreenshot())
+        val dir = File(compose.activity.externalCacheDir, "dropdown-menus/${bitmap.width}x${bitmap.height}").apply { mkdirs() }
         try { File(dir, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         finally { bitmap.recycle() }
     }

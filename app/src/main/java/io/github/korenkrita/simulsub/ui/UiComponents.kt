@@ -1,20 +1,19 @@
 package io.github.korenkrita.simulsub.ui
 
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.animation.animateContentSize
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
@@ -142,45 +141,67 @@ internal fun ToggleSetting(title: String, detail: String, checked: Boolean, enab
     }
 }
 
-/** 选择入口用官方列表项，展开为原生Material底部面板，选择后播放收起动画。 */
+/** 保留圆角选择入口，使用官方锚定下拉菜单；列表随可用空间滚动，选中后直接收起。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun OptionPicker(title: String, selectedId: String, options: List<UiOption>, enabled: Boolean = true, onSelect: (String) -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+internal fun OptionPicker(title: String, selectedId: String, options: List<UiOption>, enabled: Boolean = true,
+                          optionContent: (@Composable (UiOption) -> Unit)? = null, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val available = enabled && options.isNotEmpty()
+    LaunchedEffect(available) { if (!available) expanded = false }
+    // 非输入框锚点也应先关闭菜单，不能让系统返回穿透到页面导航。
+    BackHandler(enabled = expanded && available) { expanded = false }
     val selected = options.firstOrNull { it.id == selectedId }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    Surface(onClick = { expanded = true }, enabled = enabled && options.isNotEmpty(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).semantics { stateDescription = selected?.label ?: "暂无选项" }) {
-        ListItem(
-            headlineContent = { Text(selected?.label ?: selectedId.ifEmpty { "暂无选项" }, style = MaterialTheme.typography.bodyLarge) },
-            overlineContent = { Text(title, style = MaterialTheme.typography.labelMedium) },
-            trailingContent = { Icon(Icons.Outlined.ExpandMore, null) },
-            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        )
-    }
-    if (expanded && enabled) ModalBottomSheet(onDismissRequest = { expanded = false }, sheetState = sheetState,
-        // 顶部安全区在停靠点计算外处理，避免高速回弹时「位置→留白→高度→停靠点」循环重排。
-        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
-        contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom) },
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
-                items(options, key = { it.id }) { option ->
-                    ListItem(
-                        headlineContent = { Text(option.label) },
-                        supportingContent = option.description.takeIf { it.isNotEmpty() }?.let { { Text(it) } },
-                        leadingContent = { RadioButton(selected = option.id == selectedId, onClick = null) },
-                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
-                            .clickable(role = Role.RadioButton) {
-                                onSelect(option.id)
-                                scope.launch { sheetState.hide(); expanded = false }
-                            }.semantics { this.selected = option.id == selectedId },
-                    )
-                }
+    ExposedDropdownMenuBox(
+        expanded = expanded && available,
+        onExpandedChange = { expanded = it && available },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = available)
+                .fillMaxWidth().heightIn(min = 72.dp)
+                .semantics {
+                    stateDescription = selected?.label ?: "暂无选项"
+                    if (!available) disabled()
+                },
+        ) {
+            ListItem(
+                modifier = Modifier.semantics { if (!available) disabled() },
+                headlineContent = { Text(selected?.label ?: selectedId.ifEmpty { "暂无选项" }, style = MaterialTheme.typography.bodyLarge) },
+                overlineContent = { Text(title, style = MaterialTheme.typography.labelMedium) },
+                trailingContent = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && available) },
+                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            )
+        }
+        ExposedDropdownMenu(
+            expanded = expanded && available,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 360.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        if (optionContent != null) optionContent(option)
+                        else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(option.label, style = MaterialTheme.typography.bodyLarge)
+                            if (option.description.isNotEmpty()) Text(option.description,
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    trailingIcon = {
+                        if (option.id == selectedId) Icon(Icons.Outlined.Check, null)
+                        else Spacer(Modifier.size(24.dp))
+                    },
+                    enabled = expanded && available,
+                    onClick = {
+                        if (expanded && available) { expanded = false; onSelect(option.id) }
+                    },
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { this.selected = option.id == selectedId },
+                )
             }
         }
     }

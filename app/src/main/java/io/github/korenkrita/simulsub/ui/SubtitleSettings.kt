@@ -16,7 +16,7 @@ internal fun SubtitleSettings(style: SubtitleStyleUiState, actions: SimulSubActi
             item("subtitle-preview") {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     SectionHeading("字幕预览示例", "可拖动、切换横竖屏或暂时收起。完整画面等比缩小，放大查看字幕局部。")
-                    if (style.palettes.isNotEmpty()) OptionPicker("字幕配色", style.paletteId, style.palettes.map { UiOption(it.id, it.label) }) { actions.onSubtitleStyleChange(style.copy(paletteId = it)) }
+                    if (style.palettes.isNotEmpty()) SubtitlePalettePicker(style, actions.onSubtitleStyleChange)
                     else SupportingText("字幕配色尚未加载；示例使用黑底白字。")
                     FilledTonalButton(onClick = actions.onResetOverlayPosition, modifier = Modifier.heightIn(min = 48.dp)) { Text("重置悬浮字幕位置") }
                 }

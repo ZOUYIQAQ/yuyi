@@ -1,89 +1,69 @@
 # 羽译 · Yuyi
 
-[简体中文](README.md) · [Documentation (Chinese)](docs/README.md) · [Releases](https://github.com/ZOUYIQAQ/yuyi/releases)
+Yuyi provides **floating translated subtitles for live streams and videos on Android**. It recognizes playback audio locally on your device, sends the recognized text to your own translation API, and displays subtitles over other apps.
 
-**Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
+[Download test build](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
 
-An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.8.1 (versionCode 33)**, merges upstream 1.0.4 with faster short-utterance cuts, timestamp-based recovery of dropped words and improved translation of short Japanese fragments. It adds fixed-height captions by default, internal text scrolling and background transitions, and a reorganized Live control card; named API profiles, HTTP local/LAN endpoints and incremental draft translation remain; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+**Android only**: supports **Android 10+ phones and tablets with arm64-v8a**. Recognition models are downloaded and activated after installation; they are not bundled in the APK.
 
-The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
+## Download
 
-Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
+There is currently no GitHub Release available. Open this fork's [Actions workflow](https://github.com/ZOUYIQAQ/yuyi/actions/workflows/android.yml), select the most recent successful run, and download **安卓安装包** (Android installation package) under **Artifacts**. Extract it and install `app-debug.apk`. You must sign in to GitHub to download artifacts.
 
-In **字幕 (Subtitles)**, **预留临时字幕空间 (Reserve interim-caption space)** keeps one line of background after interim text disappears. It is on by default and can only be changed when **仅显示定稿 (Final captions only)** is off. The choice is remembered while disabled. This does not move finalized captions or consume their sentence limit.
-
-The default scene is **B站 VTuber 直播 (Bilibili VTuber Live)**. Saved manual scene choices and edits are preserved.
-
-## Get started
-
-Requires **Android 10 (API 29)+ and arm64-v8a**.
-
-First launch guides permissions, the translation API, and model download/activation in that order. Each step can be skipped, and the guide can be reopened from Settings. Cold starts read actual system permission grants; missing required permissions appear in an emphasized card at the top of Live.
-
-1. Open **设置 → 模型库 (Settings → Model library)** and download a recognition package. Each package includes its own Silero VAD; no separate selection is needed. After verification, tap **启用模型 (Activate model)** manually.
-2. Open **设置 → 翻译 API (Settings → Translation API)**. Select or add a named profile, then choose a preset or enter your OpenAI-compatible endpoint, model ID and API key, and save. Saving keeps the inputs and displays **已保存 (Saved)**. **测试连接 (Test connection)** tests the draft without saving it. Requests may incur charges; apply a successful result with **替换并保存 (Replace and save)**.
-3. On **同传 (Live)**, select source/target languages and a scene, grant the requested permissions and system capture authorization, then tap **开始同传 (Start)** in the session control card.
-
-Capture depends on the source app, DRM, Android version and device implementation. Compatibility with every player or video is not guaranteed. Capture is not isolated by process: other eligible apps playing audio at the same time may also be transcribed.
+Future releases will be listed on this fork's [Releases page](https://github.com/ZOUYIQAQ/yuyi/releases).
 
 ## Screens
 
 | Live | Model library | Subtitle style preview |
 |---|---|---|
-| ![Live](docs/images/screens/home.png) | ![Models](docs/images/screens/models.png) | ![Subtitle style preview](docs/images/screens/subtitle.png) |
+| ![Live](docs/images/screens/home.png) | ![Model library](docs/images/screens/models.png) | ![Subtitle style preview](docs/images/screens/subtitle.png) |
 
 <details>
-<summary>Tablet live</summary>
+<summary>Tablet live view</summary>
 
 ![Tablet live](docs/images/screens/tablet-home.png)
 
 </details>
 
-Only four representative screenshots are displayed here; screenshot files and historical QA records are retained.
+## Core experience
 
-These four screenshots were captured on the local API 35 emulator, including tablet-sized windows. Home screens are updated to 1.8.1; unchanged Models and Subtitle screens retain their 1.8.0 captures. The subtitle screenshot shows the settings preview.
+- **Read subtitles while watching**: show translations over a live stream or video, with optional source text. Tap subtitles to reveal controls, then move, resize or lock the overlay.
+- **Local recognition, your choice of translation service**: choose from two recognition models and configure an OpenAI-compatible translation API. Save multiple profiles and switch as needed.
+- **Adjust subtitles to suit your viewing**: translations only by default, keeping the latest 3 finalized sentences. Change font size, colors, opacity and subtitle window size, compare color schemes directly in the menu, and fine-tune them with a draggable floating preview.
+- **Phone and tablet layouts**: a warm Camellia theme by default, with light/dark modes, custom colors and Android 12+ dynamic colors.
 
-Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
+Add stream background and preferred translations under **设置 → 场景与术语 (Settings → Scenes and terms)**. Usage recording is off by default and can be enabled when needed.
 
-Compact windows use bottom navigation; wider windows use a navigation rail and adapt page columns. The settings home groups entries and each row opens a detail page (translation API, subtitle style, appearance, permissions, advanced, usage records, about), model management, or scene management; the top bar and system back handle returning. The settings preview is a sample, rather than an actual floating overlay.
+## Quick start
 
-Each main route, Settings home and detail page, model library, and scene list remembers its own list position. Phone single- and two-column layouts keep separate positions. Form API keys are excluded from SavedState.
+First launch guides you through permissions, the translation API and recognition models. You can also complete these steps later in Settings.
 
-## Recognition and translation
+1. **Grant permissions**: allow audio recording and display over other apps as prompted. Confirm the system screen-sharing/audio-capture authorization each time you start a session.
+2. **Configure translation**: open **设置 → 翻译 API (Settings → Translation API)**. Choose a preset or enter a compatible endpoint, model ID and API key, test the connection, then save. Testing alone does not save the configuration.
+3. **Download and activate a model**: open **设置 → 模型库 (Settings → Model library)**, download a model, then tap **启用模型 (Activate model)**.
+4. **Start listening and translating**: on **同传 (Live)**, select source and target languages and a scene, tap **开始同传 (Start)**, then switch to the playing stream or video.
 
-| Recognition package | Source languages | Download including VAD |
-|---|---|---|
-| ReazonSpeech | Japanese, English | 77,745,395 bytes (about 74.1 MiB) |
-| SenseVoice Small | Chinese, English, Japanese, Korean, Cantonese | 240,193,589 bytes (about 229.1 MiB) |
+### Which recognition model?
 
-The APK contains no ASR or VAD weights. Packages are downloaded to private app storage and checked against fixed sizes and SHA-256 hashes. Activation is manual; stop a running session before switching models. License texts ship in the APK under `assets/licenses/`, rather than being downloaded alongside model files. See [ASR](docs/asr.md) and [model sources](docs/MODEL_SOURCES.md).
+| Model | Source languages | Download size | Features |
+|---|---|---|---|
+| ReazonSpeech | Japanese, English | About 74.1 MiB | Smaller download for viewers mainly watching Japanese or English content who want to save storage |
+| SenseVoice Small | Chinese, English, Japanese, Korean, Cantonese | About 229.1 MiB | Broader language coverage, with punctuation and normalized numbers in recognition results |
 
-Translation presets include DeepSeek official (`https://api.deepseek.com/v1`, `deepseek-flash`), SiliconFlow (`https://api.siliconflow.cn/v1`, `deepseek-ai/DeepSeek-V4-Flash`) and OpenRouter (`https://openrouter.ai/api/v1`, model ID must be entered). Presets only fill an editable draft: they neither save nor send requests. Connection tests never save the draft automatically: **Replace and save** explicitly applies a successful full endpoint; leaving with unsaved edits asks for confirmation. Switching presets across endpoints clears the draft's old key, custom headers and User-Agent. Custom mode preserves the form. Defaults were checked against official documentation on **2026-10-15** and may change; this is not verification of a user's paid API access. Sources and protocol details: [Translation](docs/translation.md).
+Both packages include the required voice activity detection model. Stop the session before switching recognition models.
 
-The API page manages up to 20 named profiles, each with its own endpoint, model, key, User-Agent and headers. Existing settings remain in the Default profile. Add, rename, switch or delete with confirmation; at least one profile remains, and unsaved edits require confirmation before being discarded. During a session, an empty profile keeps the existing service; a complete profile takes effect for subsequent sentences. HTTP and HTTPS endpoints are editable, with a cleartext warning for HTTP local/LAN services on trusted networks. Release HTTPS trusts system CAs only, and translation requests do not follow redirects. The first draft is translated immediately; later drafts need at least five Unicode code points of accumulated change from the last queued draft. Finals bypass this threshold.
+## FAQ and links
 
-New installations start with **Camellia (山茶)**, sampled from the icon: orange-brown, cream, camellia red and sage green. On phones, a session control card appears after the language selectors, near the middle of the initial viewport; short landscape windows prioritize the card. In the wide layout with at least 720dp of available page width, the card occupies a separate right column. The warm control card contains a horizontal rounded primary button at least 72dp high and at most 360dp wide; it becomes Stop while running. Short wide windows place status and action side by side; large text may wrap. Scene and alternate-language shortcuts use outlined buttons with icons and wrap on narrow screens. Both controls and configuration scroll with their content. The subtitle settings preview defaults to the bottom-left at available widths of 600dp or more and bottom-right on narrower layouts; a dragged position is retained. The 1.5.1 fixes for transparent layout tails, visible system bar insets and stable subtitle baselines remain.
+**Is translation fully offline?** Speech recognition runs locally, while translation requires your configured text API. Online services require a network connection and receive recognized text; raw audio is not uploaded. You can also connect to a compatible translation endpoint hosted on your device or local network. See [Translation configuration](docs/translation.md).
 
-## Settings and controls
+**Why do some videos produce no subtitles?** The source app, protected content and system playback-capture restrictions can prevent capture. Other apps playing capturable audio at the same time may also be recognized; pause unrelated audio during use.
 
-- **场景术语 (Scenes and terms)** is under Settings for background descriptions and terminology. AI term generation uses your configured API; review and save the resulting draft.
-- **设置 → 字幕样式 (Subtitle style)** controls colors, size, opacity, width, height and one retention policy. Caption height defaults to a fixed 20% of the available viewing height (`heightFrac=0.2`), with automatic height still selectable. Reserve interim-caption space defaults to on (`reserveDraftSpace=true`). Retention is either sentence count (latest three final sentences by default, configurable from 1–10, plus one latest live draft), or translated-character count (10–300 Unicode code points, retaining the newest tail of an overlong sentence). No additional final-subtitle line limit or combined sentence/character thresholds apply. New installations show translation only, without timings; source text and timings remain optional. A draggable floating preview stays visible while scrolling and offers portrait/landscape preview frames. Finals and drafts share one continuous rounded background. The draft follows finals with a 2dp gap and always occupies at most one line; enabling source text combines source and translation on that same line. The window reserves a fixed draft budget, so showing or hiding the draft leaves the last final line's baseline unchanged. Controls use a separate overlay window and do not move the main subtitles when shown or hidden. Physical window height still bounds visible content. These settings do not modify source finals, logs or translation context.
-- **设置 → 外观 (Appearance)** offers Ocean, Forest, Iris, Camellia, Rose and Slate palettes, arbitrary RGB hex input and HSV sliders, plus Android 12+ dynamic colors. Older systems use the selected palette. Light/dark/system mode is independent of palette selection; overlay colors are separate.
-- **设置 → 高级设置 (Advanced)** contains translation context, join deduplication and optional Jev sentence/translation checks. Jev is off by default and sends text to a third-party service when enabled.
-- **设置 → 使用记录 (Usage records)** is off by default. Finished text logs can be shared, individually deleted after confirmation or cleared after confirmation. Active logs cannot be shared or deleted.
+**Does it save viewing records?** Session recording is off by default, and raw audio is not saved. Enable text records explicitly under **设置 → 使用记录 (Settings → Usage records)**. See [Usage records](docs/logs.md) and [Privacy](docs/privacy.md).
 
-The one-time upgrade migration for 1.8.0 changes legacy automatic height (`heightFrac=0`) to fixed 20% and enables interim-space reservation when no explicit choice exists. Existing nonzero fixed heights and explicit reservation choices are retained. After migration, selecting automatic height or disabling reservation is not overridden on later launches. See [Architecture](docs/architecture.md#180字幕默认值与动画) for details.
+See the [documentation index](docs/README.md) for more information, or the [build guide](docs/build.md) to build the app yourself. These documents are in Chinese.
 
-Final sentences wrap naturally across lines. New finals scroll inside the caption viewport over about 280ms, with outgoing content able to fade out. Caption-body height changes transition over about 280ms; the interim background transitions over about 200ms. The last final line stays anchored and bottom-aligned, drafts do not consume the final-sentence limit, and the toolbar remains independent. Disabling system animations shows the final state directly. Font-size or width changes and leaving the page cancel stale animations. These durations describe the implementation, not measured end-to-end latency or performance.
+## Fork and acknowledgements
 
-Tap the floating subtitles to reveal controls, drag to move, or resize from the corners while controls are visible. Lock and stop controls are available; reset position under Subtitle style.
+Yuyi is based on [simul-subtitle](https://github.com/KorenKrita/simul-subtitle) by **KorenKrita**. This fork is maintained by **ZOUYIQAQ** and can be installed alongside the original, with separate data and permissions.
 
-## Updates and development
-
-**Settings → App updates** checks for updates at startup by default, with an option to disable automatic checks and a manual check action. It supports reminding later, skipping a specific version, and restoring reminders. The update button will open this fork’s GitHub APK download link in the browser, or the [release page](https://github.com/ZOUYIQAQ/yuyi/releases) if no APK is available. The app will not download or install updates internally. Available releases are those actually published on GitHub.
-
-See [Build](docs/build.md) for `:core` and `:app`. macOS/Windows builds are no longer distributed. More: [Architecture](docs/architecture.md), [Privacy](docs/privacy.md), [Logs](docs/logs.md), [Jev](docs/jev.md).
-
-Application code: [MIT](LICENSE). Thanks to [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ReazonSpeech](https://github.com/reazon-research/ReazonSpeech), [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) and [Silero VAD](https://github.com/snakers4/silero-vad). Models and dependencies retain their own licenses; Jev is an optional cloud service.
-
-The three main destinations are Live, Subtitles, and Settings. Model and scene management are inside Settings, with shortcuts on Live. First launch guides only permissions, the translation API, and model download/activation; every step can be skipped and the guide can be reopened from Settings. The home screen hides granted permissions and no longer displays in-memory session text. Session files are created only after recording is explicitly enabled.
+Application code is licensed under [MIT](LICENSE), retaining the original author's copyright notice. Thanks to [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ReazonSpeech](https://github.com/reazon-research/ReazonSpeech), [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) and [Silero VAD](https://github.com/snakers4/silero-vad). Models and dependencies retain their own licenses; see [Model sources and licenses](docs/MODEL_SOURCES.md).
