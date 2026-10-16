@@ -123,6 +123,9 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
             setMeasuredDimension(measuredWidth, (movingHeight?.roundToInt() ?: target).coerceIn(0, bound))
         }
         snapHeightChange = false
+        // 定位守卫在预绘制末尾重新测量时，TextView可能清掉内部滚动。
+        // 立即按当前真实视口恢复尾部，不能等下一次布局或预绘制再纠正一帧。
+        keepLatestAtBottom()
     }
 
     /** 排版后确定真实新句高度，快照与新内容沿同一方向移动，分界裁切避免重叠重影。 */
@@ -138,7 +141,10 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
         val placed = layout ?: return
         incomingOffset = null
         val line = placed.getLineForOffset(offset.coerceIn(0, text.length))
-        scrollDistance = (placed.height - placed.getLineTop(line)).toFloat().coerceIn(1f, height.coerceAtLeast(1).toFloat())
+        // 保留句从旧位置进入新排版时，位移是末行基线间距，包含上一行的行间距。
+        // 末行矩形高度不含这段间距，用它代替会在零进度先跳几像素，再开始滚动。
+        scrollDistance = (if (line > 0) placed.getLineBaseline(placed.lineCount - 1) - placed.getLineBaseline(line - 1)
+            else placed.height).toFloat().coerceIn(1f, height.coerceAtLeast(1).toFloat())
         scrollAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 280L
             interpolator = easing
@@ -182,8 +188,14 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
         outgoingPaint.alpha = ((1f - progress) * 255).roundToInt()
         canvas.drawBitmap(old, 0f, height - old.height - scrollDistance * progress, outgoingPaint)
         canvas.restoreToCount(oldSave)
-        canvas.translate(-scrollX.toFloat(), -scrollY + shift)
-        super.onDraw(canvas)
+        if (placed != null) {
+            // TextView会在内部再次裁到未平移的视口；增高时这会裁掉本应从旧位置进入的保留行。
+            // 过渡期间直接绘制同一原生富文本Layout，裁切只交给外层固定视口，终帧恢复原生绘制。
+            paint.color = currentTextColor
+            paint.drawableState = drawableState
+            canvas.translate(compoundPaddingLeft - scrollX.toFloat(), compoundPaddingTop + verticalOffset - scrollY + shift)
+            placed.draw(canvas)
+        }
         canvas.restoreToCount(outer)
     }
 

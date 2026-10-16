@@ -16,39 +16,39 @@ import java.util.UUID
 
 /** 使用独立偏好验证新增预设和外观设置，不修改设备上的用户配置。 */
 class RefinementDeviceTest {
-    /** 空偏好与界面契约均默认固定两成观看高度，并预留实时字幕背景。 */
-    @Test fun emptyPreferencesDefaultToFixedHeightAndReservedDraftSpace() = withController { controller, prefs, _ ->
-        assertEquals(0.2f, prefs.heightFrac, 0f)
+    /** 空偏好与界面契约均默认自动高度，并预留实时字幕背景。 */
+    @Test fun emptyPreferencesDefaultToAutoHeightAndReservedDraftSpace() = withController { controller, prefs, _ ->
+        assertEquals(0f, prefs.heightFrac, 0f)
         assertTrue(prefs.reserveDraftSpace)
-        assertEquals(0.2f, controller.state.value.settings.subtitle.heightFraction, 0f)
+        assertEquals(0f, controller.state.value.settings.subtitle.heightFraction, 0f)
         assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace)
-        assertEquals(0.2f, SubtitleStyleUiState().heightFraction, 0f)
+        assertEquals(0f, SubtitleStyleUiState().heightFraction, 0f)
         assertTrue(SubtitleStyleUiState().reserveDraftSpace)
     }
 
-    /** 旧版显式自动高度迁移为固定高度，保留显式预留选择，其他已存样式保持原值。 */
-    @Test fun legacyAutoHeightMigratesWithoutChangingOtherPreferences() = withController(
+    /** 旧版显式自动高度保持不变，保留显式预留选择，其他已存样式保持原值。 */
+    @Test fun legacyAutoHeightIsPreservedWithoutChangingOtherPreferences() = withController(
         configureRawPrefs = {
             it.edit().putFloat("heightFrac", 0f).putBoolean("reserveDraftSpace", false)
                 .putFloat("textSp", 24f).putFloat("bgAlpha", 0.6f).putBoolean("showJa", true).apply()
         },
     ) { controller, prefs, _ ->
-        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertEquals(0f, prefs.heightFrac, 0f)
         assertFalse(prefs.reserveDraftSpace)
         assertEquals(24f, prefs.textSp, 0f)
         assertEquals(0.6f, prefs.bgAlpha, 0f)
         assertTrue(prefs.showJa)
-        assertEquals(0.2f, controller.state.value.settings.subtitle.heightFraction, 0f)
+        assertEquals(0f, controller.state.value.settings.subtitle.heightFraction, 0f)
         assertFalse(controller.state.value.settings.subtitle.reserveDraftSpace)
     }
 
-    /** 旧版从未保存高度时也按自动高度迁移，不依赖高度键是否存在。 */
-    @Test fun legacyMissingHeightMigratesAndEnablesReservation() = withController(
+    /** 旧版从未保存高度时采用自动高度，不覆盖已有主题。 */
+    @Test fun legacyMissingHeightUsesAutoAndDefaultReservation() = withController(
         configureRawPrefs = {
             it.edit().putString("theme", "dark").apply()
         },
     ) { _, prefs, _ ->
-        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertEquals(0f, prefs.heightFrac, 0f)
         assertTrue(prefs.reserveDraftSpace)
         assertEquals("dark", prefs.theme)
     }
@@ -69,11 +69,11 @@ class RefinementDeviceTest {
         assertFalse(restored.reserveDraftSpace)
     }
 
-    /** 一次迁移后用户恢复自动并关闭预留，新建偏好实例仍尊重这两个选择。 */
-    @Test fun manualAutoHeightAndDisabledReservationPersistAfterMigration() = withController(
+    /** 用户选择自动并关闭预留后，新建偏好实例仍尊重这两个选择。 */
+    @Test fun manualAutoHeightAndDisabledReservationPersist() = withController(
         configureRawPrefs = { it.edit().putFloat("heightFrac", 0f).apply() },
     ) { controller, prefs, actions ->
-        assertEquals(0.2f, prefs.heightFrac, 0f)
+        assertEquals(0f, prefs.heightFrac, 0f)
         assertTrue(prefs.reserveDraftSpace)
         actions.onSubtitleStyleChange(controller.state.value.settings.subtitle.copy(heightFraction = 0f, reserveDraftSpace = false))
         val restored = Prefs(controller.getApplication())

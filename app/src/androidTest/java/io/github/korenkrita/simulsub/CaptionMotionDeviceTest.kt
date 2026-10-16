@@ -13,6 +13,81 @@ import java.io.File
 
 /** 使用附着到真实窗口的原生字幕验证过渡帧，不启动录音或写入业务配置。 */
 class CaptionMotionDeviceTest {
+    /** 六行替换为五行，保留句在滚动起点和中间帧均不反向抖动。 */
+    @Test fun wrappedSentencesShrinkWithoutReversingRetainedText() = verifyWrappedTransition(false, false)
+
+    /** 五行替换为六行，增高不能使同一保留句先下跳。 */
+    @Test fun wrappedSentencesGrowWithoutReversingRetainedText() = verifyWrappedTransition(false, true)
+
+    /** 原文与译文混合字号时也按真实基线衔接。 */
+    @Test fun wrappedOriginalsShrinkWithoutReversingRetainedText() = verifyWrappedTransition(true, false)
+
+    /** 混合字号增高时，文字仍从上一帧原位进入滚动。 */
+    @Test fun wrappedOriginalsGrowWithoutReversingRetainedText() = verifyWrappedTransition(true, true)
+
+    /** 追踪同一保留句的可见像素，布局坐标正确不能替代真实画面的连续性。 */
+    private fun verifyWrappedTransition(original: Boolean, growing: Boolean) = withOverlay { view ->
+        val label = "变行-$original-$growing"
+        val lines = listOf(if (growing) "旧短句" else "甲".repeat(20), "乙".repeat(20), "丙".repeat(20),
+            if (growing) "丁".repeat(20) else "新的一句")
+            .mapIndexed { index, value -> CaptionOverlayView.Line(value, if (original) "原文$index" else null, true, index.toLong()) }
+        onMain { view.setShown(original, false); view.setCaptionHeight(0); view.setLines(lines.take(3), null) }
+        Thread.sleep(600)
+        val body = onMain { ((view.getChildAt(0) as android.widget.FrameLayout).getChildAt(0) as android.widget.LinearLayout).getChildAt(0) as android.widget.TextView }
+        val initial = onMain {
+            assertEquals("复现必须包含自然换行", (if (growing) 5 else 6) + if (original) 3 else 0, body.lineCount)
+            formalCapture(view).also { save(view, "$label-起点", it) }
+        }
+        val templateLine = (if (growing) 1 else 2) + if (original) 2 else 0
+        val templateTop = onMain { body.baseline + body.layout.getLineBaseline(templateLine) - body.layout.getLineBaseline(0) - body.scrollY - body.textSize.toInt() }
+        val template = Bitmap.createBitmap(initial, 0, templateTop, initial.width, onMain { body.textSize.toInt() })
+        val frames = java.util.concurrent.CopyOnWriteArrayList<Bitmap>()
+        val initialPosition = locateWhiteTemplate(template, initial) - initial.height
+        val observer = android.view.ViewTreeObserver.OnDrawListener { frames += formalCapture(view) }
+        try {
+            onMain {
+                view.setLines(lines.drop(1), null)
+                view.measure(View.MeasureSpec.makeMeasureSpec(view.width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                view.layout(view.left, view.top, view.right, view.top + view.measuredHeight)
+                val first = formalCapture(view)
+                try {
+                    save(view, "$label-零进度", first)
+                    InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
+                        putString("stream", "$label：旧高=${initial.height}，新高=${first.height}，排版=${body.layout.height}，滚动=${body.scrollY}，基线=${body.baseline}\n")
+                    })
+                    assertEquals("滚动零进度必须与上一帧无缝衔接", initialPosition,
+                        locateWhiteTemplate(template, first) - first.height)
+                } finally { first.recycle() }
+                view.viewTreeObserver.addOnDrawListener(observer)
+            }
+            Thread.sleep(800)
+            onMain {
+                view.viewTreeObserver.removeOnDrawListener(observer)
+                assertEquals("新句替换后须保持真实换行", (if (growing) 6 else 5) + if (original) 3 else 0, body.lineCount)
+            }
+            val positions = listOf(initialPosition) + frames.mapIndexed { index, bitmap ->
+                save(view, "$label-$index", bitmap)
+                locateWhiteTemplate(template, bitmap) - bitmap.height
+            }
+            assertTrue("保留句必须有实际滚动帧：$positions", positions.size >= 3)
+            InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply { putString("stream", "$label 像素轨迹：$positions\n") })
+            assertTrue("同一保留句只能向上移动，不能反向抖动：$positions", positions.zipWithNext().all { (a, b) -> b <= a + 1 })
+        } finally {
+            onMain { view.viewTreeObserver.removeOnDrawListener(observer) }
+            frames.forEach { it.recycle() }; template.recycle(); initial.recycle()
+        }
+    }
+
+    /** 用原始白字的像素模式追踪保留句，不把内部布局坐标误当真实可见位置。 */
+    private fun locateWhiteTemplate(template: Bitmap, bitmap: Bitmap): Int {
+        val probes = (0 until template.height step 3).flatMap { y ->
+            (0 until template.width step 4).map { x -> Triple(x, y, android.graphics.Color.red(template.getPixel(x, y)) > 210) }
+        }
+        return (0..(bitmap.height - template.height).coerceAtLeast(0)).minBy { top ->
+            probes.count { (x, y, white) -> (android.graphics.Color.red(bitmap.getPixel(x, top + y)) > 210) != white }
+        }
+    }
     /** 高度必须经过中间值，不能从旧固定高度直接跳到新固定高度。 */
     @Test fun fixedHeightChangesHaveIntermediateFrames() = withOverlay { view ->
         val initial = onMain { view.captionHeightPx() }
@@ -186,6 +261,8 @@ class CaptionMotionDeviceTest {
         val body = (card.getChildAt(0) as android.widget.LinearLayout).getChildAt(0)
         val rect = android.graphics.Rect(0, 0, body.width, body.height)
         view.offsetDescendantRectToMyCoords(body, rect)
+        // 这里裁取的是控件视口，祖先换算会扣除正文自己的scrollY，需要还原这段内部偏移。
+        rect.offset(body.scrollX, body.scrollY)
         // 草稿会共享黑框下沿留白，正式字形比较必须精确裁到正文，不能把新草稿算作位移。
         return Bitmap.createBitmap(bitmap, rect.left, rect.top, rect.width(), rect.height()).also { if (it !== bitmap) bitmap.recycle() }
     }

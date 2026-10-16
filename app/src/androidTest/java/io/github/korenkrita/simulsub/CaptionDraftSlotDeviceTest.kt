@@ -17,6 +17,32 @@ import org.junit.runner.RunWith
 /** 只测真实原生布局和像素，不启动服务、不请求悬浮窗权限、不修改用户数据。 */
 @RunWith(AndroidJUnit4::class)
 class CaptionDraftSlotDeviceTest {
+    /** 临时字幕只占紧凑的一行，仍容纳中日文和表情，不借缩小预留区裁掉文字。 */
+    @Test fun draftReservationIsSmallerThanFormalLineAndFitsFallbackFonts() = onMain {
+        for (font in listOf(13f, 18f, 36f)) for (original in listOf(false, true)) {
+            val view = overlay(original)
+            view.applyStyle(font, 0.8f)
+            view.setReserveDraftSpace(true)
+            view.setLines(listOf(CaptionOverlayView.Line("花朵绽放出来吧", null, true),
+                CaptionOverlayView.Line("国あAg🙂", if (original) "花が咲くでしょう～" else null, false)), null)
+            layout(view, px(view, 300))
+            val slot = view.getChildAt(1) as LinearLayout
+            val draft = slot.getChildAt(1) as TextView
+            assertTrue("小字幕必须明显小于正式字幕：$font", draft.textSize <= body(view).textSize * 0.78f)
+            assertTrue("预留高度应小于一行正文：$font", view.draftSlotHeightPx() < body(view).lineHeight)
+            assertEquals("原文与译文共用一行小字幕", 1, draft.lineCount)
+            assertTrue("不能因缩小区域而裁字", draft.layout.height <= draft.height)
+            assertTrue(draft.text.toString().contains("国あAg🙂"))
+            if (font == 18f && !original) {
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                try {
+                    view.draw(Canvas(bitmap))
+                    val directory = java.io.File(view.context.getExternalFilesDir(null), "qa-draft-reserve").apply { mkdirs() }
+                    java.io.File(directory, "compact-draft.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                } finally { bitmap.recycle() }
+            }
+        }
+    }
     /** 拖到底时临时字幕黑底必须抵达窗口末行，不能留下参与贴边计算的透明尾部。 */
     @Test fun draftBackgroundReachesBottomWithoutMovingFinalBaseline() = onMain {
         for (font in listOf(13f, 36f)) for (original in listOf(false, true)) {

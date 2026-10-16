@@ -107,13 +107,12 @@ class CaptionWindowAnchorDeviceTest {
         var attached = false
         lateinit var view: CaptionOverlayView
         lateinit var params: WindowManager.LayoutParams
-        lateinit var guard: CaptionLayoutGuard
+        lateinit var host: CaptionWindowHost
         lateinit var drawing: ViewTreeObserver.OnDrawListener
         lateinit var toolbarWindow: CaptionToolbarWindow
         lateinit var toolbar: android.view.View
         val toolbarDraws = java.util.concurrent.atomic.AtomicInteger()
         val anchor = CaptionBaselineAnchor()
-        lateinit var origin: CaptionWindowOrigin
         var availableHeight = 0
         var cardWidth = 0
         var areaTop = 0
@@ -125,8 +124,7 @@ class CaptionWindowAnchorDeviceTest {
             val block = view.measureCaptionBlockHeight(cardWidth)
             val baseline = view.finalLineBaselinePx()
             params.y = anchor.position(availableHeight, baseline, availableHeight, block)
-            guard.positioned(baseline, block)
-            if (view.isAttachedToWindow) wm.updateViewLayout(view, params)
+            host.place(params.x, params.y, cardWidth, wm.currentWindowMetrics.bounds.width(), availableHeight)
         }
 
         try {
@@ -136,7 +134,6 @@ class CaptionWindowAnchorDeviceTest {
                 availableHeight = area.height()
                 areaTop = area.top
                 cardWidth = (metrics.bounds.width() * 0.85f).toInt()
-                origin = CaptionWindowOrigin(areaTop)
                 view = CaptionOverlayView(context, true).apply {
                     setFinalOnly(false); applyStyle(18f, 0.85f)
                     setWindowHeightLimit(availableHeight)
@@ -154,9 +151,9 @@ class CaptionWindowAnchorDeviceTest {
                     toolbarWindow.update(shown, params.x, params.y, cardWidth,
                         view.measureCaptionBlockHeight(cardWidth), metrics.bounds.width(), availableHeight)
                 }
-                guard = CaptionLayoutGuard({ view.finalLineBaselinePx() }, { view.measureCaptionBlockHeight(cardWidth) }, ::position) {
-                    view.getLocationOnScreen(screenLocation)
-                    origin.aligned(screenLocation[1], params.y, view.finalLineBaselineInWindowPx(), anchor.baseline ?: 0)
+                host = CaptionWindowHost(context, wm, view, anchor) { x, y, width, height ->
+                    params.x = x; params.y = y
+                    toolbarWindow.update(toolbar.isShown, x, y, width, height, metrics.bounds.width(), availableHeight)
                 }
                 drawing = ViewTreeObserver.OnDrawListener {
                     heights += view.captionHeightPx()
@@ -169,10 +166,9 @@ class CaptionWindowAnchorDeviceTest {
                         details += "阶段=$phase，屏幕Y=${location[1]}，正文高=${text.height}/${text.measuredHeight}，排版高=${layout.height}，滚动=${text.scrollY}，首基线=${text.baseline}，末基线=${layout.getLineBaseline(layout.lineCount - 1)}，偏移=${view.finalLineBaselinePx()}，窗口Y=${params.y}，锚点=${anchor.baseline}"
                     }
                 }
-                view.viewTreeObserver.addOnPreDrawListener(guard)
                 view.viewTreeObserver.addOnDrawListener(drawing)
                 position()
-                wm.addView(view, params)
+                host.show()
                 attached = true
             }
             awaitFrame(frames, 0)
@@ -215,6 +211,14 @@ class CaptionWindowAnchorDeviceTest {
                 }
             }
             assertTrue(frames.size >= examples.size + 1)
+            // 句数不变但实际换行数增减时，同时启用正文滚动与自动高度过渡。
+            val wrapped = listOf("甲".repeat(30), "乙".repeat(30), "丙".repeat(30), "短句", "丁".repeat(30))
+                .mapIndexed { index, value -> CaptionOverlayView.Line(value, null, true, index.toLong()) }
+            for (sentences in listOf(wrapped.take(3), wrapped.subList(1, 4), wrapped.subList(2, 5))) {
+                instrumentation.runOnMainSync { view.setLines(sentences, null) }
+                Thread.sleep(600)
+                assertTrue("自动高度与新句滚动同时进行仍须固定正式末行：$details", frames.all { it.second == expected })
+            }
             // 先建立确定的起点，不能把前面自动高度的未完过渡误当作本次配置起点。
             instrumentation.runOnMainSync { view.setCaptionHeight((context.resources.displayMetrics.density * 100).toInt(), animate = false) }
             awaitStableWindow(view, params, areaTop, expected)
@@ -291,9 +295,8 @@ class CaptionWindowAnchorDeviceTest {
             instrumentation.runOnMainSync {
                 if (attached && view.isAttachedToWindow) {
                     toolbarWindow.dismiss()
-                    view.viewTreeObserver.removeOnPreDrawListener(guard)
                     view.viewTreeObserver.removeOnDrawListener(drawing)
-                    wm.removeViewImmediate(view)
+                    host.dismiss()
                 }
             }
         }

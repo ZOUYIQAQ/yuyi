@@ -168,8 +168,8 @@ data class SubtitleStyleUiState(
     val textSp: Float = 18f,
     val backgroundAlpha: Float = 0.8f,
     val widthFraction: Float = 0.9f,
-    /** 默认固定两成观看高度，零表示用户选择自动高度。 */
-    val heightFraction: Float = 0.2f,
+    /** 默认自动随内容调整高度，零表示自动高度。 */
+    val heightFraction: Float = 0f,
     val keepSentences: Int = 3,
     val keepChars: Int = 120,
     val maxLines: Int = 0,

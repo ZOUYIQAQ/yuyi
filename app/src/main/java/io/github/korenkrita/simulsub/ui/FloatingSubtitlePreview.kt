@@ -165,6 +165,7 @@ internal class SubtitlePreviewStage(context: Context) : FrameLayout(context) {
     init {
         setBackgroundColor(0xFF344044.toInt())
         clipChildren = true
+        captionView.alpha = io.github.korenkrita.simulsub.captionWindowOpacity(context)
         addView(captionView)
     }
 

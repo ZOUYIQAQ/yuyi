@@ -177,7 +177,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** 固定预留一行临时字幕；原文开启时合并在同一行，内容变化不改变窗口高度。 */
     private fun updateDraftSlotHeight() {
         val gap = dp(DRAFT_GAP_DP).toInt()
-        val bottom = dp(10f).toInt()
+        val bottom = dp(DRAFT_BOTTOM_DP).toInt()
         // 中日文字体回退的真实行高可能大于TextView的主字体lineHeight，不能把唯一一行误裁为空。
         val sample = "国あAg🙂"
         val sampleLayout = android.text.StaticLayout.Builder.obtain(sample, 0, sample.length, draftText.paint, 10000)
@@ -261,7 +261,12 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     }
 
     /** 基线在整个悬浮窗口中的位置，包含工具栏或宿主布局引入的偏移。 */
-    internal fun finalLineBaselineInWindowPx(): Int = card.top + finalLineBaselinePx()
+    internal fun finalLineBaselineInWindowPx(): Int {
+        val column = card.getChildAt(0) as LinearLayout
+        val placed = text.layout ?: return card.top + finalLineBaselinePx()
+        return card.top + column.top + text.top + text.baseline +
+            placed.getLineBaseline(placed.lineCount - 1) - placed.getLineBaseline(0) - text.scrollY
+    }
     private fun lightView() = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f); setTextColor(0xFFDADCE0.toInt())
         gravity = Gravity.CENTER_VERTICAL; compoundDrawablePadding = dp(4f).toInt()
@@ -439,7 +444,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             includeFontPadding = false
             gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
             typeface = this@CaptionOverlayView.text.typeface
-            setLineSpacing(dp(2f), 1f)
+            setLineSpacing(0f, 1f)
             captionLineLimit = 1
         }
         draftSource.apply {
@@ -451,7 +456,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         draftSlot.apply {
             orientation = VERTICAL
             clipChildren = true
-            setPadding(dp(18f).toInt(), dp(DRAFT_GAP_DP).toInt(), dp(18f).toInt(), dp(10f).toInt())
+            setPadding(dp(18f).toInt(), dp(DRAFT_GAP_DP).toInt(), dp(18f).toInt(), dp(DRAFT_BOTTOM_DP).toInt())
             addView(draftSource, LayoutParams(LayoutParams.MATCH_PARENT, 0))
             addView(draftText, LayoutParams(LayoutParams.MATCH_PARENT, 0))
             visibility = GONE
@@ -475,7 +480,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         draftText.refreshSpanStyle()
         textSp = sizeSp; bgAlpha = alpha
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
-        draftText.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp * 0.85f)
+        draftText.setTextSize(TypedValue.COMPLEX_UNIT_SP, (sizeSp * DRAFT_SIZE_FRACTION).coerceAtLeast(10f))
         draftSource.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp * 0.62f)
         draftText.setTextColor(colors.draft)
         draftSource.setTextColor(colors.ja)
@@ -733,6 +738,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         const val TOOLBAR_GAP_DP = 6f
         /** 正式正文与临时字幕之间的小间距。 */
         const val DRAFT_GAP_DP = 2f
+        /** 临时字幕采用较小字号，至少10sp；其预留行高随实际字体测量。 */
+        private const val DRAFT_SIZE_FRACTION = 0.68f
+        /** 草稿尾部保留少量圆角内边距，与正文共用的底部留白不重复计算。 */
+        private const val DRAFT_BOTTOM_DP = 6f
 
         /** Caption colour schemes; the first is the default. ids are stored in prefs, keep them stable. */
         val PALETTES = listOf(

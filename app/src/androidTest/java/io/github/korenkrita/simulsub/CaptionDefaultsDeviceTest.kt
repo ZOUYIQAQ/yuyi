@@ -20,6 +20,77 @@ import java.util.UUID
 class CaptionDefaultsDeviceTest {
     @get:Rule val compose=createComposeRule()
 
+    /** 新安装默认自动高度且继续预留草稿空间，不写入高度或旧迁移标记。 */
+    @Test fun freshInstallDefaultsToAutoHeightWithoutWritingCaptionChoices() {
+        assertEquals(0f, SubtitleStyleUiState().heightFraction, 0f)
+        assertTrue(SubtitleStyleUiState().reserveDraftSpace)
+        assertCaptionChoicesPreserved(height = null, reserve = null, migrated = null)
+    }
+
+    /** 旧自动高度在没有迁移标记或标记为假时均保持零，显式预留选择也保持不变。 */
+    @Test fun legacyAutoHeightAndReserveChoicesArePreserved() {
+        for (migrated in listOf(null, false)) {
+            for (reserve in listOf(false, true)) {
+                assertCaptionChoicesPreserved(height = 0f, reserve = reserve, migrated = migrated)
+            }
+        }
+    }
+
+    /** 旧固定高度按原值保留，包含原迁移目标两成及滑块两端，不被统一改回自动。 */
+    @Test fun legacyNonzeroHeightsAndReserveChoicesArePreserved() {
+        for (height in listOf(0.05f, 0.1f, 0.15f, 0.2f, 0.25f, 0.3f, 0.35f, 0.4f)) {
+            for (reserve in listOf(false, true)) {
+                assertCaptionChoicesPreserved(height = height, reserve = reserve, migrated = null)
+            }
+        }
+    }
+
+    /** 已迁移用户当前选择的自动或固定高度均保留，不猜测两成高度是否来自历史迁移。 */
+    @Test fun migratedUsersKeepTheirCurrentHeightAndReserveChoices() {
+        for (height in listOf(0f, 0.05f, 0.2f, 0.4f)) {
+            for (reserve in listOf(false, true)) {
+                assertCaptionChoicesPreserved(height = height, reserve = reserve, migrated = true)
+            }
+        }
+    }
+
+    /** 缺少高度或预留键的旧配置只读取默认值，不补写选择或改变旧迁移标记。 */
+    @Test fun missingCaptionChoicesUseDefaultsWithoutPersistingThem() {
+        for (migrated in listOf(null, false, true)) {
+            for (reserve in listOf(false, true)) {
+                assertCaptionChoicesPreserved(height = null, reserve = reserve, migrated = migrated)
+            }
+            for (height in listOf(0f, 0.2f)) {
+                assertCaptionChoicesPreserved(height = height, reserve = null, migrated = migrated)
+            }
+        }
+    }
+
+    /** 在独立存储中写入历史配置，两次重建真实偏好并核对读值及原始键值均未被覆盖。 */
+    private fun assertCaptionChoicesPreserved(height: Float?, reserve: Boolean?, migrated: Boolean?) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val token = UUID.randomUUID().toString()
+        val isolated = object : ContextWrapper(context) {
+            /** 将偏好全部隔离到本用例，避免读取或覆盖设备上的用户选择。 */
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                context.getSharedPreferences("字幕高度默认-$token-$name", mode)
+        }
+        val stored = isolated.getSharedPreferences("jpsub", Context.MODE_PRIVATE)
+        assertTrue(stored.edit().apply {
+            if (height != null) putFloat("heightFrac", height)
+            if (reserve != null) putBoolean("reserveDraftSpace", reserve)
+            if (migrated != null) putBoolean("fixedCaptionHeightDefaultMigrated", migrated)
+        }.commit())
+        repeat(2) {
+            val prefs = Prefs(isolated)
+            assertEquals(height ?: 0f, prefs.heightFrac, 0f)
+            assertEquals(reserve ?: true, prefs.reserveDraftSpace)
+            assertEquals(height, stored.all["heightFrac"])
+            assertEquals(reserve, stored.all["reserveDraftSpace"])
+            assertEquals(migrated, stored.all["fixedCaptionHeightDefaultMigrated"])
+        }
+    }
+
     /** 即使内存仍有字幕且显示开关均打开，首页也不能重新显示原文、译文或耗时。 */
     @Test fun liveDoesNotDisplayInMemoryCaptions() {
         val live = LiveUiState(showOriginal = true, showStats = true,

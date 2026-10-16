@@ -14,7 +14,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
-import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -31,7 +30,6 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.util.TypedValue
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
@@ -621,25 +619,16 @@ class CaptionService : Service() {
         var toolbarShown = false
         val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow())
         overlayToolbarWindow = toolbarWindow
-        val lp = WindowManager.LayoutParams(
-            cardW,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = prefs.overlayX.takeIf { it >= 0 } ?: ((area().width() - cardW) / 2)
-            y = prefs.overlayY.takeIf { it >= 0 } ?: (area().height() * 2 / 3)
-        }
-        // 字幕窗口只容纳正文和固定草稿预算；工具栏使用独立浮层，不移动字幕。
-        var cardX = lp.x; var cardY = lp.y
-        var shownX = cardX; var shownY = cardY // where layout() last put the card (cardX / cardY clamped to the screen)
-        // 只固定最后一行定稿的基线，草稿和耗时变化不能重新贴屏或改写锚点。
+        var cardX = prefs.overlayX.takeIf { it >= 0 } ?: ((area().width() - cardW) / 2)
+        var cardY = prefs.overlayY.takeIf { it >= 0 } ?: (area().height() * 2 / 3)
+        var shownX = cardX; var shownY = cardY
         val baselineAnchor = CaptionBaselineAnchor(prefs.overlayBaselineForArea(area().width(), area().height()))
-        var layoutGuard: CaptionLayoutGuard? = null
-        val screenLocation = IntArray(2)
-        val windowOrigin = CaptionWindowOrigin(if (android.os.Build.VERSION.SDK_INT >= 30) area().top else null)
+        val host = CaptionWindowHost(this, wm, v, baselineAnchor) { x, y, width, height ->
+            shownX = x; shownY = y
+            val bounds = area()
+            toolbarWindow.update(toolbarShown, x, y, width, height, bounds.width(), bounds.height())
+        }
+        overlayWindowHost = host
         fun layout() {
             val a = area(); val sw = a.width(); val sh = a.height()
             cardW = cardW.coerceIn((sw * Prefs.MIN_WIDTH).toInt(), sw)
@@ -656,11 +645,7 @@ class CaptionService : Service() {
             val baselineOffset = v.finalLineBaselinePx()
             shownY = baselineAnchor.position(cardY, baselineOffset, sh, blockH)
             v.placeCard(0, 0, false, 0)
-            lp.x = shownX; lp.width = cardW
-            lp.y = shownY
-            layoutGuard?.positioned(baselineOffset, blockH)
-            if (v.isAttachedToWindow) wm.updateViewLayout(v, lp)
-            toolbarWindow.update(toolbarShown, shownX, shownY, cardW, blockH, sw, sh)
+            host.place(cardX, cardY, cardW, sw, sh)
         }
         // rotation / resize: the caption height may not change, so re-fit explicitly from the saved width fraction
         // caption height from the saved fraction (0 = fit the text); kept within the 40 % cap by the view
@@ -668,7 +653,6 @@ class CaptionService : Service() {
         var captionH = 0 // px while a resize drag runs
         onDisplayChanged = {
             baselineAnchor.reset()
-            windowOrigin.reset(if (android.os.Build.VERSION.SDK_INT >= 30) area().top else null)
             cardW = (area().width() * prefs.widthFrac).toInt()
             applyHeight(); layout()
             baselineAnchor.baseline?.let { prefs.saveOverlayBaseline(it, area().width(), area().height()) }
@@ -722,19 +706,6 @@ class CaptionService : Service() {
         v.setShown(prefs.showJa, prefs.showStats)
         v.onToggleJa = { prefs.showJa = !prefs.showJa }
         v.onToggleStats = { prefs.showStats = !prefs.showStats }
-        // 绘制前纠正位置，包含外框高度没变但正文重排的情况，避免延后一帧的闪动。
-        layoutGuard = CaptionLayoutGuard(
-            baselineOffset = { v.finalLineBaselinePx() },
-            reservedHeight = { v.measureCaptionBlockHeight(cardW) },
-            position = { layout() },
-            aligned = {
-                v.getLocationOnScreen(screenLocation)
-                windowOrigin.aligned(screenLocation[1], lp.y, v.finalLineBaselineInWindowPx(), baselineAnchor.baseline ?: 0)
-            },
-        ).also { guard ->
-            overlayLayoutGuard = guard
-            v.viewTreeObserver.addOnPreDrawListener(guard)
-        }
         // settings changed on the home screen while subtitles run
         prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             when (key) {
@@ -767,11 +738,11 @@ class CaptionService : Service() {
         overlay = v
         refresh()
         layout()
-        wm.addView(v, lp)
+        host.show()
     }
 
     private var onDisplayChanged: (() -> Unit)? = null
-    private var overlayLayoutGuard: CaptionLayoutGuard? = null
+    private var overlayWindowHost: CaptionWindowHost? = null
     private var overlayToolbarWindow: CaptionToolbarWindow? = null
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -803,13 +774,8 @@ class CaptionService : Service() {
         onDisplayChanged = null
         overlayToolbarWindow?.dismiss()
         overlayToolbarWindow = null
-        overlay?.let { view ->
-            overlayLayoutGuard?.let { guard ->
-                if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnPreDrawListener(guard)
-            }
-            getSystemService(WindowManager::class.java).removeView(view)
-        }
-        overlayLayoutGuard = null
+        overlayWindowHost?.dismiss()
+        overlayWindowHost = null
         overlay = null
         super.onDestroy()
     }

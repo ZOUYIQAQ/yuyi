@@ -8,17 +8,7 @@ class Prefs(ctx: Context) {
     // 会话、测试连接和生成术语均先读取偏好，再发送模型请求。
     init {
         ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
-        // 仅首次将旧版自动高度（含未保存高度）迁移为固定两成高度；固定高度保持原值。
-        // 默认值与完成标记原子写入，显式预留选择保留，此后选回自动也不再覆盖。
-        if (!sp.contains("fixedCaptionHeightDefaultMigrated")) {
-            sp.edit().apply {
-                if (sp.getFloat("heightFrac", 0f) == 0f) {
-                    putFloat("heightFrac", 0.2f)
-                    if (!sp.contains("reserveDraftSpace")) putBoolean("reserveDraftSpace", true)
-                }
-                putBoolean("fixedCaptionHeightDefaultMigrated", true)
-            }.apply()
-        }
+        // 停用旧固定高度默认迁移；保留已存高度、预留选择及旧迁移标记，不反向推断用户意图。
         val range = sentenceRange()
         // 在旧区间补齐前区分新安装与旧配置；新版显式选择始终优先。
         if (!sp.contains("captionSentenceCount")) {
@@ -59,9 +49,9 @@ class Prefs(ctx: Context) {
         get() = sp.getFloat("widthFrac", DEFAULT_WIDTH)
         set(v) = sp.edit().putFloat("widthFrac", v).apply()
 
-    /** 字幕区域默认为可用观看高度的两成；零仍表示用户手动选择的自动高度。 */
+    /** 字幕默认自动高度（零），已保存的自动或固定高度选择保持原值。 */
     var heightFrac: Float
-        get() = sp.getFloat("heightFrac", 0.2f)
+        get() = sp.getFloat("heightFrac", 0f)
         set(v) = sp.edit().putFloat("heightFrac", v).apply()
 
     /** Show the recognised Japanese above the Chinese line */
