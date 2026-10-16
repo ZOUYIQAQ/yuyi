@@ -16,6 +16,31 @@ import java.util.UUID
 
 /** 使用独立偏好验证新增预设和外观设置，不修改设备上的用户配置。 */
 class RefinementDeviceTest {
+    /** 无显式选择时默认B站直播，之后手动选通用仍能保存并回填。 */
+    @Test fun defaultSceneIsBilibiliAndManualSelectionPersists() = withController { controller, prefs, actions ->
+        assertEquals(Scene.VTUBER.id, prefs.scene.id)
+        assertEquals(Scene.VTUBER.id, controller.state.value.live.sceneId)
+        actions.onSelectScene(Scene.GENERAL.id)
+        assertEquals(Scene.GENERAL.id, Prefs(controller.getApplication()).scene.id)
+        assertEquals(Scene.GENERAL.id, controller.state.value.live.sceneId)
+    }
+
+    /** 覆盖安装后已有的显式场景选择不被新默认值替换。 */
+    @Test fun savedGeneralSceneStillLoadsIntoController() = withController(
+        configurePrefs = { it.scene = Scene.GENERAL },
+    ) { controller, prefs, _ ->
+        assertEquals(Scene.GENERAL.id, prefs.scene.id)
+        assertEquals(Scene.GENERAL.id, controller.state.value.live.sceneId)
+    }
+
+    /** 默认场景使用用户已编辑的内容，不能绕过存储读取原始内置模板。 */
+    @Test fun editedBilibiliSceneIsUsedWithoutExplicitSelection() = withController(
+        configurePrefs = { it.scenes = listOf(Scene.VTUBER.copy(background = "用户的直播背景")) },
+    ) { controller, prefs, _ ->
+        assertEquals(Scene.VTUBER.id, controller.state.value.live.sceneId)
+        assertEquals("用户的直播背景", prefs.scene.background)
+    }
+
     /** 新选项默认关闭，保存、其他样式修改和定稿模式切换均保持同一持久化选择。 */
     @Test fun draftBackgroundReservationPersistsWithoutChangingOtherDefaults() = withController { controller, prefs, actions ->
         assertFalse(prefs.reserveDraftSpace)

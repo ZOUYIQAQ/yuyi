@@ -51,6 +51,32 @@ class ModelDeviceTest {
         }
     }
 
+    /** 仅读取已安装的Reazon模型，验证原生时间戳确实能映射回完整识别文本。 */
+    @Test fun installedReazonProvidesNativeTokenTimings() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        ActivityScenario.launch(MainActivity::class.java).use {
+            val repository = ModelRepository.get(context)
+            val deadline = System.currentTimeMillis() + 30_000
+            while (repository.selectedPaths() == null && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            val paths = requireNotNull(repository.selectedPaths()) { "需已有启用的Reazon模型，测试不下载或切换模型" }
+            assertEquals("reazonspeech", paths.spec.id)
+            val samples = waveSamples(instrumentation.context.assets.open("ja.wav").use { stream -> stream.readBytes() })
+            val asr = SherpaAsr(paths, 2)
+            try {
+                val result = asr.recognizeTimed(samples)
+                val pieces = requireNotNull(result.pieces) { "Reazon原生结果缺少可映射的分词时间戳：${result.text}" }
+                assertTrue("必须实际识别出示例日语", result.text.contains("中学"))
+                assertTrue("时间片段不能为空", pieces.isNotEmpty())
+                assertEquals("按时间片段拼接必须还原完整原文", result.text, pieces.joinToString("") { piece -> piece.text })
+                assertTrue("时间戳必须有限、按序且落在补偿后的音频范围", pieces.all { piece ->
+                    piece.t.isFinite() && piece.t >= -0.3f && piece.t <= samples.size / 16_000f + 0.3f
+                } && pieces.zipWithNext().all { (a, b) -> a.t <= b.t })
+                Log.i("模型设备验收", "真实Reazon时间戳已映射：${pieces.size}个片段；原文：${result.text}")
+            } finally { asr.release() }
+        }
+    }
+
     /** 读取测试仓库提供的16kHz单声道PCM16 WAV，按RIFF块定位而非假定44字节头。 */
     private fun waveSamples(bytes: ByteArray): FloatArray {
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)

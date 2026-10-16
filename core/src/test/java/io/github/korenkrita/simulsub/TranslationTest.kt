@@ -194,6 +194,17 @@ class TranslationTest {
         assertNotEquals(s, byokSystem(Scene.VTUBER, Lang.JA, Target.custom("粤语")!!))
     }
 
+    /** 短片段禁止借前文补全的规则仅适用于日语转内置中文。 */
+    @Test
+    fun aFragmentIsNotCompletedFromThePreviousLinesOnlyFromJapaneseIntoChinese() {
+        val rule = "不要根据【前文】把它补全成完整句子"
+        assertTrue(byokSystem(Scene.VTUBER, Lang.JA, Target.ZH).contains(rule))
+        assertFalse(byokSystem(Scene.VTUBER, Lang.EN, Target.ZH).contains(rule))
+        assertFalse(byokSystem(Scene.VTUBER, null, Target.ZH).contains(rule))
+        assertFalse(byokSystem(Scene.VTUBER, Lang.JA, Target.of(Lang.EN)).contains(rule))
+        assertFalse(byokSystem(Scene.VTUBER, Lang.JA, Target.custom("中文")!!).contains(rule))
+    }
+
     @Test
     fun targetsAreStoredAsAPresetCodeOrATypedName() {
         assertEquals(Target.of(Lang.KO), Target.parse("ko"))
@@ -216,5 +227,38 @@ class TranslationTest {
         assertEquals(FIX_NOTES_GENERAL["negation"], fixNote("negation", Lang.EN, Target.ZH))
         assertEquals(FIX_NOTES_GENERAL["reversal"], fixNote("reversal", Lang.JA, Target.of(Lang.EN)))
         assertEquals(null, fixNote("ok", Lang.JA, Target.ZH))
+    }
+
+    /** 命名配置沿用旧默认存储键，并能完整往返保存。 */
+    @Test
+    fun llmProfilesStartAsTheOldSettingAndRoundTrip() {
+        // nothing saved yet (an update from 1.0, or a new install): the one setting there was, under the old names
+        assertEquals(listOf(LlmProfile.FIRST), LlmProfile.all(null))
+        assertEquals("", LlmProfile.FIRST.suffix)
+        val list = listOf(LlmProfile.FIRST, LlmProfile("p1700000000000", "DeepSeek"))
+        assertEquals(list, LlmProfile.all(LlmProfile.store(list)))
+        assertEquals(":p1700000000000", list[1].suffix)
+    }
+
+    /** 无效标识、空名称和重复配置不会进入配置目录。 */
+    @Test
+    fun llmProfilesDropWhatCannotBeAStorageName() {
+        // an id outside [a-z0-9] would end up inside a storage name or keychain account; a broken value is the first one
+        val saved = """[{"id":"a:b","name":"x"},{"id":"p1","name":"  "},{"id":"p2","name":"好"},{"id":"p2","name":"重复"}]"""
+        assertEquals(listOf(LlmProfile("p2", "好")), LlmProfile.all(saved))
+        assertEquals(listOf(LlmProfile.FIRST), LlmProfile.all("not json"))
+        assertEquals(listOf(LlmProfile.FIRST), LlmProfile.all("""[{"id":"A","name":"x"}]"""))
+    }
+
+    /** 配置名去除首尾空白、限制长度并避免重名，标识生成避开已有配置。 */
+    @Test
+    fun llmProfileNamesAreTrimmedAndUnique() {
+        val list = listOf(LlmProfile.FIRST, LlmProfile("p1", "DeepSeek"))
+        assertEquals("千问" to null, LlmProfile.name("  千问 ", list))
+        assertNull(LlmProfile.name(" ", list).first)
+        assertNull(LlmProfile.name("deepseek", list).first) // another one's, case aside
+        assertEquals("DeepSeek" to null, LlmProfile.name("DeepSeek", list, self = "p1")) // its own name again
+        assertNull(LlmProfile.name("x".repeat(LlmProfile.MAX_NAME + 1), list).first)
+        assertEquals("p6", LlmProfile.newId(listOf(LlmProfile("p5", "a")), now = 5))
     }
 }

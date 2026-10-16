@@ -23,14 +23,20 @@ class SherpaAsr(private val paths: ModelPaths, threads: Int) : Asr {
         ),
     )
 
-    /** 按模型处理输入与结果，确保原生流在成功和异常时都能释放。 */
-    override fun recognize(samples: FloatArray): String {
+    /** 普通识别沿用同一解码结果，避免为了时间戳重复执行推理。 */
+    override fun recognize(samples: FloatArray): String = recognizeTimed(samples).text
+
+    /** Reazon提供分词时间戳修复漏词；SenseVoice保留标记清理且不伪造时间信息。 */
+    override fun recognizeTimed(samples: FloatArray): Recognition {
         val stream = rec.createStream()
         try {
-            val input = if (paths.spec.kind == ModelKind.REAZON) padded(samples) else samples
-            stream.acceptWaveform(input, 16_000)
+            val reazon = paths.spec.kind == ModelKind.REAZON
+            stream.acceptWaveform(if (reazon) padded(samples) else samples, 16_000)
             rec.decode(stream)
-            return rec.getResult(stream).text.replace(Regex("<\\|[^|]*\\|>"), "").trim()
+            val result = rec.getResult(stream)
+            val text = result.text.replace(Regex("<\\|[^|]*\\|>"), "").trim()
+            return if (reazon) Recognition.of(text, result.tokens, result.timestamps, PAD / 16_000f)
+                else Recognition(text, null)
         } finally {
             stream.release()
         }

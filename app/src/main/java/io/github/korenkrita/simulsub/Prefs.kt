@@ -176,9 +176,11 @@ class Prefs(ctx: Context) {
     var scenes: List<Scene>
         get() = Scene.all(sp.getString("scenes", null))
         set(v) = sp.edit().putString("scenes", Scene.store(v)).apply()
-    /** What the subtitles are about (translator background + term list), one of [scenes]; read when a session starts. */
+    /** 默认使用B站直播；已有选择优先，按标识读取用户编辑后的背景与术语。 */
     var scene: Scene
-        get() = sp.getString("scene", null).let { id -> scenes.let { all -> all.firstOrNull { it.id == id } ?: all.first() } }
+        get() = sp.getString("scene", Scene.VTUBER.id).let { id ->
+            scenes.let { all -> all.firstOrNull { it.id == id } ?: all.first { it.id == Scene.VTUBER.id } }
+        }
         set(v) = sp.edit().putString("scene", v.id).apply()
 
     /** Use Jev (cloud) for sentence ends; needs the key of [jevProvider]. */

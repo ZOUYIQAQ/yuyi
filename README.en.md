@@ -4,13 +4,15 @@
 
 **Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
 
-An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.6.2 (versionCode 30)**, adds optional persistent background space for interim captions, and keeps the named API profiles, HTTP local/LAN endpoints and incremental draft translation from upstream 1.0.2, with improved narrow-window/large-text appearance controls and saved auxiliary-key editing; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.7.0 (versionCode 31)**, merges upstream 1.0.4 with faster short-utterance cuts, timestamp-based recovery of dropped words and improved translation of short Japanese fragments. It preserves optional persistent background space for interim captions, named API profiles, HTTP local/LAN endpoints and incremental draft translation, with improved narrow-window/large-text appearance controls and saved auxiliary-key editing; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
 
 The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
 
 Android floating subtitles for audio playing on your device. Speech recognition and voice activity detection run locally; your own translation API receives text. The current build supports Android phones and tablets. Desktop clients and their dedicated tools have been removed.
 
 In **字幕 (Subtitles)**, **预留临时字幕空间 (Reserve interim-caption space)** keeps one line of background after interim text disappears. It is off by default and can only be changed when **仅显示定稿 (Final captions only)** is off. The choice is remembered while disabled. This does not move finalized captions or consume their sentence limit.
+
+The default scene is **B站 VTuber 直播 (Bilibili VTuber Live)**. Saved manual scene choices and edits are preserved.
 
 ## Get started
 
@@ -39,7 +41,7 @@ Capture depends on the source app, DRM, Android version and device implementatio
 
 Only four representative screenshots are displayed here; screenshot files and historical QA records are retained.
 
-These four screenshots show Yuyi 1.6.1 running on the local API 35 emulator on 2026-10-16, including tablet-sized windows. The subtitle screenshot shows the settings preview.
+These four screenshots show Yuyi 1.7.0 running on the local API 35 emulator on 2026-10-16, including tablet-sized windows. The subtitle screenshot shows the settings preview.
 
 Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
 

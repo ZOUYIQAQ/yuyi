@@ -487,7 +487,7 @@ class CaptionService : Service() {
             // with Jev the forced cut asks first and an "unfinished" head may grow to twice this (10 s); without Jev it
             // cuts at the default 7 s. The live log showed long waits were utterances that reached the forced cut.
             // An utterance that starts while Jev is paused (its key is missing) is cut as without Jev.
-            val seg = Segmenter({ pl.submit(it) }, minFinalMs = 1_200, maxHoldSilenceMs = 1_500,
+            val seg = Segmenter({ pl.submit(it) }, minFinalMs = MIN_FINAL_MS, maxHoldSilenceMs = 1_500,
                 maxUtteranceMs = if (jevActive) JEV_MAX_UTTERANCE_MS else PLAIN_MAX_UTTERANCE_MS,
                 hintWaitMs = if (jevActive) JEV_WAIT_MS else 0, holdHint = pl::holdHint,
                 judged = pl::judged, plainMaxUtteranceMs = PLAIN_MAX_UTTERANCE_MS)
@@ -876,6 +876,8 @@ class CaptionService : Service() {
         private const val JEV_WAIT_MS = 1_000
         private const val JEV_MAX_UTTERANCE_MS = 5_000
         private const val PLAIN_MAX_UTTERANCE_MS = 7_000
+        /** 短语累计400毫秒语音即可分句，避免应答语因旧阈值1200毫秒而额外等待。 */
+        internal const val MIN_FINAL_MS = 400
         /** captions never take more than this part of the usable height, so the toolbar always fits */
         const val MAX_CAPTION_FRAC = 0.4f
 

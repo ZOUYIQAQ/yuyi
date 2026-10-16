@@ -2,15 +2,18 @@
 
 ## 版本与上游来源
 
-本轮为 **羽译1.6.0（versionCode 28，2026-10-16）**。以 [KorenKrita/simul-subtitle main `20ffe11`](https://github.com/KorenKrita/simul-subtitle/commit/20ffe11)（上游1.0.2）为参考，按功能移植以下提交，原作者均为 **KorenKrita**：
+当前为 **羽译1.7.0（versionCode 31，2026-10-16）**，正常合并 [KorenKrita/simul-subtitle main `585ad36`](https://github.com/KorenKrita/simul-subtitle/commit/585ad36)（上游1.0.4）。保留上游完整提交历史，以及原作者 **KorenKrita** 的署名与MIT许可。合并时保留本Fork的Compose界面、安装后下载模型、独立包名及仅安卓范围。
 
-| 上游提交 | 移植功能与本分支边界 |
+| 上游提交 | 集成内容与本分支边界 |
 |---|---|
-| [`475aa2b`](https://github.com/KorenKrita/simul-subtitle/commit/475aa2b) | 命名 API 配置；接入现有 Compose 设置页、草稿确认与 Android 加密存储 |
-| [`129093f`](https://github.com/KorenKrita/simul-subtitle/commit/129093f) | HTTP 本机／局域网服务；保留协议与明文提示，release HTTPS 仅信系统 CA，不跟随重定向 |
-| [`4054358`](https://github.com/KorenKrita/simul-subtitle/commit/4054358) | 草稿增量翻译；按最后实际入队草稿累计变化，阈值为5个 Unicode 码点 |
+| [`475aa2b`](https://github.com/KorenKrita/simul-subtitle/commit/475aa2b) | 命名API配置；已接入Compose设置、草稿确认和Android加密存储，保留本Fork的并发及名称校验增强 |
+| [`129093f`](https://github.com/KorenKrita/simul-subtitle/commit/129093f) | HTTP本机／局域网服务；release HTTPS仅信任系统CA |
+| [`4054358`](https://github.com/KorenKrita/simul-subtitle/commit/4054358) | 草稿增量翻译；保留本Fork相对实际入队草稿累计5个Unicode码点的规则 |
+| [`8a5a0db`](https://github.com/KorenKrita/simul-subtitle/commit/8a5a0db) | 安卓短语分句阈值从1200毫秒语音降至400毫秒，减少短应答额外等待 |
+| [`a8dd137`](https://github.com/KorenKrita/simul-subtitle/commit/a8dd137) | 日语到内置中文目标的短片段翻译约束，避免借前文补成整句 |
+| [`cbfb8ed`](https://github.com/KorenKrita/simul-subtitle/commit/cbfb8ed)、[`15b74cc`](https://github.com/KorenKrita/simul-subtitle/commit/15b74cc) | 根据Reazon分词时间戳补回长识别遗漏的旧草稿文字；跨段延续核对只保留每段最长音频。SenseVoice没有可用时间信息时正常识别，不伪造时间戳 |
 
-采用定向移植，不执行普通合并，不恢复 desktop；仍仅构建 Android 手机／平板客户端及共享核心。原项目的 KorenKrita 署名和 MIT 许可保留。本轮验证范围见[Android验收记录](ANDROID_QA.md)。
+上游曾加入逐字显示流式译文，随后已在[`2e419f3`](https://github.com/KorenKrita/simul-subtitle/commit/2e419f3)撤回；本次按上游最终状态合并，不重新启用已撤回的展示。历史上的定向移植现已由真实双亲合并记录连接；仍只构建Android手机／平板客户端及共享核心。验证范围见[Android验收记录](ANDROID_QA.md)。
 
 ## 端到端数据流
 
@@ -27,7 +30,7 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
   Segmenter（将连续语音切分为句子）
     • 边听边出：说话期间每 0.7 s 输出一次草稿（当前句累积音频）
     • 停顿定稿：静音满 0.4 s 定稿；单句最长 7 s，超长时在该句最长停顿处切分
-    • 短句等待：不足 1.2 s 的短语音先等最多 1.5 s，若继续开口则合并为同一句
+    • 短句等待：不足 0.4 s 的极短语音先等最多 1.5 s，若继续开口则合并为同一句
     • Jev 断句（可选）：满 5 s 或停顿 0.4 s 时先问 Jev 是否说完；未说完则继续蓄音，最长 10 s 强制切分
         │
         ▼
@@ -83,7 +86,7 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 - **过时草稿自动折叠**：识别队列中若积压了多份草稿，旧草稿会被直接合并丢弃，只识别最新一份。若在工具栏选择「说完再出」，会跳过用于字幕展示的草稿识别与翻译；启用 Jev 断句时仍可能识别候选句尾用于判断。
 - **草稿增量门槛**：每段首份非空草稿直接入翻译队列；之后相对最后实际入队文本，扣除公共前后缀，以变化区间较长一侧的 Unicode 码点数判断，至少变化5个才再入队。跳过草稿不推进基线、不移除已排队任务，连续小增量仍可累计；定稿不受此门槛限制。基线最多保留64段，定稿入队后清理对应项。
 - **定稿按序处理**：正常运行时定稿按顺序识别与翻译，不按草稿折叠策略丢弃；用户停止、失败或过载收尾可能取消剩余任务，见下方过载保护。
-- **长句开头吞字自动补齐**：语音较长时，离线识别模型偶发吞掉定稿开头的词。若检测到草稿已识别出的前半句在定稿中丢失，流水线会自动用草稿前半句补齐再拼接定稿后半句；接缝处若出现重复字词，可通过「设置 → 高级设置 → 去掉衔接处重复的字」开关消重（默认关闭）。
+- **按时间戳补回漏词**：Reazon把原生分词时间映射回文字，只在新识别的时间空隙中补回最新草稿已识别出的内容，不额外运行第二次识别。提前切段后，只有下一段音频确实接续上一段时才延续对应文字；每段只保留一份最长草稿音频。有修正的新草稿替代旧稿，缺少时间戳时不推测补词。接缝消重仍可在高级设置调整（默认关闭）。
 - **相同原文译文复用**：同一句话的草稿与定稿（或相邻草稿）识别出的文本与提示词完全相同时，直接复用上一次译文，不重复发起翻译请求。
 
 ---

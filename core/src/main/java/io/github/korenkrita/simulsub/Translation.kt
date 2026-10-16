@@ -1,6 +1,6 @@
 package io.github.korenkrita.simulsub
 
-// Translator prompts and the BYOK client. Pure Kotlin so the Mac app and harness (tools/mac-e2e) compile the same code.
+// 翻译提示词和 BYOK 客户端：使用纯 Kotlin，供 Android 应用及核心测试复用。
 
 /**
  * What the subtitles are about: the background text and the term list given to the translator. Two come with the app
@@ -303,6 +303,10 @@ fun byokSystem(scene: Scene, source: Lang?, target: Target): String = buildStrin
     // the terms are in one language: given only when the captions are in it
     val terms = scene.termsFor(target)
     if (terms.isNotEmpty()) append("\n\n术语（原文出现时必须这样译）：" + terms.joinToString("、") { "${it.first}→${it.second}" })
+    // 日语转内置中文时，短残片只翻译自身，禁止借前文补全或复述；其他语言组合沿用原提示词。
+    if (source == Lang.JA && target.lang == Lang.ZH) append("\n\n如果【当前句】只有几个字（例如「あ」「日」「えっ」这类残缺片段），" +
+        "不要根据【前文】把它补全成完整句子，也不要复述【前文】的内容；但这几个字本身仍要翻译成自然的中文（例如「犬」→「狗」、" +
+        "「行く」→「去」），不要直接照抄原文。")
 }
 
 /**
@@ -391,16 +395,8 @@ fun byokUser(text: String, notes: List<String> = emptyList(), previous: List<Str
     notes.forEach { append("\n\n【注意】$it") }
 }
 
-/**
- * The user's own OpenAI-compatible service (BYOK), the only translator: streamed, so that a slow or queued request is
- * noticed early. No translated text within [firstContentMs] fails the caption, the call ends [deadlineMs] after
- * sending, the caption shows the whole sentence at once, no retry and no fallback: a failure is a failed caption,
- * visible as such. [cancel] is terminal (stop). [system] is fixed for the session; [translate] takes the [byokUser] text.
- *
- * Thinking must be off, but there is no standard switch: [THINKING_OFF] lists the ones we know. [variant] is the one
- * [probe] found for this URL + model (null: none worked, the request carries no switch and may think and be slow).
- * Reasoning in an answer is never shown; it is only flagged ([MtResult.thinking]).
- */
+// 命名翻译配置复用 LlmProfile.kt：保留 Fork 的配置数量限制及标识校验，避免重复声明上游同名类。
+
 /**
  * The user's LLM API as saved: chat URL (see [ByokTranslator.chatUrl]), model, key ("" = none: no Authorization header,
  * for a free service), the User-Agent ("" = [ByokTranslator.defaultUserAgent]) and extra request headers. A data class:
@@ -459,6 +455,12 @@ data class ByokService(val url: String, val model: String, val key: String, val 
     }
 }
 
+/**
+ * BYOK 流式翻译客户端：首段译文与总调用分别受 [firstContentMs]、[deadlineMs] 限制，
+ * 字幕整句返回；翻译失败直接报告，不重试或切换服务。[cancel] 为终止操作。
+ * [system] 固定，[translate] 接收 [byokUser] 生成的当前句提示词。
+ * 通过 [THINKING_OFF] 探测关闭思考的参数；不显示思考内容，只记录 [MtResult.thinking]。
+ */
 class ByokTranslator(
     private val service: ByokService,
     private val system: String,

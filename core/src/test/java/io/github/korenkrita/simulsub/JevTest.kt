@@ -678,6 +678,8 @@ class JevTest {
         for (u in listOf("ftp://h.io", "ws://h.io", "file:///etc/hosts"))
             assertTrue(u, ByokTranslator.chatUrl(u).first!!.contains("http:// 或 https://"))
         for (u in listOf("https://h.io:65536", "https://h.io:0")) assertNull(u, ByokTranslator.chatUrl(u).second)
+        // 未写协议的地址也应提示补齐接受的两种协议。
+        assertTrue(ByokTranslator.chatUrl("h.io").first!!.contains("http:// 或 https://"))
         assertEquals("https://[::1]:8443/v1/chat/completions", ByokTranslator.chatUrl("HTTPS://[::1]:8443/v1/").second)
     }
 
