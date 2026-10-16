@@ -225,12 +225,14 @@ class SegmenterTest {
 
     /** A judge that answers [latencyMs] after the end-of-speech draft was emitted (ASR + network), in audio time. */
     private fun timedJudge(answer: Boolean, latencyMs: Int, pattern: List<Pair<Boolean, Int>>, hintWaitMs: Int = 1000,
-                           maxHoldSilenceMs: Int = 2500, maxUtteranceMs: Int = 7000): List<AsrJob> {
+                           maxHoldSilenceMs: Int = 2500, maxUtteranceMs: Int = 7000, askSilenceMs: Int = 400,
+                           times: MutableList<Long>? = null): List<AsrJob> {
         val jobs = ArrayList<AsrJob>()
         var now = 0L
         val sentAt = HashMap<Pair<Long, Int>, Long>()
-        val s = Segmenter({ jobs.add(it); if (it.endOfSpeech) sentAt[it.segmentId to it.revision] = now },
+        val s = Segmenter({ jobs.add(it); times?.add(now); if (it.endOfSpeech) sentAt[it.segmentId to it.revision] = now },
             minFinalMs = 1200, maxHoldSilenceMs = maxHoldSilenceMs, hintWaitMs = hintWaitMs, maxUtteranceMs = maxUtteranceMs,
+            askSilenceMs = askSilenceMs,
             holdHint = { seg, rev -> sentAt[seg to rev]?.let { if (now - it >= latencyMs) answer else null } })
         var idx = 0
         for ((speech, ms) in pattern) repeat(ms / 32) {
@@ -256,6 +258,68 @@ class SegmenterTest {
         val tail = jobs.single { it.endOfSpeech }
         assertEquals(frameIds(tail), frameIds(f))
         assertTrue(jobs.indexOf(f) > jobs.indexOf(tail))
+    }
+
+    /** 判断结果提前返回时仍使用相同音频，并在真实停顿成立后定稿。 */
+    @Test
+    fun askedEarlyAFinishedAnswerFinalizesAtThePauseWithTheSameAudio() {
+        val pattern = listOf(true to 1504, false to 3000)
+        val atPause = ArrayList<Long>(); val early = ArrayList<Long>()
+        val a = timedJudge(answer = false, latencyMs = 200, pattern = pattern, times = atPause)
+        val b = timedJudge(answer = false, latencyMs = 200, pattern = pattern, askSilenceMs = 224, times = early)
+        val fa = a.indexOfFirst { it.isFinal }; val fb = b.indexOfFirst { it.isFinal }
+        assertEquals(frameIds(a[fa]), frameIds(b[fb]))
+        // 常规提问还要再等约200毫秒；224毫秒提前提问时，实际停顿成立后即可使用答案。
+        assertTrue("${atPause[fa]}", atPause[fa] >= 1504 + 416 + 200)
+        assertTrue("${early[fb]}", early[fb] <= 1504 + 448)
+    }
+
+    /** 提前提问未收到结果时，定稿时间不早于原有等待期限。 */
+    @Test
+    fun askedEarlyWithoutAnAnswerTheFinalComesWhenItWouldHave() {
+        val pattern = listOf(true to 1504, false to 3000)
+        val atPause = ArrayList<Long>(); val early = ArrayList<Long>()
+        val a = timedJudge(answer = false, latencyMs = 60_000, pattern = pattern, times = atPause)
+        val b = timedJudge(answer = false, latencyMs = 60_000, pattern = pattern, askSilenceMs = 224, times = early)
+        assertEquals(atPause[a.indexOfFirst { it.isFinal }], early[b.indexOfFirst { it.isFinal }])
+    }
+
+    /** 比较分段、版本和音频长度，确保提前判断不会改变切句内容。 */
+    private fun sig(jobs: List<AsrJob>) = jobs.map { "${it.segmentId}/${it.revision}/${it.isFinal}/${it.endOfSpeech}/${it.samples.size}" }
+
+    /** 临近强制切句或已有问题等待时，提前提问不替换原判断。 */
+    @Test
+    fun askingEarlyChangesNothingNearAForcedCutOrWithAQuestionOpen() {
+        // 强制切句前的短暂停顿，仍按原顺序判断强制切句和停顿。
+        for (answer in listOf(true, false)) {
+            val near = listOf(true to 4768, false to 512, true to 1504, false to 3000)
+            assertEquals(sig(timedJudge(answer, 64, near, maxUtteranceMs = 5000)),
+                sig(timedJudge(answer, 64, near, maxUtteranceMs = 5000, askSilenceMs = 224)))
+            // 强制切句判断尚未结束时，不让提前问题取代它。
+            val open = listOf(true to 5408, false to 320, true to 1504, false to 3000)
+            assertEquals(sig(timedJudge(answer, 640, open, maxUtteranceMs = 5000)),
+                sig(timedJudge(answer, 640, open, maxUtteranceMs = 5000, askSilenceMs = 224)))
+        }
+    }
+
+    /** 很短的等待设置仍从实际停顿开始计时。 */
+    @Test
+    fun askedEarlyWithAShortWaitTheFinalStillComesWhenItWouldHave() {
+        val pattern = listOf(true to 1504, false to 3000)
+        val atPause = ArrayList<Long>(); val early = ArrayList<Long>()
+        val a = timedJudge(answer = false, latencyMs = 60_000, pattern = pattern, hintWaitMs = 96, times = atPause)
+        val b = timedJudge(answer = false, latencyMs = 60_000, pattern = pattern, hintWaitMs = 96, askSilenceMs = 224, times = early)
+        assertEquals(atPause[a.indexOfFirst { it.isFinal }], early[b.indexOfFirst { it.isFinal }])
+    }
+
+    /** 提前判定已说完，但停顿不足400毫秒便续说时，仍不能切句。 */
+    @Test
+    fun askedEarlyASilenceShorterThanThePauseIsNoCut() {
+        // 静音320毫秒期间已判断说完，但说话人在400毫秒前续说，不能因此切句。
+        val jobs = timedJudge(answer = false, latencyMs = 64, askSilenceMs = 224,
+            pattern = listOf(true to 1504, false to 320, true to 1504, false to 3000))
+        assertEquals(listOf(1L), jobs.filter { it.isFinal }.map { it.segmentId })
+        assertTrue(jobs.count { it.endOfSpeech } >= 2)
     }
 
     // A pause candidate whose "finished" answer arrives after the speaker went on: the sentence before the pause is

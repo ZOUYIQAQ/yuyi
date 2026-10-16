@@ -230,8 +230,9 @@ class Pipeline(
         segSetup.remove(seg)
         // a segment that ended without a final (empty, dropped by stop) would otherwise stay: keep the table bounded
         if (segSetup.size > 64) segSetup.keys.removeIf { it < seg - 32 }
-        // 定稿已交给翻译队列，后续任务自带设置，不再需要草稿比较基线。
-        sentDraft.remove(seg)
+        // 定稿不再使用草稿基线；翻译线程也会访问该缓存，因此清理时持同一把锁。
+        synchronized(lock) { sentDraft.remove(seg) }
+        skipNextDraft.removeIf { it <= seg }
     }
 
     /**
@@ -356,11 +357,12 @@ class Pipeline(
         }
     }
 
-    /** Polls [q]; a final that leaves the queue is counted in [inFlightFinals] atomically, so drain never misses it. */
-    private fun <T> take(q: LinkedBlockingDeque<T>, isFinal: (T) -> Boolean): T? {
+    /** 在同一临界区取出任务、计入在途定稿并执行 [onTaken]，避免草稿基线与队列之间出现空隙。 */
+    private fun <T> take(q: LinkedBlockingDeque<T>, onTaken: (T) -> Unit = {}, isFinal: (T) -> Boolean): T? {
         synchronized(lock) {
             val x = q.pollFirst() ?: return@synchronized
             if (isFinal(x)) inFlightFinals++
+            onTaken(x)
             return x
         }
         Thread.sleep(10)
@@ -375,8 +377,10 @@ class Pipeline(
     private val segAudio = HashMap<Long, FloatArray>()
     /** 各段定稿的样本数，用于确认下一段的音频截点；只由识别线程访问。 */
     private val finalSamples = HashMap<Long, Int>()
-    /** 各段最后实际入队的草稿；跳过识别结果不改变基线，缓存最多保留六十四段。 */
+    /** 各段最后被翻译线程取走的草稿；由 [lock] 保护，最多保留六十四段。 */
     private val sentDraft = LinkedHashMap<Long, String>()
+    /** 上一份普通草稿增量不足时，跳过下一次普通草稿识别；句尾候选和定稿始终识别。仅识别线程访问。 */
+    private val skipNextDraft = LinkedHashSet<Long>()
 
     /**
      * Reazon在追加音频后偶尔漏掉停顿前的词；按最新草稿的分词时间补回真实空隙里的内容。
@@ -433,6 +437,7 @@ class Pipeline(
         while (running && !failed) {
             val q = take(asrQueue) { it.job.isFinal } ?: continue
             if (!q.job.isFinal && !q.job.endOfSpeech && skipDisplayDraft()) continue
+            if (!q.job.isFinal && !q.job.endOfSpeech && skipNextDraft.remove(q.job.segmentId)) continue
             // the segment's settings are fixed before its first recognition, so a change during it applies to the next one
             val setup = setupOf(q.job.segmentId)
             val start = clock()
@@ -456,15 +461,18 @@ class Pipeline(
                 if (!q.job.isFinal && ja.isEmpty()) return@synchronized
                 // a sentence-end candidate was recognized for Jev; it is only translated if drafts are wanted now
                 if (!q.job.isFinal && !drafts()) return@synchronized
-                // 先判断再修改队列：跳过的草稿既不能清除已排队任务，也不能推进比较基线；定稿始终通过。
-                if (!q.job.isFinal && !worthSendingDraft(q.job.segmentId, ja)) return@synchronized
+                // 跳过的草稿不能替换队列或推进比较基线；普通草稿增量不足时省去下一次识别。
+                if (!q.job.isFinal && !worthSendingDraft(q.job.segmentId, ja)) {
+                    if (!q.job.endOfSpeech) {
+                        skipNextDraft += q.job.segmentId
+                        // 没有定稿的旧分段也必须有界；淘汰只会多识别一稿，不影响定稿或句尾判断。
+                        if (skipNextDraft.size > 64) skipNextDraft.remove(skipNextDraft.first())
+                    }
+                    return@synchronized
+                }
+                skipNextDraft.remove(q.job.segmentId)
                 mtQueue.removeIf { it.q.job.segmentId == q.job.segmentId && !it.q.job.isFinal }
                 mtQueue.addLast(MtJob(q, ja, start, end, setup))
-                if (!q.job.isFinal) {
-                    sentDraft[q.job.segmentId] = ja
-                    // 按首次接受顺序淘汰，编号跳跃、倒序或没有定稿也不会导致缓存持续增长。
-                    if (sentDraft.size > 64) sentDraft.remove(sentDraft.keys.first())
-                }
                 if (q.job.isFinal) inFlightFinals-- // now counted by mtQueue
             }
             // the final carries its setup on (MtJob): the segment needs no lookup any more
@@ -472,7 +480,7 @@ class Pipeline(
         }
     }
 
-    /** 只比较最后实际入队的草稿；跳过的识别结果不影响后续小增量累计。仅识别线程调用。 */
+    /** 在 [lock] 内比较最后实际翻译的草稿，排队后被替换或跳过的结果不推进基线。 */
     private fun worthSendingDraft(segmentId: Long, ja: String): Boolean {
         val last = sentDraft[segmentId] ?: return true
         return newChars(last, ja) >= DRAFT_MIN_NEW_CHARS
@@ -678,7 +686,13 @@ class Pipeline(
                 } finally { req.done.countDown() }
                 continue
             }
-            val j = take(mtQueue) { it.q.job.isFinal } ?: continue
+            val j = take(mtQueue, onTaken = { taken ->
+                if (!taken.q.job.isFinal && !skipDisplayDraft()) {
+                    sentDraft[taken.q.job.segmentId] = taken.ja
+                    // 只有翻译线程实际接收的草稿才成为基线；保留无定稿、乱序编号时的容量保护。
+                    if (sentDraft.size > 64) sentDraft.remove(sentDraft.keys.first())
+                }
+            }) { it.q.job.isFinal } ?: continue
             if (!j.q.job.isFinal && skipDisplayDraft()) continue
             val job = j.q.job
             val start = clock()

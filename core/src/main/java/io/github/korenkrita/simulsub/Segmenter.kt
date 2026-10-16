@@ -47,6 +47,11 @@ class Segmenter(
     private val judged: ((segmentId: Long) -> Boolean)? = null,
     /** [maxUtteranceMs] for an utterance [judged] said no to */
     private val plainMaxUtteranceMs: Int = maxUtteranceMs,
+    /**
+     * 启用 [hintWaitMs] 时，在此静音时长先识别并判断句尾，但仍只在 [endSilenceMs] 后切句。
+     * 停顿未达切句阈值便继续说话时，丢弃提前候选；默认等到实际停顿才提问。
+     */
+    private val askSilenceMs: Int = endSilenceMs,
 ) {
     private val frameMs = frameSize * 1000 / sampleRate
     private val preRollFrames = preRollMs / frameMs
@@ -64,6 +69,8 @@ class Segmenter(
     private var tailRevision = -1
     private var tailCut = 0
     private var tailAtFrames = 0
+    /** 候选已在 [askSilenceMs] 发出，但停顿尚未达到 [endSilenceMs]。 */
+    private var tailEarly = false
     /**
      * A pause candidate the speaker talked past before its answer came: its answer is still waited for, within
      * 2 x [hintWaitMs] of the candidate. "Finished" = the sentence before the pause is done, cut there and carry the
@@ -124,7 +131,9 @@ class Segmenter(
         framesSinceDraft++
         silentFrames = if (f.speech) 0 else silentFrames + 1
         if (f.speech && tailRevision >= 0) {
-            resumedRevision = tailRevision; resumedCut = tailCut; resumedAtFrames = tailAtFrames
+            // 停顿不够长便恢复说话，提前提问的候选直接丢弃。
+            if (tailEarly) tailEarly = false
+            else { resumedRevision = tailRevision; resumedCut = tailCut; resumedAtFrames = tailAtFrames }
             tailRevision = -1
         }
         if (resumedRevision >= 0) {
@@ -149,7 +158,14 @@ class Segmenter(
         when {
             // a held pause is bounded by maxHoldSilenceMs; no forced cut inside it (the final drops the silence)
             inPause && (durMs >= hardMaxMs || !holding(silMs)) -> finalize(speechEnd, continueSpeech = false)
-            inPause -> if (waitMs > 0 && tailRevision < 0 && speechMs() >= minFinalMs) {
+            inPause -> if (tailEarly) {
+                // 提前候选现在成为真实停顿，从此按正常停顿候选处理。
+                tailEarly = false
+                if (cutRevision >= 0) { cutRevision = -1; cutClosed = true }
+                heldRevision = -1
+                resumedRevision = -1
+                tailAtFrames = frames.size
+            } else if (waitMs > 0 && tailRevision < 0 && speechMs() >= minFinalMs) {
                 // a newer candidate end replaces an open forced-cut question, and closes it for this utterance
                 if (cutRevision >= 0) { cutRevision = -1; cutClosed = true }
                 heldRevision = -1 // and a hold taken before: this newer candidate decides now
@@ -157,6 +173,16 @@ class Segmenter(
                 tailRevision = ++revision
                 tailCut = speechEnd
                 tailAtFrames = frames.size
+                emit(AsrJob(segmentId, tailRevision, false, concat(speechEnd), frames[speechEnd - 1].endAt, frames[speechEnd - 1].estimated, endOfSpeech = true))
+            }
+            // 仅普通停顿可提前提问：没有尚未结束的判断、没有待复查的保留，也不会在停顿成立前触发强制切段。
+            // 提前候选与实际停顿使用同一段音频，不改变切句内容。
+            silMs >= askSilenceMs && waitMs > 0 && tailRevision < 0 && speechMs() >= minFinalMs && cutRevision < 0 &&
+                resumedRevision < 0 && heldRevision < 0 && durMs + endSilenceMs - askSilenceMs < maxMs -> {
+                tailRevision = ++revision
+                tailCut = speechEnd
+                tailAtFrames = frames.size
+                tailEarly = true
                 emit(AsrJob(segmentId, tailRevision, false, concat(speechEnd), frames[speechEnd - 1].endAt, frames[speechEnd - 1].estimated, endOfSpeech = true))
             }
             durMs >= maxMs && forcedCutStep(durMs) -> Unit
@@ -175,7 +201,8 @@ class Segmenter(
         if (speechMs() < minFinalMs) return true
         if (waitMs <= 0) return false
         if (tailRevision < 0) return true // the candidate is emitted on this frame
-        return holdHint(segmentId, tailRevision) ?: ((frames.size - tailAtFrames) * frameMs < waitMs)
+        // 提前提问的超时仍从真实停顿成立时开始，不缩短原有等待期限。
+        return holdHint(segmentId, tailRevision) ?: (tailEarly || (frames.size - tailAtFrames) * frameMs < waitMs)
     }
 
     /**
@@ -231,6 +258,7 @@ class Segmenter(
     private fun finalize(count: Int, continueSpeech: Boolean) {
         emit(AsrJob(segmentId, ++revision, true, concat(count), frames[count - 1].endAt, frames[count - 1].estimated))
         tailRevision = -1
+        tailEarly = false
         resumedRevision = -1
         cutRevision = -1
         cutClosed = false

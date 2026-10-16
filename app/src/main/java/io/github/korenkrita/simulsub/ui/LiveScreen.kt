@@ -133,7 +133,7 @@ private fun LiveSceneOptions(state: LiveUiState, actions: SimulSubActions) {
                 FilledTonalButton(onClick = actions.onApplyCustomTarget, enabled = editable && state.customTarget.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("应用自定义语言") }
             }
         }
-        ToggleSetting("仅显示定稿", "关闭后显示实时修正的草稿。", state.finalOnly, editable, actions.onFinalOnly)
+        ToggleSetting("仅显示定稿", "开启后隐藏临时字幕，只显示定稿内容。", state.finalOnly, editable, actions.onFinalOnly)
     }
 }
 

@@ -167,13 +167,124 @@ class PipelineTest {
         val afterFirst = mt.calls.size // the first draft of a segment is always translated
         p.submit(job(1, 2, false, 2)); Thread.sleep(80)
         assertEquals("a draft that grew by 2 characters was translated", afterFirst, mt.calls.size)
-        p.submit(job(1, 3, false, 3))
+        // 增量不足后跳过一次普通草稿识别，下一次恢复。
+        p.submit(job(1, 3, false, 3)); Thread.sleep(80)
+        p.submit(job(1, 4, false, 3))
         while (mt.calls.size <= afterFirst && monoMs() < deadline) Thread.sleep(5)
         assertEquals("the draft that grew was translated", afterFirst + 1, mt.calls.size)
-        p.submit(job(1, 4, true, 4))
+        p.submit(job(1, 5, true, 4))
         assertTrue(done.await(3, TimeUnit.SECONDS))
         p.stop(); p.awaitStopped()
         assertTrue("the final was translated", mt.calls.any { source(it).startsWith("今日はゲーム配信を始めますよろしくお願いしますみなさん") })
+    }
+
+    /** 以最后实际翻译的草稿累计增长，平稳语速也能及时更新译文。 */
+    @Test
+    fun aSlowlyGrowingDraftIsTranslatedOnceItGrewEnoughSinceTheLastTranslation() {
+        val asr = object : Asr {
+            /** 按样本长度返回指定文本，隔离网络和模型耗时。 */
+            override fun recognize(samples: FloatArray): String = when (samples.size) {
+                1 -> "今日はゲーム"
+                2 -> "今日はゲーム配信を" // 新增三字，尚未达到翻译门槛。
+                else -> "今日はゲーム配信を始めま" // 相对被跳过稿新增三字，相对已翻译稿累计六字。
+            }
+        }
+        val mt = FakeMt(1)
+        val out = Collections.synchronizedList(ArrayList<Caption>())
+        val p = Pipeline(asr, mt, { out.add(it) })
+        p.start()
+        try {
+            p.submit(job(1, 1, false, 1))
+            val deadline = monoMs() + 2_000
+            while (out.none { !it.isFinal } && monoMs() < deadline) Thread.sleep(5)
+            p.submit(job(1, 2, false, 2)); Thread.sleep(80)
+            assertEquals(1, mt.calls.size)
+            p.submit(job(1, 3, false, 3)); Thread.sleep(80) // 上一草稿增量不足，本次不运行识别。
+            p.submit(job(1, 4, false, 3))
+            while (mt.calls.size < 2 && monoMs() < deadline) Thread.sleep(5)
+            assertEquals(2, mt.calls.size)
+        } finally { p.stop(); p.awaitStopped() }
+    }
+
+    /** 普通草稿增量不足时跳过下一次识别，再下一次恢复；句尾与定稿始终处理。 */
+    @Test
+    fun theDraftAfterOneNotWorthTranslatingIsNotRecognized() {
+        val calls = Collections.synchronizedList(ArrayList<Int>())
+        val asr = object : Asr {
+            /** 按样本长度返回指定文本，隔离网络和模型耗时。 */
+            override fun recognize(samples: FloatArray): String { calls += samples.size; return when (samples.size) {
+                1 -> "今日はゲーム"
+                2 -> "今日はゲーム配信を" // 新增三字，尚未达到翻译门槛。
+                4 -> "今日はゲーム配信を始めますよろしく"
+                else -> "今日はゲーム配信を始めますよろしくお願いします"
+            } }
+        }
+        val mt = FakeMt(1)
+        val out = Collections.synchronizedList(ArrayList<Caption>())
+        val p = Pipeline(asr, mt, { out.add(it) })
+        p.start()
+        try {
+            val deadline = monoMs() + 2_000
+            p.submit(job(1, 1, false, 1))
+            while (out.none { !it.isFinal } && monoMs() < deadline) Thread.sleep(5)
+            p.submit(job(1, 2, false, 2)); while (calls.size < 2 && monoMs() < deadline) Thread.sleep(5)
+            p.submit(job(1, 3, false, 3)); Thread.sleep(80)
+            p.submit(job(1, 4, false, 4)); while (mt.calls.size < 2 && monoMs() < deadline) Thread.sleep(5)
+            // 定稿和句尾候选始终运行识别。
+            p.submit(job(1, 5, false, 4)); while (calls.size < 4 && monoMs() < deadline) Thread.sleep(5) // 没有增长，跳过翻译。
+            p.submit(AsrJob(1, 6, false, FloatArray(5), monoMs(), endOfSpeech = true))
+            while (calls.size < 5 && monoMs() < deadline) Thread.sleep(5)
+            p.submit(job(1, 7, true, 5)); while (out.none { it.isFinal } && monoMs() < deadline) Thread.sleep(5)
+            assertEquals(listOf(1, 2, 4, 4, 5, 5), calls.toList())
+        } finally { p.stop(); p.awaitStopped() }
+    }
+
+    /** 尚未被翻译线程取走的排队草稿不能成为比较基线。 */
+    @Test
+    fun aQueuedDraftThatWasReplacedIsNotWhatTheNextIsMeasuredAgainst() {
+        val asr = object : Asr {
+            /** 按样本长度返回指定文本，隔离网络和模型耗时。 */
+            override fun recognize(samples: FloatArray): String = when (samples.size) {
+                1 -> "あいうえお"
+                2 -> "かきくけこ"
+                else -> "あいうえおか" // 相对实际翻译稿只新增一字，不能因排队稿而误判。
+            }
+        }
+        val mt = GateMt()
+        val p = Pipeline(asr, mt, {})
+        p.start()
+        try {
+            p.submit(job(1, 1, false, 1))
+            assertTrue(mt.entered.await(2, TimeUnit.SECONDS))
+            p.submit(job(1, 2, false, 2)); Thread.sleep(80)
+            p.submit(job(1, 3, false, 3)); Thread.sleep(80)
+            mt.gate.countDown()
+            val deadline = monoMs() + 2_000
+            while (mt.order.size < 2 && monoMs() < deadline) Thread.sleep(5)
+            Thread.sleep(50)
+            assertEquals(listOf("あいうえお", "かきくけこ"), mt.order.toList())
+        } finally { p.stop(); p.awaitStopped() }
+    }
+
+    /** 句尾候选增量不足不能让下一份普通草稿跳过识别。 */
+    @Test
+    fun aSentenceEndCandidateNotTranslatedDoesNotSkipTheNextDraft() {
+        val calls = Collections.synchronizedList(ArrayList<Int>())
+        val asr = object : Asr {
+            /** 按样本长度返回指定文本，隔离网络和模型耗时。 */
+            override fun recognize(samples: FloatArray): String { calls += samples.size; return if (samples.size < 3) "今日はゲーム" else "今日はゲーム配信を始めます" }
+        }
+        val mt = FakeMt(1)
+        val out = Collections.synchronizedList(ArrayList<Caption>())
+        val p = Pipeline(asr, mt, { out.add(it) })
+        p.start()
+        try {
+            val deadline = monoMs() + 2_000
+            p.submit(job(1, 1, false, 1)); while (out.isEmpty() && monoMs() < deadline) Thread.sleep(5)
+            p.submit(AsrJob(1, 2, false, FloatArray(2), monoMs(), endOfSpeech = true)); while (calls.size < 2 && monoMs() < deadline) Thread.sleep(5)
+            p.submit(job(1, 3, false, 3)); while (calls.size < 3 && monoMs() < deadline) Thread.sleep(5)
+            assertEquals(listOf(1, 2, 3), calls.toList())
+        } finally { p.stop(); p.awaitStopped() }
     }
 
     @Test
@@ -1740,7 +1851,8 @@ class PipelineTest {
         for (i in 1..12) { assertTrue(p.setSetup(Setup(FakeMt(1), version = i))); p.submit(job(1L + i, 1, true, 10 + i)) }
         // wait until the ASR thread has taken all of them (MT is still blocked on segment 1)
         val until = monoMs() + 2_000
-        while (monoMs() < until && asrSeen.none { it == 13L }) Thread.sleep(5)
+        // 同步列表的 contains 自带锁；不能在写线程运行时使用未同步的迭代器。
+        while (monoMs() < until && !asrSeen.contains(13L)) Thread.sleep(5)
         assertTrue(asrSeen.contains(13L))
         p.stop()
         assertEquals(0L, old.gate.count) // GateMt.cancel opens the gate

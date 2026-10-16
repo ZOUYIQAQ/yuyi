@@ -103,7 +103,10 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
             compose.onNodeWithText(heading).assertIsDisplayed()
             compose.onNodeWithContentDescription("返回设置").assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(UiDestination.SETTINGS, state.destination) }
-            compose.onNodeWithText("字幕与翻译").assertExists()
+            // 返回应恢复原入口位置，顶部标题可能已滚出懒列表，不能据此判断路由。
+            navigation("设置").assertIsSelected()
+            compose.onNodeWithText(label).assertIsDisplayed()
+            compose.onNodeWithContentDescription("返回设置").assertDoesNotExist()
         }
     }
 

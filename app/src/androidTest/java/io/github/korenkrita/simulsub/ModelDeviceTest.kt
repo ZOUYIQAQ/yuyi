@@ -38,7 +38,7 @@ class ModelDeviceTest {
             val paths = requireNotNull(repository.selectedPaths())
             assertEquals(id, paths.spec.id)
             val samples = waveSamples(instrumentation.context.assets.open("ja.wav").use { stream -> stream.readBytes() })
-            val asr = SherpaAsr(paths, 2)
+            val asr = SherpaAsr(paths, CaptionService.ASR_THREADS)
             val vad = SileroProb(paths.directory)
             try {
                 val started = System.nanoTime()
@@ -51,7 +51,7 @@ class ModelDeviceTest {
         }
     }
 
-    /** 仅读取已安装的Reazon模型，验证原生时间戳确实能映射回完整识别文本。 */
+    /** 使用正式识别线程配置读取已装Reazon模型，验证原生时间戳映射，不下载或切换模型。 */
     @Test fun installedReazonProvidesNativeTokenTimings() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -62,7 +62,7 @@ class ModelDeviceTest {
             val paths = requireNotNull(repository.selectedPaths()) { "需已有启用的Reazon模型，测试不下载或切换模型" }
             assertEquals("reazonspeech", paths.spec.id)
             val samples = waveSamples(instrumentation.context.assets.open("ja.wav").use { stream -> stream.readBytes() })
-            val asr = SherpaAsr(paths, 2)
+            val asr = SherpaAsr(paths, CaptionService.ASR_THREADS)
             try {
                 val result = asr.recognizeTimed(samples)
                 val pieces = requireNotNull(result.pieces) { "Reazon原生结果缺少可映射的分词时间戳：${result.text}" }

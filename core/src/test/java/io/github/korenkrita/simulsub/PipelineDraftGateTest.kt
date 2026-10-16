@@ -42,11 +42,11 @@ class PipelineDraftGateTest {
 
         init { pipeline.start() }
 
-        /** 等待识别完成，再用空句尾候选确保前一草稿已完成入队判断。 */
-        fun process(text: String, final: Boolean = false, segment: Long = 1) {
+        /** 可提交普通草稿；空句尾候选屏障确保门槛判断已完成，且不消耗或清除跳过标记。 */
+        fun process(text: String, final: Boolean = false, segment: Long = 1, candidate: Boolean = true) {
             texts.add(text)
             val rev = ++revision
-            assertTrue(pipeline.submit(AsrJob(segment, rev, final, FloatArray(texts.size), monoMs(), endOfSpeech = true)))
+            assertTrue(pipeline.submit(AsrJob(segment, rev, final, FloatArray(texts.size), monoMs(), endOfSpeech = candidate)))
             assertEquals("识别必须按序完成", rev, recognized.poll(2, TimeUnit.SECONDS))
             val barrier = ++revision
             assertTrue(pipeline.submit(AsrJob(segment, barrier, false, FloatArray(0), monoMs(), endOfSpeech = true)))
@@ -122,7 +122,8 @@ class PipelineDraftGateTest {
             s.process("起点")
             assertTrue("首稿翻译必须已经开始", s.entered.await(2, TimeUnit.SECONDS))
             s.process("起点甲乙丙丁戊")
-            s.process("起点甲乙丙丁戊己庚")
+            // 比较基准是正在翻译的「起点」，不是尚未被取走的排队草稿。
+            s.process("起点甲乙")
             s.process("")
             s.live = false
             s.process("起点甲乙丙丁戊己庚辛壬癸")
@@ -165,6 +166,56 @@ class PipelineDraftGateTest {
             s.process("首稿", final = true)
             assertTrue(s.caption().isFinal)
             assertTrue("定稿识别完成后释放基线", !history.containsKey(1L))
+        }
+    }
+
+    /** 无定稿且编号跳跃倒序时，普通草稿跳过标记最多保留六十四项，并淘汰最早插入的分段。 */
+    @Test
+    fun abandonedOrdinaryDraftsHaveBoundedSkipMarkers() {
+        Session().use { s ->
+            val segments = (100L downTo 1L).map { it * 17 }
+            for (seg in segments) {
+                s.process("首稿", segment = seg, candidate = false)
+                assertEquals("首稿必须已被翻译，才能建立该段基线", seg, s.caption().segmentId)
+                // 同段第二份普通草稿没有增量，应留下标记；process 的空候选不能把它清掉。
+                s.process("首稿", segment = seg, candidate = false)
+            }
+            val field = Pipeline::class.java.getDeclaredField("skipNextDraft").apply { isAccessible = true }
+            val skipped = (field.get(s.pipeline) as Set<*>).toSet()
+            assertEquals("必须实际生成并保留六十四个跳过标记", 64, skipped.size)
+            assertEquals("应保留最后插入的分段，不能按编号大小淘汰", segments.takeLast(64).toSet(), skipped)
+            assertEquals("重复普通草稿及空候选屏障都不应额外翻译", segments.size, s.calls.size)
+        }
+    }
+
+    /** 最早分段的标记淘汰后恢复普通识别；再次留下跳过标记也不能阻止其小增量定稿送达。 */
+    @Test
+    fun evictedSkipMarkersAllowRecognitionAndNeverDropTheFinal() {
+        Session().use { s ->
+            val segments = (100L downTo 1L).map { it * 17 }
+            for (seg in segments) {
+                s.process("首稿", segment = seg, candidate = false)
+                assertEquals(seg, s.caption().segmentId)
+                s.process("首稿", segment = seg, candidate = false)
+            }
+            val field = Pipeline::class.java.getDeclaredField("skipNextDraft").apply { isAccessible = true }
+            val oldest = segments.first()
+            assertTrue("最早插入的标记必须已淘汰", !(field.get(s.pipeline) as Set<*>).contains(oldest))
+            s.process("首稿甲乙丙丁戊", segment = oldest, candidate = false)
+            val resumed = s.caption()
+            assertEquals("淘汰后普通草稿应重新识别并翻译", "首稿甲乙丙丁戊", resumed.ja)
+            assertEquals(oldest, resumed.segmentId)
+            s.process("首稿甲乙丙丁戊", segment = oldest, candidate = false)
+            assertTrue("重复普通草稿必须再次留下跳过标记", (field.get(s.pipeline) as Set<*>).contains(oldest))
+            // 尚有跳过标记且文本只增加一字，定稿仍必须绕过识别跳过和翻译增量门槛。
+            s.process("首稿甲乙丙丁戊己", final = true, segment = oldest, candidate = false)
+            val final = s.caption()
+            assertTrue("跳过标记不能丢掉定稿", final.isFinal)
+            assertEquals(oldest, final.segmentId)
+            assertEquals("首稿甲乙丙丁戊己", final.ja)
+            assertTrue("定稿处理完应清理其跳过标记", !(field.get(s.pipeline) as Set<*>).contains(oldest))
+            assertEquals("只增加恢复后的普通草稿和最终定稿两次翻译", segments.size + 2, s.calls.size)
+            assertEquals("所有已接受定稿必须交付完成", 0, s.pipeline.drainFinals(1_000))
         }
     }
 }

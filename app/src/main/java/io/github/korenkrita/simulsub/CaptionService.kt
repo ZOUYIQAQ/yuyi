@@ -488,7 +488,8 @@ class CaptionService : Service() {
             val seg = Segmenter({ pl.submit(it) }, minFinalMs = MIN_FINAL_MS, maxHoldSilenceMs = 1_500,
                 maxUtteranceMs = if (jevActive) JEV_MAX_UTTERANCE_MS else PLAIN_MAX_UTTERANCE_MS,
                 hintWaitMs = if (jevActive) JEV_WAIT_MS else 0, holdHint = pl::holdHint,
-                judged = pl::judged, plainMaxUtteranceMs = PLAIN_MAX_UTTERANCE_MS)
+                judged = pl::judged, plainMaxUtteranceMs = PLAIN_MAX_UTTERANCE_MS,
+                askSilenceMs = JEV_ASK_SILENCE_MS)
             val frame = FloatArray(seg.frameSize)
             val ts = AudioTimestamp()
             var framesRead = 0L
@@ -835,11 +836,13 @@ class CaptionService : Service() {
 
         const val EXTRA_DATA = "data"
         const val ACTION_STOP = "stop"
-        // 8 Gen 3: 1×X4 + 5×A720 + 2×A520: ASR stays on two of the big cores.
-        private const val ASR_THREADS = 2
+        // 沿用上游正式版的四线程识别配置；性能收益仍取决于设备，不将电脑数据当作手机实测。
+        internal const val ASR_THREADS = 4
         private const val DRAIN_TIMEOUT_MS = 60_000L
         /** How long after a sentence-end candidate to wait for Jev before finalizing (ASR ~0.1 s + Jev p90 ~0.7 s). */
         private const val JEV_WAIT_MS = 1_000
+        /** 智能断句在静音224毫秒时提前判断，仍在停顿达到400毫秒后才允许切句。 */
+        private const val JEV_ASK_SILENCE_MS = 224
         private const val JEV_MAX_UTTERANCE_MS = 5_000
         private const val PLAIN_MAX_UTTERANCE_MS = 7_000
         /** 短语累计400毫秒语音即可分句，避免应答语因旧阈值1200毫秒而额外等待。 */

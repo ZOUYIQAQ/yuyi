@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -66,24 +67,32 @@ internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, action
 private fun SettingsHome(wide: Boolean, actions: SimulSubActions, onSelect: (SettingsSection) -> Unit) {
     PageColumns(wide, first = {
         item { SectionHeading("字幕与翻译") }
-        item { SettingsCard(padding = 4.dp, spacing = 0.dp) {
-            SettingsEntry(SettingsSection.API, Icons.Outlined.Translate, onSelect)
-            SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
-            SettingsLink("模型库", "下载、启用与删除离线识别模型", Icons.AutoMirrored.Outlined.LibraryBooks) { actions.onNavigate(UiDestination.MODELS) }
-            SettingsLink("场景与术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
-        } }
+        item {
+            Box(Modifier.testTag("settings-subtitle-translation-group")) {
+                SettingsCard(padding = 4.dp, spacing = 0.dp) {
+                    SettingsEntry(SettingsSection.API, Icons.Outlined.Translate, onSelect)
+                    SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
+                    SettingsLink("模型库", "下载、启用与删除离线识别模型", Icons.AutoMirrored.Outlined.LibraryBooks) { actions.onNavigate(UiDestination.MODELS) }
+                    SettingsLink("场景与术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
+                    SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.Tune, onSelect)
+                }
+            }
+        }
         item { SectionHeading("个性化") }
         item { SettingsCard(padding = 4.dp, spacing = 0.dp) { SettingsEntry(SettingsSection.APPEARANCE, Icons.Outlined.Palette, onSelect) } }
     }, second = {
         item { SectionHeading("应用") }
-        item { SettingsCard(padding = 4.dp, spacing = 0.dp) {
-            SettingsEntry(SettingsSection.PERMISSIONS, Icons.Outlined.Security, onSelect)
-            SettingsLink("首次配置引导", "重新检查使用前的必要配置", Icons.Outlined.AutoFixHigh, actions.onRestartOnboarding)
-            SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.Tune, onSelect)
-            SettingsEntry(SettingsSection.RECORDS, Icons.Outlined.History, onSelect)
-            SettingsEntry(SettingsSection.UPDATES, Icons.Outlined.SystemUpdate, onSelect)
-            SettingsEntry(SettingsSection.ABOUT, Icons.Outlined.Info, onSelect)
-        } }
+        item {
+            Box(Modifier.testTag("settings-application-group")) {
+                SettingsCard(padding = 4.dp, spacing = 0.dp) {
+                    SettingsEntry(SettingsSection.PERMISSIONS, Icons.Outlined.Security, onSelect)
+                    SettingsLink("首次配置引导", "重新检查使用前的必要配置", Icons.Outlined.AutoFixHigh, actions.onRestartOnboarding)
+                    SettingsEntry(SettingsSection.RECORDS, Icons.Outlined.History, onSelect)
+                    SettingsEntry(SettingsSection.UPDATES, Icons.Outlined.SystemUpdate, onSelect)
+                    SettingsEntry(SettingsSection.ABOUT, Icons.Outlined.Info, onSelect)
+                }
+            }
+        }
     })
 }
 
