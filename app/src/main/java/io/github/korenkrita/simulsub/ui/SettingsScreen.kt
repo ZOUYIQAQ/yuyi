@@ -74,7 +74,7 @@ private fun SettingsHome(wide: Boolean, actions: SimulSubActions, onSelect: (Set
                     SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
                     SettingsLink("模型库", "下载、启用与删除离线识别模型", Icons.AutoMirrored.Outlined.LibraryBooks) { actions.onNavigate(UiDestination.MODELS) }
                     SettingsLink("场景与术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
-                    SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.Tune, onSelect)
+                    SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.AutoAwesome, onSelect)
                 }
             }
         }
