@@ -10,11 +10,13 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 
@@ -25,18 +27,17 @@ internal fun LiveScreen(state: LiveUiState, actions: SimulSubActions, wide: Bool
     BoxWithConstraints(Modifier.fillMaxSize().testTag("live-control-viewport")) {
         val twoColumns = wide && maxWidth >= 720.dp
         val controlsFirst = !twoColumns && (maxHeight < 520.dp || LocalDensity.current.fontScale >= 1.5f)
-        val compactControl = maxHeight < 600.dp
-        val controlHeight = (maxHeight * 0.44f).coerceIn(184.dp, 360.dp)
+        val shortWindow = maxHeight < 400.dp
         PageColumns(twoColumns, first = {
             if (missingPermissions.isNotEmpty()) item("permissions") {
                 LivePermissionWarning(missingPermissions, !state.busy, actions)
             }
-            if (controlsFirst) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            if (controlsFirst) item("session") { LiveControlPanel(state, actions, shortWindow) }
             item("languages") { LiveLanguagePickers(state, actions) }
-            if (!twoColumns && !controlsFirst) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            if (!twoColumns && !controlsFirst) item("session") { LiveControlPanel(state, actions, shortWindow) }
             item("configuration") { LiveSceneOptions(state, actions) }
         }, second = {
-            if (twoColumns) item("session") { LiveControlPanel(state, actions, controlHeight, compactControl) }
+            if (twoColumns) item("session") { LiveControlPanel(state, actions, shortWindow) }
             item("services") { LiveServices(state, actions) }
         })
     }
@@ -63,23 +64,21 @@ private fun LiveLanguagePickers(state: LiveUiState, actions: SimulSubActions) {
     }
 }
 
-/** 状态与主操作共享控制舱，低矮窗口并排节省高度，大字号自然增高而非裁切。 */
+/** 暖色控制卡承载状态和横向主按钮，内容决定高度，手机和平板沿用一致的视觉层级。 */
 @Composable
-private fun LiveControlPanel(state: LiveUiState, actions: SimulSubActions, minHeight: Dp, compact: Boolean) {
+private fun LiveControlPanel(state: LiveUiState, actions: SimulSubActions, shortWindow: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth().testTag("live-control-panel"), shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            if (compact && maxWidth >= 320.dp && LocalDensity.current.fontScale < 1.5f) {
-                Row(Modifier.fillMaxWidth().heightIn(min = minHeight).padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(20.dp)) {
+            if (shortWindow && maxWidth >= 480.dp && LocalDensity.current.fontScale < 1.5f) {
+                Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
                     LiveSessionStatus(state, Modifier.weight(1f))
-                    LivePrimaryAction(state, actions)
+                    Box(Modifier.width(220.dp)) { LivePrimaryAction(state, actions) }
                 }
             } else {
-                Column(Modifier.fillMaxWidth().heightIn(min = minHeight).padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     LiveSessionStatus(state, Modifier.fillMaxWidth())
                     LivePrimaryAction(state, actions)
@@ -109,18 +108,30 @@ private fun LiveSceneOptions(state: LiveUiState, actions: SimulSubActions) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (state.running) SupportingText("语言与场景调整将用于后续句子。")
         OptionPicker("内容场景", state.sceneId, state.sceneOptions, editable, actions.onSelectScene)
-        TextButton(onClick = { actions.onNavigate(UiDestination.SCENES) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("管理场景与术语") }
-        TextButton(onClick = { customLanguageOpen = !customLanguageOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(if (customLanguageOpen) "收起其他语言" else "使用其他字幕语言")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedButton(onClick = { actions.onNavigate(UiDestination.SCENES) }, enabled = editable,
+                modifier = Modifier.heightIn(min = 48.dp)) {
+                Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("场景与术语")
+            }
+            OutlinedButton(onClick = { customLanguageOpen = !customLanguageOpen }, enabled = editable,
+                modifier = Modifier.heightIn(min = 48.dp)) {
+                Icon(Icons.Outlined.Translate, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (customLanguageOpen) "收起其他语言" else "其他字幕语言")
+            }
         }
-        if (customLanguageOpen) {
-            TextField(
-                shape = TextFieldDefaults.shape,
-                colors = TextFieldDefaults.colors(),
-                value = state.customTarget, onValueChange = actions.onCustomTargetChange, enabled = editable,
-                label = { Text("自定义字幕语言") }, supportingText = { Text("输入语言名称后应用。") }, modifier = Modifier.fillMaxWidth(),
-            )
-            FilledTonalButton(onClick = actions.onApplyCustomTarget, enabled = editable && state.customTarget.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("应用自定义语言") }
+        AnimatedVisibility(customLanguageOpen) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextField(
+                    shape = TextFieldDefaults.shape,
+                    colors = TextFieldDefaults.colors(),
+                    value = state.customTarget, onValueChange = actions.onCustomTargetChange, enabled = editable,
+                    label = { Text("自定义字幕语言") }, supportingText = { Text("输入语言名称后应用。") }, modifier = Modifier.fillMaxWidth(),
+                )
+                FilledTonalButton(onClick = actions.onApplyCustomTarget, enabled = editable && state.customTarget.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("应用自定义语言") }
+            }
         }
         ToggleSetting("仅显示定稿", "关闭后显示实时修正的草稿。", state.finalOnly, editable, actions.onFinalOnly)
     }
@@ -147,8 +158,8 @@ private fun LiveServices(state: LiveUiState, actions: SimulSubActions) {
 private fun LivePermissionWarning(permissions: List<PermissionUiState>, enabled: Boolean, actions: SimulSubActions) {
     Card(
         modifier = Modifier.fillMaxWidth().testTag("live-permission-warning"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -163,11 +174,13 @@ private fun LivePermissionWarning(permissions: List<PermissionUiState>, enabled:
                     Text(permission.title, style = MaterialTheme.typography.titleSmall)
                     Text(permission.description, style = MaterialTheme.typography.bodyMedium)
                     Button(onClick = { actions.onPermission(permission.id) }, enabled = enabled,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onPrimary,
+                            contentColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier.heightIn(min = 48.dp)) { Text("去允许") }
                 }
             }
             TextButton(onClick = { actions.onPermission("all") }, enabled = enabled,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
                 modifier = Modifier.heightIn(min = 48.dp)) { Text("查看全部权限") }
         }
     }

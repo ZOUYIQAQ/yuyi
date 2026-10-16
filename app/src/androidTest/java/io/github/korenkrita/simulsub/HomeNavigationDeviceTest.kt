@@ -110,7 +110,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 首页快捷入口保留来源信息，详情返回不能误跳到设置首页。 */
     @Test fun homeShortcutsReturnToLiveWithTopBack() {
         show()
-        for ((label, destination) in listOf("模型库" to UiDestination.MODELS, "管理场景与术语" to UiDestination.SCENES)) {
+        for ((label, destination) in listOf("模型库" to UiDestination.MODELS, "场景与术语" to UiDestination.SCENES)) {
             scrollToText(label)
             compose.onNodeWithText(label).performClick()
             compose.runOnIdle { assertEquals(destination, state.destination) }

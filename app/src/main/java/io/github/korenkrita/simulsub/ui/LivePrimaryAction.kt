@@ -8,12 +8,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/** 主操作嵌入会话控制舱，以紧凑圆角大按钮保持辨识度，大字号允许文案换行增高。 */
+/** 横向主按钮与状态卡共享对齐，保持大触控区而不再形成突兀的方形色块。 */
 @Composable
 internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     val missingPermission = state.permissions.firstOrNull { it.required && !it.granted }
@@ -33,16 +31,14 @@ internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     }
     Button(
         onClick = action, enabled = !state.busy,
-        modifier = Modifier.widthIn(max = if (LocalDensity.current.fontScale >= 1.5f) 240.dp else 160.dp)
-            .fillMaxWidth().heightIn(min = 148.dp).testTag("live-primary-action"),
+        modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth().heightIn(min = 72.dp)
+            .testTag("live-primary-action"),
         shape = MaterialTheme.shapes.extraLarge,
-        contentPadding = PaddingValues(16.dp),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(if (state.running) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, Modifier.size(40.dp))
-            Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (state.running) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, Modifier.size(28.dp))
+            Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleMedium)
         }
     }
 }

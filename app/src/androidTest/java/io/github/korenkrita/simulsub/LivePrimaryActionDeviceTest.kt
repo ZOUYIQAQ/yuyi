@@ -30,12 +30,12 @@ class LivePrimaryActionDeviceTest {
         show(actions = SimulSubActions(onStart = { starts++ }, onStop = { stops++ }), state = { state })
         val page = viewport()
         val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertIsEnabled()
-            .assertHeightIsAtLeast(144.dp).assertWidthIsAtLeast(144.dp)
+            .assertHeightIsAtLeast(72.dp).assertWidthIsAtLeast(144.dp)
         val initial = action.fetchSemanticsNode().boundsInRoot
         assertAboveSubtitles(page, initial)
         assertTrue("手机主操作中心应在首屏中部", initial.center.y in
-            (page.top + page.height * 0.4f)..(page.top + page.height * 0.65f))
-        assertTrue("手机不能恢复为全宽长条", initial.width < page.width * 0.6f)
+            (page.top + page.height * 0.3f)..(page.top + page.height * 0.65f))
+        assertTrue("手机按钮需留出卡片内边距", initial.width < page.width)
         action.performClick()
         compose.runOnIdle {
             assertEquals(1, starts)
@@ -56,7 +56,7 @@ class LivePrimaryActionDeviceTest {
         show(width = 640.dp, height = 300.dp, fontScale = 2f,
             actions = SimulSubActions(onStop = { stops++ }), state = { readyState().copy(running = true) })
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("live-primary-action"))
-        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(144.dp)
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(72.dp)
         compose.onNodeWithText("停止同传").assertIsDisplayed()
         assertInside(viewport(), action.fetchSemanticsNode().boundsInRoot)
         action.performClick()
@@ -68,10 +68,19 @@ class LivePrimaryActionDeviceTest {
         var stops = 0
         show(width = 640.dp, height = 300.dp, actions = SimulSubActions(onStop = { stops++ }),
             state = { readyState().copy(running = true) })
-        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(144.dp)
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(72.dp)
         assertAboveSubtitles(viewport(), action.fetchSemanticsNode().boundsInRoot)
         action.performClick()
         compose.runOnIdle { assertEquals(1, stops) }
+    }
+
+    /** 低矮横屏遇到两行状态说明时，停止动作仍需完整避开下方字幕区域。 */
+    @Test fun shortWindowWithTwoLineStatusKeepsStopAboveSubtitles() {
+        show(width = 640.dp, height = 300.dp, state = {
+            readyState().copy(running = true, statusDetail = "正在识别播放中的声音。\n实时译文会显示在字幕中。")
+        })
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertIsEnabled()
+        assertAboveSubtitles(viewport(), action.fetchSemanticsNode().boundsInRoot)
     }
 
     /** 平板左侧配置、右侧独立紧凑控制；配置滚动不牵动右栏，开始和停止均避开字幕区。 */
@@ -85,14 +94,14 @@ class LivePrimaryActionDeviceTest {
         val panel = compose.onNodeWithTag("live-control-panel").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val languages = compose.onNodeWithTag("live-language-controls").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed()
-            .assertHeightIsAtLeast(144.dp).assertWidthIsAtLeast(144.dp)
+            .assertHeightIsAtLeast(72.dp).assertWidthIsAtLeast(144.dp)
         val bounds = action.fetchSemanticsNode().boundsInRoot
         assertTrue("语言配置应位于控制面板左侧", languages.right <= panel.left)
         assertTrue("主操作应属于右侧控制面板", bounds.center.x > page.center.x)
         assertInside(panel, bounds)
         assertAboveSubtitles(page, bounds)
-        assertTrue("平板主操作应保持紧凑而非长条", bounds.width / bounds.height in 0.9f..1.3f)
-        assertTrue("主操作不应填满右栏", bounds.width < panel.width * 0.6f)
+        assertTrue("平板横向主按钮应保留足够触控高度", bounds.width / bounds.height in 1.5f..6f)
+        assertTrue("主操作应保留卡片内边距", bounds.width < panel.width)
         compose.onAllNodesWithText("准备就绪").assertCountEquals(1)
         compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("仅显示定稿"))
         assertEquals("左侧配置滚动不应移动右侧控制", bounds, action.assertIsDisplayed().fetchSemanticsNode().boundsInRoot)
@@ -159,11 +168,11 @@ class LivePrimaryActionDeviceTest {
         compose.onNodeWithTag("live-primary-action").assertIsDisplayed()
         val list = compose.onNode(hasScrollToIndexAction())
         list.performScrollToNode(hasTestTag("live-primary-action"))
-        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(144.dp)
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(72.dp)
         assertInside(viewport(), action.fetchSemanticsNode().boundsInRoot)
         compose.onNodeWithText("开始同传").assertIsDisplayed()
-        list.performScrollToNode(hasText("使用其他字幕语言"))
-        compose.onNodeWithText("使用其他字幕语言").assertIsDisplayed().performClick()
+        list.performScrollToNode(hasText("其他字幕语言"))
+        compose.onNodeWithText("其他字幕语言").assertIsDisplayed().performClick()
         list.performScrollToNode(hasText("自定义字幕语言"))
         compose.onNodeWithText("自定义字幕语言").assertIsDisplayed()
         list.performScrollToNode(hasText(model))

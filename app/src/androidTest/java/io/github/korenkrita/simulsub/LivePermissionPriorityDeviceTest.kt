@@ -63,7 +63,7 @@ class LivePermissionPriorityDeviceTest(private val wide: Boolean, private val da
         compose.runOnIdle { assertEquals(listOf("audio", "all"), events) }
         // 常规窗口中控制舱是手机第三项、平板右栏首项，回到该项即可避开底部字幕。
         controls.performScrollToIndex(if (wide) 0 else 2)
-        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(144.dp)
+        val action = compose.onNodeWithTag("live-primary-action").assertIsDisplayed().assertHeightIsAtLeast(72.dp)
         val session = compose.onNodeWithText("会话状态").fetchSemanticsNode().boundsInRoot
         assertTrue("权限卡必须位于会话卡之前", session.top >= bounds.top)
         configuration.performScrollToNode(hasText("仅显示定稿"))
@@ -94,9 +94,9 @@ class LivePermissionPriorityDeviceTest(private val wide: Boolean, private val da
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(if (wide) 0.6f else 1f, 1f)) {
                 SimulSubTheme(SettingsUiState(theme = if (dark) UiThemeMode.DARK else UiThemeMode.LIGHT)) {
-                    emphasisColor = MaterialTheme.colorScheme.primaryContainer
+                    emphasisColor = MaterialTheme.colorScheme.primary
                     surfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                     Box(Modifier.requiredSize(if (wide) 1040.dp else 360.dp, 740.dp)) {
                         LiveScreen(state, SimulSubActions(onPermission = { events += it }), wide)
                     }
