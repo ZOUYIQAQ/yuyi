@@ -4,7 +4,7 @@
 
 **Android phones and tablets only.** This fork has removed other platform clients and their dedicated tooling. It does not provide Windows, macOS, or other platform builds.
 
-An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.6.0 (versionCode 28)** and ports named API profiles, HTTP local/LAN endpoints and incremental draft translation from upstream 1.0.2; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
+An Android fork of [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle), originally authored by **KorenKrita** and maintained in this fork by **ZOUYIQAQ**. This revision targets **1.6.1 (versionCode 29)** and keeps the named API profiles, HTTP local/LAN endpoints and incremental draft translation from upstream 1.0.2, with improved narrow-window/large-text appearance controls and saved auxiliary-key editing; see [Architecture](docs/architecture.md) for attribution. The upstream MIT copyright and license are preserved. Package `io.github.zouyiqaq.yuyi` can coexist with the original `io.github.korenkrita.simulsub`, with separate data and permissions.
 
 The default icon uses the supplied vector contours with the illustrated background and falling decorations. Appearance offers color and monochrome styles, backgrounds and a falling-decorations switch controlling both the petal and bottom-right leaf. Monochrome offers ten preset colors, with automatic nearest-theme matching or a fixed manual choice.
 
@@ -37,7 +37,7 @@ Capture depends on the source app, DRM, Android version and device implementatio
 
 Only four representative screenshots are displayed here; screenshot files and historical QA records are retained.
 
-These four screenshots show Yuyi 1.6.0 running on the local API 35 emulator on 2026-10-16, including tablet-sized windows. The subtitle screenshot shows the settings preview.
+These four screenshots show Yuyi 1.6.1 running on the local API 35 emulator on 2026-10-16, including tablet-sized windows. The subtitle screenshot shows the settings preview.
 
 Layout references [FlClash](https://github.com/chen08209/FlClash) for Material You hierarchy and card grouping while keeping this project's own Compose stack, built with official stable Compose Material 3 1.4.0 components. Container outlines and dividers follow the hierarchy instead of being removed everywhere; items at the same level are styled alike.
 

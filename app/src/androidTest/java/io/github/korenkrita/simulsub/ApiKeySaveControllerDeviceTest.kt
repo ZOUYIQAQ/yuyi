@@ -175,6 +175,28 @@ class ApiKeySaveControllerDeviceTest {
         assertNull(prefs.byokKey)
     }
 
+    /** 辅助服务保存后同样回填；重建、切换与清空只影响该服务自己的密钥。 */
+    @Test fun auxiliaryKeyRemainsEditableAfterSaveAndRecreation() = onMain {
+        actions.onAdvancedChange(controller.state.value.settings.advanced.copy(jevProviderId = JevProvider.OFFICIAL.name))
+        actions.onAdvancedChange(controller.state.value.settings.advanced.copy(jevKey = "jev-local-test-key"))
+        actions.onSaveJevKey()
+        assertEquals("jev-local-test-key", controller.state.value.settings.advanced.jevKey)
+        assertTrue(controller.state.value.settings.advanced.jevHasSavedKey)
+        assertEquals("辅助服务密钥已保存", controller.state.value.settings.advanced.jevMessage?.text)
+        createController()
+        assertEquals("jev-local-test-key", controller.state.value.settings.advanced.jevKey)
+        actions.onAdvancedChange(controller.state.value.settings.advanced.copy(jevProviderId = JevProvider.ZEN.name))
+        assertNull(controller.state.value.settings.advanced.jevKey)
+        actions.onAdvancedChange(controller.state.value.settings.advanced.copy(jevProviderId = JevProvider.OFFICIAL.name))
+        assertEquals("jev-local-test-key", controller.state.value.settings.advanced.jevKey)
+        actions.onAdvancedChange(controller.state.value.settings.advanced.copy(jevKey = ""))
+        actions.onSaveJevKey()
+        assertEquals("", controller.state.value.settings.advanced.jevKey)
+        assertFalse(controller.state.value.settings.advanced.jevHasSavedKey)
+        assertEquals("辅助服务密钥已清空", controller.state.value.settings.advanced.jevMessage?.text)
+        assertNull(prefs.jevKey(JevProvider.OFFICIAL))
+    }
+
     /** 销毁旧控制器后从同一份隔离存储重建。 */
     private fun createController() {
         store.clear()

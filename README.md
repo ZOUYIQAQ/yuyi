@@ -4,7 +4,7 @@
 
 **仅支持 Android 手机和平板。** 本 Fork 已移除其他平台客户端与专属工具，不提供 Windows、macOS 或其他平台版本。
 
-基于 [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle) 的安卓 Fork，原作者为 **KorenKrita**，由 **ZOUYIQAQ** 维护本分支。本轮版本为 **1.6.0（versionCode 28）**，移植上游 1.0.2 的命名 API 配置、HTTP 本机／局域网服务和草稿增量翻译功能，来源见[架构说明](docs/architecture.md)。保留原项目的 MIT 版权与许可声明。应用包名为 `io.github.zouyiqaq.yuyi`，可与原版 `io.github.korenkrita.simulsub` 共存，数据与权限独立。
+基于 [KorenKrita/simul-subtitle](https://github.com/KorenKrita/simul-subtitle) 的安卓 Fork，原作者为 **KorenKrita**，由 **ZOUYIQAQ** 维护本分支。本轮版本为 **1.6.1（versionCode 29）**，保留上游 1.0.2 的命名 API 配置、HTTP 本机／局域网服务和草稿增量翻译功能，并改善窄屏／大字号外观设置与辅助服务密钥回填，来源见[架构说明](docs/architecture.md)。保留原项目的 MIT 版权与许可声明。应用包名为 `io.github.zouyiqaq.yuyi`，可与原版 `io.github.korenkrita.simulsub` 共存，数据与权限独立。
 
 默认图标采用用户提供的矢量轮廓，保留变色背景、山茶花与飘落装饰。在「设置 → 外观」选择彩色或纯色样式、背景及飘落花瓣；开关同时控制右下绿叶。纯色提供10种预设色，默认跟随主题相近色，也可手动固定。支持 Android 自适应裁切与系统主题图标。
 
@@ -38,7 +38,7 @@
 
 本文仅展示4张代表截图，截图文件与历史验收记录保留。
 
-上述4张图片为羽译1.6.0于2026-10-16在本机API35模拟器的实际截图，含平板窗口尺寸。字幕样式图为设置预览。
+上述4张图片为羽译1.6.1于2026-10-16在本机API35模拟器的实际截图，含平板窗口尺寸。字幕样式图为设置预览。
 
 界面编排参考[FlClash](https://github.com/chen08209/FlClash)的Material You层级与卡片组织，保留本项目自身的Compose技术栈，使用官方Compose Material3 1.4.0稳定组件；容器按层级使用描边与分割线，同一层级保持一致，未统一去除边框。
 

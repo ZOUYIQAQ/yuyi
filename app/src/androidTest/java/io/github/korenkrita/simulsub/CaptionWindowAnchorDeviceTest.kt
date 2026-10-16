@@ -17,8 +17,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /** 使用真实系统悬浮窗口逐帧核对基线；不启动录音、不调用翻译、不改变业务配置。 */
 class CaptionWindowAnchorDeviceTest {
+    private var screenCase = "normal"
     /** 真实前台窗口隐藏系统栏后，字幕也必须到屏幕底部，且草稿与工具栏不能恢复抖动。 */
     @Test fun immersiveOverlayReachesScreenBottomWithoutJitter() {
+        screenCase = "immersive"
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val wm = context.getSystemService(WindowManager::class.java)
         androidx.test.core.app.ActivityScenario.launch(androidx.activity.ComponentActivity::class.java).use { scenario ->
@@ -27,6 +29,7 @@ class CaptionWindowAnchorDeviceTest {
                     activity.window.decorView.setBackgroundColor(0xFF2D3436.toInt())
                     activity.window.insetsController!!.hide(android.view.WindowInsets.Type.systemBars())
                 }
+                dismissImmersiveEducation()
                 awaitStableArea(wm, false)
                 assertEquals("隐藏系统栏后可用区域必须抵达物理屏幕底边",
                     wm.currentWindowMetrics.bounds.bottom, captionWindowArea(wm.currentWindowMetrics).bottom)
@@ -34,6 +37,33 @@ class CaptionWindowAnchorDeviceTest {
             } finally {
                 scenario.onActivity { it.window.insetsController!!.show(android.view.WindowInsets.Type.systemBars()) }
             }
+        }
+    }
+
+    /** 首次全屏会出现系统教学并给整屏加暗；只确认已观察到的系统按钮，避免把它当作字幕颜色变化。 */
+    private fun dismissImmersiveEducation() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val end = System.currentTimeMillis() + 5_000
+        val originalFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
+        try {
+            while (System.currentTimeMillis() < end) {
+                val roots = listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root }
+                for (root in roots.filter { it.packageName?.toString() in listOf("android", "com.android.systemui") }) {
+                    val button = listOf("Got it", "知道了").asSequence()
+                        .flatMap { root.findAccessibilityNodeInfosByText(it).asSequence() }
+                        .firstOrNull { it.isClickable }
+                    if (button != null) {
+                        assertTrue("全屏教学确认按钮应可操作", button.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+                        return
+                    }
+                }
+                Thread.sleep(100)
+            }
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
         }
     }
 
@@ -79,6 +109,8 @@ class CaptionWindowAnchorDeviceTest {
         lateinit var guard: CaptionLayoutGuard
         lateinit var drawing: ViewTreeObserver.OnDrawListener
         lateinit var toolbarWindow: CaptionToolbarWindow
+        lateinit var toolbar: android.view.View
+        val toolbarDraws = java.util.concurrent.atomic.AtomicInteger()
         val anchor = CaptionBaselineAnchor()
         lateinit var origin: CaptionWindowOrigin
         var availableHeight = 0
@@ -114,7 +146,9 @@ class CaptionWindowAnchorDeviceTest {
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                     PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
-                toolbarWindow = CaptionToolbarWindow(wm, view.takeToolbarForWindow())
+                toolbar = view.takeToolbarForWindow()
+                toolbar.viewTreeObserver.addOnDrawListener { toolbarDraws.incrementAndGet() }
+                toolbarWindow = CaptionToolbarWindow(wm, toolbar)
                 view.onToolbarShown = { shown ->
                     toolbarWindow.update(shown, params.x, params.y, cardWidth,
                         view.measureCaptionBlockHeight(cardWidth), metrics.bounds.width(), availableHeight)
@@ -172,19 +206,15 @@ class CaptionWindowAnchorDeviceTest {
                         android.graphics.Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height - 1)) > 0)
                 }
                 if (index in listOf(0, 1, 2)) {
-                    val file = File(context.getExternalFilesDir(null), "qa-first-release-fixes/window-$index.png")
-                    file.parentFile!!.mkdirs()
-                    instrumentation.uiAutomation.takeScreenshot().let { bitmap ->
-                        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    }
+                    screenshot("window-$index")
                 }
             }
             assertTrue(frames.size >= examples.size + 1)
-            var stableWindow: List<Int>? = null
-            instrumentation.runOnMainSync {
-                view.getLocationOnScreen(screenLocation)
-                stableWindow = listOf(screenLocation[0], screenLocation[1], view.width, view.height)
-            }
+            // 阶段标记可能先记录上一份排版的绘制；长文换短文后还须等待系统应用新窗口位置。
+            // 每一帧基线断言仍保留，不能把尚未完成的文本重排误算为点击工具栏造成的位移。
+            val stableWindow = awaitStableWindow(view, params, areaTop, expected)
+            screenshot("window-before-toolbar")
+            val stablePixels = captionPixels(view)
             repeat(6) { click ->
                 instrumentation.runOnMainSync {
                     phase = examples.size + click + 1
@@ -200,12 +230,38 @@ class CaptionWindowAnchorDeviceTest {
                 }
                 awaitFrame(frames, examples.size + click + 1)
                 Thread.sleep(80)
+                if (click == 0) {
+                    awaitToolbar(toolbar, toolbarDraws)
+                    Thread.sleep(400)
+
+                }
                 instrumentation.runOnMainSync {
                     view.getLocationOnScreen(screenLocation)
                     assertEquals("点击展开／收起只能改变工具栏自己的窗口", stableWindow,
                         listOf(screenLocation[0], screenLocation[1], view.width, view.height))
                 }
                 assertTrue("点击字幕不能绘制偏移帧：$frames", frames.all { it.second == expected })
+                if (click == 0) {
+                    screenshot("window-toolbar-expanded")
+                    val after = captionPixels(view, stablePixels.first)
+                    val beforeGlyph = glyphMask(stablePixels.second)
+                    val afterGlyph = glyphMask(after.second)
+                    assertEquals("工具栏展开不能移动正式字幕字形边界",
+                        glyphBounds(beforeGlyph, stablePixels.first.width()), glyphBounds(afterGlyph, stablePixels.first.width()))
+                    // 独立浮层不会经过字幕根视图，按住工具栏超过隐藏周期仍应保持可见。
+                    instrumentation.runOnMainSync {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, 10f, 10f, 0)
+                        toolbar.dispatchTouchEvent(down); down.recycle()
+                    }
+                    Thread.sleep(4_200)
+                    instrumentation.runOnMainSync {
+                        assertTrue("手指按住独立工具栏时不能自动隐藏", toolbar.isShown)
+                        val now = android.os.SystemClock.uptimeMillis()
+                        val cancel = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_CANCEL, 10f, 10f, 0)
+                        toolbar.dispatchTouchEvent(cancel); cancel.recycle()
+                    }
+                }
             }
         } finally {
             instrumentation.runOnMainSync {
@@ -217,6 +273,110 @@ class CaptionWindowAnchorDeviceTest {
                 }
             }
         }
+    }
+
+    /** 独立工具栏必须实际绘制为可触控窗口，不能仅凭字幕角标判定它已经出现。 */
+    private fun awaitToolbar(toolbar: android.view.View, draws: java.util.concurrent.atomic.AtomicInteger) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val end = System.currentTimeMillis() + 3_000
+        var visible = false
+        var detail = ""
+        while (!visible && System.currentTimeMillis() < end) {
+            instrumentation.runOnMainSync {
+                val area = android.graphics.Rect()
+                val minimum = (48 * toolbar.resources.displayMetrics.density).toInt()
+                visible = toolbar.isAttachedToWindow && toolbar.isShown && toolbar.getGlobalVisibleRect(area) &&
+                    area.width() >= minimum && area.height() >= minimum && draws.get() > 0
+                detail = "测量=${toolbar.measuredWidth}x${toolbar.measuredHeight}，实际=${toolbar.width}x${toolbar.height}，显示=$area，附着=${toolbar.isAttachedToWindow}，绘制=${draws.get()}，可见=${toolbar.visibility}，透明=${toolbar.alpha}，坐标=${toolbar.left},${toolbar.top}，平移=${toolbar.translationX},${toolbar.translationY}，裁剪=${toolbar.clipBounds}"
+            }
+            if (!visible) Thread.sleep(16)
+        }
+        assertTrue("独立字幕工具栏未实际可见：$detail", visible)
+        val position = IntArray(2)
+        instrumentation.runOnMainSync { toolbar.getLocationOnScreen(position) }
+        instrumentation.sendStatus(0, android.os.Bundle().apply {
+            putString("stream", "工具栏运行测量：$detail；屏幕位置=${position.toList()}；请求=${toolbar.layoutParams}\n")
+        })
+    }
+
+    /** 提取正式白字核心，缩放角标及阴影的合法变化不属于文字移动。 */
+    private fun glyphMask(pixels: IntArray): IntArray {
+        val result = IntArray(pixels.size) { index ->
+            val color = pixels[index]
+            if (android.graphics.Color.red(color) >= 200 && android.graphics.Color.green(color) >= 200 &&
+                android.graphics.Color.blue(color) >= 200) 1 else 0
+        }
+        assertTrue("字形比较区域必须包含正式白字", result.count { it == 1 } > 100)
+        return result
+    }
+
+    /** 字形边界必须逐像素相等，独立于合成器对抗锯齿边缘的颜色取整。 */
+    private fun glyphBounds(pixels: IntArray, width: Int): android.graphics.Rect {
+        val result = android.graphics.Rect(width, pixels.size / width, 0, 0)
+        pixels.forEachIndexed { index, value ->
+            if (value == 1) {
+                val x = index % width
+                val y = index / width
+                result.left = minOf(result.left, x); result.top = minOf(result.top, y)
+                result.right = maxOf(result.right, x + 1); result.bottom = maxOf(result.bottom, y + 1)
+            }
+        }
+        return result
+    }
+
+    /** 在同一屏幕矩形读取正文像素，防止坐标缓存正确但合成层文字实际移动。 */
+    private fun captionPixels(view: CaptionOverlayView, fixed: android.graphics.Rect? = null): Pair<android.graphics.Rect, IntArray> {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val bounds = android.graphics.Rect()
+        instrumentation.runOnMainSync {
+            val text = ((view.getChildAt(0) as FrameLayout).getChildAt(0) as LinearLayout).getChildAt(0) as TextView
+            val location = IntArray(2)
+            text.getLocationOnScreen(location)
+            bounds.set(fixed ?: android.graphics.Rect(location[0], location[1], location[0] + text.width, location[1] + text.height))
+        }
+        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            val pixels = IntArray(bounds.width() * bounds.height())
+            bitmap.getPixels(pixels, 0, bounds.width(), bounds.left, bounds.top, bounds.width(), bounds.height())
+            return bounds to pixels
+        } finally { bitmap.recycle() }
+    }
+
+    /** 导出同一正式末行在工具栏开合前后的实际画面，避免只依赖窗口坐标。 */
+    private fun screenshot(name: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val file = File(instrumentation.targetContext.getExternalFilesDir(null), "qa-first-release-fixes/$screenCase/$name.png")
+        file.parentFile!!.mkdirs()
+        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally { bitmap.recycle() }
+    }
+
+    /** 只在当前基线和请求坐标均已落到屏幕、且连续八次不变后记录点击前窗口；错误绘制仍由全帧断言捕获。 */
+    private fun awaitStableWindow(view: CaptionOverlayView, params: WindowManager.LayoutParams,
+                                  areaTop: Int, expectedBaseline: Int): List<Int> {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val end = System.currentTimeMillis() + 5_000
+        var previous: List<Int>? = null
+        var stable = 0
+        var current = emptyList<Int>()
+        while (stable < 8) {
+            instrumentation.runOnMainSync {
+                val location = IntArray(2)
+                view.getLocationOnScreen(location)
+                current = listOf(location[0], location[1], view.width, view.height)
+                val aligned = location[1] == areaTop + params.y &&
+                    location[1] + view.finalLineBaselineInWindowPx() == expectedBaseline
+                stable = if (aligned && current == previous) stable + 1 else 0
+                previous = current
+            }
+            assertTrue("重排后窗口仍未定位完成：实际=$current，请求Y=${params.y}，目标基线=$expectedBaseline",
+                System.currentTimeMillis() < end)
+            Thread.sleep(16)
+        }
+        android.util.Log.i("CaptionWindowAnchorTest", "点击前字幕窗口已稳定：$current；正式末行基线=$expectedBaseline")
+        return current
     }
 
     /** 等待真实绘制回调而非固定睡眠猜测布局已完成，失败时有界退出。 */

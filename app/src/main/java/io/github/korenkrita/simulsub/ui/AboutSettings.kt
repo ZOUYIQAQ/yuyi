@@ -47,11 +47,6 @@ internal fun AboutSettings(state: SettingsUiState, actions: SimulSubActions, wid
             OutlinedButton(onClick = { showLicense = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("查看完整许可") }
             SupportingText("语音模型与其他依赖遵循各自许可，模型许可可在模型库查看。")
         } }
-        item { SettingsCard {
-            SectionHeading("项目", "更新检查与提醒在「设置 → 应用更新」中管理。")
-            OutlinedButton(onClick = actions.onOpenRepository, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("打开本 Fork 仓库") }
-
-        } }
     })
     if (showLicense) AlertDialog(onDismissRequest = { showLicense = false }, title = { Text("MIT License") },
         text = { Text(remember { context.assets.open("licenses/App-LICENSE.txt").bufferedReader().use { it.readText() } },

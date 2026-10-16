@@ -26,7 +26,7 @@ class ApiImeDeviceTest {
         val titleBefore = screenBounds("翻译 API")
         val navigationBefore = compose.onNodeWithText("设置").fetchSemanticsNode().boundsInRoot
         assertFalse("聚焦前应能读取标题屏幕坐标", titleBefore.isEmpty)
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("API 密钥"))
+        compose.onAllNodes(hasScrollToIndexAction()).onLast().performScrollToNode(hasText("API 密钥"))
         compose.onNode(hasSetTextAction() and hasText("API 密钥", substring = true)).performClick()
         compose.waitUntil(10_000) { insets().isVisible(WindowInsetsCompat.Type.ime()) }
         instrumentation.waitForIdleSync()
@@ -48,9 +48,13 @@ class ApiImeDeviceTest {
             assertTrue("密钥输入框不能被标题遮挡", key.top > titleAfter.bottom)
             assertTrue("密钥输入框不能被键盘遮挡", key.bottom < imeTop)
             assertEquals("键盘不能把底部导航顶上来", navigationBefore, navigation)
-            assertTrue("底部导航应留在键盘覆盖的屏幕底部：导航=$navigation，键盘顶=$imeTop", navigation.top >= imeTop)
+            if (compose.activity.resources.configuration.screenWidthDp >= 600) {
+                assertTrue("平板侧边导航应留在表单左侧", navigation.right < key.left)
+            } else {
+                assertTrue("底部导航应留在键盘覆盖的屏幕底部：导航=$navigation，键盘顶=$imeTop", navigation.top >= imeTop)
+            }
             screenshot("api-keyboard")
-            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("保存翻译配置"))
+            compose.onAllNodes(hasScrollToIndexAction()).onLast().performScrollToNode(hasText("保存翻译配置"))
             compose.onNodeWithText("保存翻译配置").performScrollTo().assertIsDisplayed()
             compose.waitUntil(5_000) {
                 val save = screenBounds("保存翻译配置", parent = true)

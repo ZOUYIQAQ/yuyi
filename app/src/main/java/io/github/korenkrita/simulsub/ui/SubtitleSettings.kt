@@ -11,10 +11,11 @@ import kotlin.math.roundToInt
 @Composable
 internal fun SubtitleSettings(style: SubtitleStyleUiState, actions: SimulSubActions, wide: Boolean, navigation: (@Composable () -> Unit)?, finalOnly: Boolean = false) {
     Box(Modifier.fillMaxSize()) {
-        PageColumns(wide, header = navigation, first = {
+        // 底部预览恢复按钮独立悬浮，末项需能完整滚动到按钮上方。
+        PageColumns(wide, header = navigation, bottomPadding = 96.dp, first = {
             item("subtitle-preview") {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SectionHeading("字幕预览示例", "本页悬浮示例可拖动、切换观看方向或暂时收起。完整画面等比缩小；放大时原大裁切字幕局部，排版不变。离开页面即关闭。")
+                    SectionHeading("字幕预览示例", "可拖动、切换横竖屏或暂时收起。完整画面等比缩小，放大查看字幕局部。")
                     if (style.palettes.isNotEmpty()) OptionPicker("字幕配色", style.paletteId, style.palettes.map { UiOption(it.id, it.label) }) { actions.onSubtitleStyleChange(style.copy(paletteId = it)) }
                     else SupportingText("字幕配色尚未加载；示例使用黑底白字。")
                     FilledTonalButton(onClick = actions.onResetOverlayPosition, modifier = Modifier.heightIn(min = 48.dp)) { Text("重置悬浮字幕位置") }

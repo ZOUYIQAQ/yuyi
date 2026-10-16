@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -25,6 +26,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /** 官方对话框只维护本次草稿，返回、点击外部及取消都不触发保存。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ThemeColorPickerDialog(
     initialSeed: Int,
@@ -54,73 +56,83 @@ internal fun ThemeColorPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text("自定义主题颜色") },
         text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text("输入颜色值或调整滑杆，保存后应用到界面。", style = MaterialTheme.typography.bodyMedium)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Surface(
-                        Modifier.size(48.dp).semantics { contentDescription = "颜色预览 ${themeColorHex(previewSeed)}" },
-                        shape = MaterialTheme.shapes.medium,
-                        color = Color(previewSeed),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    ) {}
-                    Column {
-                        Text("所选颜色", style = MaterialTheme.typography.labelMedium)
-                        Text(themeColorHex(previewSeed), style = MaterialTheme.typography.titleMedium)
-                    }
-                }
-                OutlinedTextField(
-                    value = hex,
-                    onValueChange = { value ->
-                        hex = value
-                        parseThemeColor(value)?.let { seed ->
-                            previewSeed = seed
-                            val hsv = FloatArray(3).also { AndroidColor.colorToHSV(seed, it) }
-                            hue = hsv[0]
-                            saturation = hsv[1]
-                            brightness = hsv[2]
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stacked = maxWidth < 360.dp && LocalDensity.current.fontScale >= 1.5f
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text("输入颜色值或调整滑杆，保存后应用到界面。", style = MaterialTheme.typography.bodyMedium)
+                    // 大字号时将色值移至色样下方，完整保留七位颜色文本。
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        maxItemsInEachRow = if (stacked) 1 else 2,
+                    ) {
+                        Surface(
+                            Modifier.size(48.dp).semantics { contentDescription = "颜色预览 ${themeColorHex(previewSeed)}" },
+                            shape = MaterialTheme.shapes.medium,
+                            color = Color(previewSeed),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        ) {}
+                        Column {
+                            Text("所选颜色", style = MaterialTheme.typography.labelMedium)
+                            Text(themeColorHex(previewSeed), style = MaterialTheme.typography.titleMedium)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("颜色值") },
-                    placeholder = { Text("#RRGGBB") },
-                    singleLine = true,
-                    isError = parsed == null,
-                    supportingText = { Text(if (parsed == null) "请输入 6 位十六进制颜色，例如 #D38569" else "支持 #RRGGBB，不含透明度。") },
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Characters,
-                        autoCorrectEnabled = false,
-                        keyboardType = KeyboardType.Ascii,
-                        imeAction = ImeAction.Done,
-                    ),
-                )
-                ThemeColorSlider(
-                    "色相", "${hue.roundToInt()}°", hue, 0f..360f,
-                    (0..6).map { Color(AndroidColor.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) },
-                ) { updateHsv(h = it) }
-                ThemeColorSlider(
-                    "饱和度", "${(saturation * 100).roundToInt()}%", saturation, 0f..1f,
-                    listOf(Color(AndroidColor.HSVToColor(floatArrayOf(hue, 0f, brightness))),
-                        Color(AndroidColor.HSVToColor(floatArrayOf(hue, 1f, brightness)))),
-                ) { updateHsv(s = it) }
-                ThemeColorSlider(
-                    "明度", "${(brightness * 100).roundToInt()}%", brightness, 0f..1f,
-                    listOf(Color.Black, Color(AndroidColor.HSVToColor(floatArrayOf(hue, saturation, 1f)))),
-                ) { updateHsv(v = it) }
-                Text("主题效果", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
-                        color = previewScheme.primary, contentColor = previewScheme.onPrimary) {
-                        Text("主题主色", Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
                     }
-                    Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
-                        color = previewScheme.primaryContainer, contentColor = previewScheme.onPrimaryContainer) {
-                        Text("容器与文字", Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
+                    OutlinedTextField(
+                        value = hex,
+                        onValueChange = { value ->
+                            hex = value
+                            parseThemeColor(value)?.let { seed ->
+                                previewSeed = seed
+                                val hsv = FloatArray(3).also { AndroidColor.colorToHSV(seed, it) }
+                                hue = hsv[0]
+                                saturation = hsv[1]
+                                brightness = hsv[2]
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("颜色值") },
+                        placeholder = { Text("#RRGGBB") },
+                        singleLine = true,
+                        isError = parsed == null,
+                        supportingText = { Text(if (parsed == null) "请输入 6 位十六进制颜色，例如 #D38569" else "支持 #RRGGBB，不含透明度。") },
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Characters,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Ascii,
+                            imeAction = ImeAction.Done,
+                        ),
+                    )
+                    ThemeColorSlider(
+                        "色相", "${hue.roundToInt()}°", hue, 0f..360f,
+                        (0..6).map { Color(AndroidColor.HSVToColor(floatArrayOf(it * 60f, 1f, 1f))) },
+                    ) { updateHsv(h = it) }
+                    ThemeColorSlider(
+                        "饱和度", "${(saturation * 100).roundToInt()}%", saturation, 0f..1f,
+                        listOf(Color(AndroidColor.HSVToColor(floatArrayOf(hue, 0f, brightness))),
+                            Color(AndroidColor.HSVToColor(floatArrayOf(hue, 1f, brightness)))),
+                    ) { updateHsv(s = it) }
+                    ThemeColorSlider(
+                        "明度", "${(brightness * 100).roundToInt()}%", brightness, 0f..1f,
+                        listOf(Color.Black, Color(AndroidColor.HSVToColor(floatArrayOf(hue, saturation, 1f)))),
+                    ) { updateHsv(v = it) }
+                    Text("主题效果", style = MaterialTheme.typography.labelLarge)
+                    // 两种效果各自占满一行，避免大字号在半宽卡片中逐字换行。
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = if (stacked) 1 else 2) {
+                        Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                            color = previewScheme.primary, contentColor = previewScheme.onPrimary) {
+                            Text("主题主色", Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
+                        }
+                        Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                            color = previewScheme.primaryContainer, contentColor = previewScheme.onPrimaryContainer) {
+                            Text("容器与文字", Modifier.padding(12.dp), style = MaterialTheme.typography.labelLarge)
+                        }
                     }
+                    Text("界面会根据所选颜色生成适合阅读的浅色与深色配色。", style = MaterialTheme.typography.bodySmall)
                 }
-                Text("界面会根据所选颜色生成适合阅读的浅色与深色配色。", style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {

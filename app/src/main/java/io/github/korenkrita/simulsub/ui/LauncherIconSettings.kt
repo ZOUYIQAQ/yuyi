@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,16 +34,29 @@ internal fun LauncherIconSettings(choice: LauncherIconChoice, onConfirm: (Launch
         Surface(onClick = { open = true }, shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = "选择应用图标" }) {
-            Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                LauncherIconPreview(choice, Modifier.size(64.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(choice.style.title, style = MaterialTheme.typography.titleMedium)
-                    Text("${choice.background.title} · ${if (choice.petals) "有飘落花瓣" else "无飘落花瓣"}", style = MaterialTheme.typography.bodyMedium)
-                    if (choice.style == IconStyle.MONO) Text(choice.colorSummary, style = MaterialTheme.typography.bodySmall)
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LauncherIconPreview(choice, Modifier.size(64.dp))
+                        if (stacked) Spacer(Modifier.weight(1f))
+                        else LauncherIconSummary(choice, Modifier.weight(1f))
+                        Icon(Icons.Outlined.ChevronRight, null)
+                    }
+                    if (stacked) LauncherIconSummary(choice, Modifier.fillMaxWidth())
                 }
-                Icon(Icons.Outlined.ChevronRight, null)
             }
         }
+    }
+}
+
+/** 紧凑布局将当前组合说明放到图标下方，避免大字号被预览和箭头挤成竖列。 */
+@Composable
+private fun LauncherIconSummary(choice: LauncherIconChoice, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(choice.style.title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium)
+        Text("${choice.background.title} · ${if (choice.petals) "有飘落花瓣" else "无飘落花瓣"}", Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium)
+        if (choice.style == IconStyle.MONO) Text(choice.colorSummary, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -91,29 +105,33 @@ internal fun LauncherIconDialog(initial: LauncherIconChoice, onDismiss: () -> Un
     )
 }
 
-/** 采用固定两列色样和文字选中状态，色觉差异和大字体下也能辨识。 */
+/** 色样按可用宽度和字号排列，整项至少四十八单位高并保留文字选中状态。 */
 @Composable
 private fun IconTonePicker(tone: IconTone, background: IconBackground, manual: Boolean, onSelect: (IconTone) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("纯色颜色", style = MaterialTheme.typography.titleSmall)
-        IconTone.entries.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { candidate ->
-                    val selected = manual && candidate == tone
-                    Surface(onClick = { onSelect(candidate) },
-                        modifier = Modifier.weight(1f).semantics {
-                            contentDescription = "图标颜色：${candidate.title}"
-                            this.selected = selected
-                        },
-                        shape = MaterialTheme.shapes.medium,
-                        border = BorderStroke(if (selected) 2.dp else 1.dp,
-                            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                        Row(Modifier.padding(10.dp).heightIn(min = 28.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(20.dp).background(Color(candidate.foregroundArgb(background)), CircleShape))
-                            Text(candidate.title + if (selected) " ✓" else "", style = MaterialTheme.typography.labelMedium)
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 112.dp * fontScale * 2 + 8.dp) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("纯色颜色", style = MaterialTheme.typography.titleSmall)
+            IconTone.entries.chunked(columns).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { candidate ->
+                        val selected = manual && candidate == tone
+                        Surface(onClick = { onSelect(candidate) },
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = "图标颜色：${candidate.title}"
+                                this.selected = selected
+                            },
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(if (selected) 2.dp else 1.dp,
+                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Row(Modifier.heightIn(min = 48.dp).padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(Modifier.size(20.dp).background(Color(candidate.foregroundArgb(background)), CircleShape))
+                                Text(candidate.title + if (selected) " ✓" else "", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }

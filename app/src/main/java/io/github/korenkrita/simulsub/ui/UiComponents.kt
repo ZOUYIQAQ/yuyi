@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 
 /** 每种布局独立持有真实列表位置，不包含任何业务值或表单草稿。 */
 internal class PageScrollStates(val single: LazyListState, val first: LazyListState, val second: LazyListState)
@@ -49,6 +50,7 @@ internal fun PageColumns(
     first: LazyListScope.() -> Unit,
     second: LazyListScope.() -> Unit = {},
     header: (@Composable () -> Unit)? = null,
+    bottomPadding: Dp? = null,
 ) {
     val states = LocalPageScrollStates.current
     val singleColumnState = states?.single ?: rememberLazyListState()
@@ -66,19 +68,20 @@ internal fun PageColumns(
                     LazyColumn(
                         Modifier.weight(1f).fillMaxHeight(),
                         state = firstColumnState,
-                        contentPadding = PaddingValues(start = pagePadding, end = 12.dp, top = 16.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(start = pagePadding, end = 12.dp, top = 16.dp, bottom = bottomPadding ?: 24.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp), content = first,
                     )
                     LazyColumn(
                         Modifier.weight(1f).fillMaxHeight(),
                         state = secondColumnState,
-                        contentPadding = PaddingValues(start = 12.dp, end = pagePadding, top = 16.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(start = 12.dp, end = pagePadding, top = 16.dp, bottom = bottomPadding ?: 24.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp), content = second,
                     )
                 }
             } else {
                 LazyColumn(
-                    Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(pagePadding),
+                    Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = pagePadding,
+                        end = pagePadding, top = pagePadding, bottom = bottomPadding ?: pagePadding),
                     state = singleColumnState,
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
@@ -158,6 +161,9 @@ internal fun OptionPicker(title: String, selectedId: String, options: List<UiOpt
         )
     }
     if (expanded && enabled) ModalBottomSheet(onDismissRequest = { expanded = false }, sheetState = sheetState,
+        // 顶部安全区在停靠点计算外处理，避免高速回弹时「位置→留白→高度→停靠点」循环重排。
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+        contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom) },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))

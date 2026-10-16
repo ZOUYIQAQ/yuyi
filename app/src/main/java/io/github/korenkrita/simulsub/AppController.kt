@@ -365,7 +365,8 @@ class AppController internal constructor(application: Application,
                         jevProviders = JevProvider.entries.map { UiOption(it.name, it.label) },
                         jevNeedsKey = prefs.jevProvider.needsKey,
                         jevHasSavedKey = !prefs.jevKey(prefs.jevProvider).isNullOrBlank(),
-                        jevKey = old.settings.advanced.jevKey.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name },
+                        jevKey = old.settings.advanced.jevKey.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name }
+                            ?: prefs.jevKey(prefs.jevProvider),
                         jevMessage = old.settings.advanced.jevMessage.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name },
                     ), version = BuildConfig.VERSION_NAME,
                 ),
@@ -600,13 +601,15 @@ class AppController internal constructor(application: Application,
         mutableState.update { it.copy(settings = it.settings.copy(advanced = draft)) }; refresh()
     }
 
-    /** 仅在用户点保存时更新 Jev 密钥。 */
+    /** 仅在用户点保存时更新Jev密钥，保存后回填本服务的值，避免空框造成提交失败的误解。 */
     private fun saveJevKey() {
         val draft = state.value.settings.advanced
         val provider = prefs.jevProvider
         if (draft.jevProviderId != provider.name || !provider.needsKey) return
         draft.jevKey?.let { prefs.setJevKey(provider, it) } ?: return
-        mutableState.update { it.copy(settings = it.settings.copy(advanced = it.settings.advanced.copy(jevKey = null, jevMessage = UiMessage("辅助服务密钥已保存")))) }
+        mutableState.update { it.copy(settings = it.settings.copy(advanced = it.settings.advanced.copy(
+            jevKey = prefs.jevKey(provider).orEmpty(),
+            jevMessage = UiMessage(if (draft.jevKey.isNullOrBlank()) "辅助服务密钥已清空" else "辅助服务密钥已保存")))) }
         refresh()
     }
 

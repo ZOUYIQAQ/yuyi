@@ -131,11 +131,27 @@ private fun LivePermissionWarning(permissions: List<PermissionUiState>, enabled:
 /** 服务名称可完整换行，入口为大字号保留足够宽度与至少48dp触控高度。 */
 @Composable
 private fun LiveServiceRow(title: String, value: String, action: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.bodyMedium)
+    BoxWithConstraints(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
+        if (maxWidth < 320.dp && LocalDensity.current.fontScale >= 1.5f) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LiveServiceSummary(title, value, Modifier.fillMaxWidth())
+                TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(action) }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveServiceSummary(title, value, Modifier.weight(1f))
+                TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 160.dp).heightIn(min = 48.dp)) { Text(action) }
+            }
         }
-        TextButton(onClick = onClick, modifier = Modifier.widthIn(max = 160.dp).heightIn(min = 48.dp)) { Text(action) }
+    }
+}
+
+/** 窄栏大字号为服务名称保留整行，避免英文模型名被右侧入口挤成碎片。 */
+@Composable
+private fun LiveServiceSummary(title: String, value: String, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium)
     }
 }

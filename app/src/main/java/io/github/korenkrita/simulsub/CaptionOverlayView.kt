@@ -46,7 +46,16 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** resize marks, one per corner: top-left, top-right, bottom-right, bottom-left */
     private val corners = List(4) { android.widget.ImageView(ctx) }
     private val unlockBtn = ImageButton(ctx)
-    private val toolbar = LinearLayout(ctx)
+    private val toolbar = object : LinearLayout(ctx) {
+        /** 独立工具栏不经过字幕根视图，按住时暂停隐藏，松开后重新计时。 */
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> this@CaptionOverlayView.removeCallbacks(hideRunnable)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (visibility == VISIBLE) bumpToolbarTimer()
+            }
+            return super.dispatchTouchEvent(event)
+        }
+    }
     private var externalToolbar = false
     private val bg = GradientDrawable().apply { cornerRadius = dp(12f) }
 
