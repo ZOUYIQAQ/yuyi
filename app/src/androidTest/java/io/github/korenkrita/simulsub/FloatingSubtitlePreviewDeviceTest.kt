@@ -26,6 +26,60 @@ import org.junit.Test
 class FloatingSubtitlePreviewDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    /** 开关在实时模式可操作，定稿模式置灰且不丢选择；实际预览立即更新空槽背景。 */
+    @Test fun draftReservationSwitchIsDisabledForFinalOnlyAndUpdatesNativePreview() {
+        var style by mutableStateOf(SubtitleStyleUiState())
+        var finalOnly by mutableStateOf(false)
+        compose.setContent {
+            SimulSubTheme(SettingsUiState()) {
+                SubtitleSettings(style, SimulSubActions(onSubtitleStyleChange = { style = it }), false, null, finalOnly)
+            }
+        }
+        val stage = nativeStage()
+        compose.onNodeWithContentDescription("暂时收起字幕预览").performClick()
+        compose.onAllNodes(hasScrollToIndexAction()).onLast().performScrollToNode(hasText("预留临时字幕空间"))
+        val toggle = compose.onNode(hasText("预留临时字幕空间") and isToggleable())
+        toggle.performScrollTo().assertIsEnabled().assertIsOff()
+        captureReservationState("switch-off")
+        toggle.performClick()
+        captureReservationState("switch-on")
+        compose.runOnIdle { assertTrue(style.reserveDraftSpace); finalOnly = true }
+        toggle.assertIsNotEnabled().assertIsOn()
+        compose.onNodeWithText("关闭「仅显示定稿」后可调整。").assertIsDisplayed()
+        captureReservationState("switch-disabled")
+        compose.runOnIdle { assertTrue(style.reserveDraftSpace); finalOnly = false }
+        toggle.assertIsEnabled().assertIsOn()
+        compose.onNodeWithTag("subtitle-preview-restore").performClick()
+        compose.runOnIdle {
+            val current = nativeStageOnMain()
+            assertNotSame("恢复预览应创建新的渲染视图", stage, current)
+            val caption = current.captionView
+            caption.setLines(listOf(CaptionOverlayView.Line("正式字幕", null, true)), null)
+            caption.measure(View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            caption.layout(0, 0, caption.measuredWidth, caption.measuredHeight)
+            val bitmap = android.graphics.Bitmap.createBitmap(caption.width, caption.height, android.graphics.Bitmap.Config.ARGB_8888)
+            try {
+                caption.draw(android.graphics.Canvas(bitmap))
+                assertTrue("预览需真正绘制空槽背景", android.graphics.Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height - 1)) > 0)
+            } finally { bitmap.recycle() }
+        }
+    }
+
+    /** 保存真实组件的整屏像素，供手机和平板逐图核对触控区域和置灰说明。 */
+    private fun captureReservationState(name: String) {
+        compose.waitForIdle()
+        Thread.sleep(250)
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val directory = java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "qa-draft-reserve").apply { mkdirs() }
+        val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) { "未能截取当前界面" }
+        try {
+            java.io.File(directory, "$name.png").outputStream().use {
+                screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        } finally { screenshot.recycle() }
+    }
+
     /** 滚动不能带走预览；拖动、收起、恢复和离页都必须作用于真实视图。 */
     @Test fun scrollingDraggingCollapseAndLeavingHaveRealLifecycle() {
         var state by mutableStateOf(SimulSubUiState(destination = UiDestination.SETTINGS))

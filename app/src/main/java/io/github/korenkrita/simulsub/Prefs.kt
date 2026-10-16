@@ -63,6 +63,11 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("showStats", false)
         set(v) = sp.edit().putBoolean("showStats", v).apply()
 
+    /** 实时字幕消失后仍绘制一行背景；默认关闭，沿用原有自动收缩行为。 */
+    var reserveDraftSpace: Boolean
+        get() = sp.getBoolean("reserveDraftSpace", false)
+        set(v) = sp.edit().putBoolean("reserveDraftSpace", v).apply()
+
     /** Overlay position (top-left, px); -1 = default */
     var overlayX: Int
         get() = sp.getInt("overlayX", -1)

@@ -29,6 +29,11 @@ internal fun SubtitleSettings(style: SubtitleStyleUiState, actions: SimulSubActi
                     ValueSlider("背景不透明度", style.backgroundAlpha, 0f..1f, "${(style.backgroundAlpha * 100).roundToInt()}%", steps = 19) { actions.onSubtitleStyleChange(style.copy(backgroundAlpha = it)) }
                     ToggleSetting("显示原文", "在译文上方显示识别出的原文。", style.showOriginal) { actions.onSubtitleStyleChange(style.copy(showOriginal = it)) }
                     ToggleSetting("显示耗时信息", "显示识别和翻译耗时，便于检查字幕延迟。", style.showStats) { actions.onSubtitleStyleChange(style.copy(showStats = it)) }
+                    ToggleSetting("预留临时字幕空间",
+                        if (finalOnly) "关闭「仅显示定稿」后可调整。" else "临时字幕消失后仍保留一行背景，避免黑框收缩。",
+                        style.reserveDraftSpace, enabled = !finalOnly) {
+                        actions.onSubtitleStyleChange(style.copy(reserveDraftSpace = it))
+                    }
                 }
             }
             item("subtitle-size") {

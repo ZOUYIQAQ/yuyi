@@ -182,6 +182,8 @@ data class SubtitleStyleUiState(
     /** 显示句数只统计正式字幕，临时草稿另计；keepSentences仅用于旧配置迁移。 */
     val maxSentences: Int = maxOf(3, keepSentences.coerceIn(1, 10)),
     val limitMode: CaptionLimitMode = CaptionLimitMode.SENTENCES,
+    /** 仅实时字幕模式使用；仅显示定稿时保留选择但不绘制空槽背景。 */
+    val reserveDraftSpace: Boolean = false,
 )
 
 /** 高级设置与旧 Prefs 对齐，Jev 密钥同样使用 null 保留、空串清空的契约。 */

@@ -178,6 +178,7 @@ internal class SubtitlePreviewStage(context: Context) : FrameLayout(context) {
         watchingWidthPx = if (landscape) long else short
         watchingHeightPx = if (landscape) short else long
         captionView.setFinalOnly(finalOnly)
+        captionView.setReserveDraftSpace(style.reserveDraftSpace)
         captionView.setShown(style.showOriginal, style.showStats)
         captionView.setColors(CaptionOverlayView.palette(style.paletteId))
         captionView.applyStyle(style.textSp, style.backgroundAlpha)

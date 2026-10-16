@@ -16,6 +16,32 @@ import java.util.UUID
 
 /** 使用独立偏好验证新增预设和外观设置，不修改设备上的用户配置。 */
 class RefinementDeviceTest {
+    /** 新选项默认关闭，保存、其他样式修改和定稿模式切换均保持同一持久化选择。 */
+    @Test fun draftBackgroundReservationPersistsWithoutChangingOtherDefaults() = withController { controller, prefs, actions ->
+        assertFalse(prefs.reserveDraftSpace)
+        assertFalse(controller.state.value.settings.subtitle.reserveDraftSpace)
+        val initial = controller.state.value.settings.subtitle
+        actions.onSubtitleStyleChange(initial.copy(reserveDraftSpace = true))
+        assertTrue(prefs.reserveDraftSpace)
+        assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace)
+        assertTrue(Prefs(controller.getApplication()).reserveDraftSpace)
+        actions.onFinalOnly(true)
+        assertTrue(controller.state.value.live.finalOnly)
+        assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace)
+        actions.onSubtitleStyleChange(controller.state.value.settings.subtitle.copy(textSp = 22f))
+        assertTrue(prefs.reserveDraftSpace)
+        assertEquals(initial.maxSentences, prefs.captionSentenceCount)
+        actions.onFinalOnly(false)
+        assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace)
+        actions.onSubtitleStyleChange(controller.state.value.settings.subtitle.copy(reserveDraftSpace = false))
+        assertFalse(Prefs(controller.getApplication()).reserveDraftSpace)
+    }
+
+    /** 已保存的选项在首次创建控制器时也必须回填，而非只留在本次内存状态。 */
+    @Test fun savedDraftBackgroundReservationLoadsIntoController() = withController(
+        configurePrefs = { it.reserveDraftSpace = true },
+    ) { controller, _, _ -> assertTrue(controller.state.value.settings.subtitle.reserveDraftSpace) }
+
     /** 模板仅改草稿；保存后才切换服务，不能沿用旧服务的凭据。 */
     @Test fun presetIsEditableAndOnlySavesOnExplicitAction() = withController { controller, prefs, actions ->
         prefs.saveByok("https://old.example/v1", "旧模型", "旧服务密钥", "旧服务UA", listOf("X-Key" to "旧请求头"))

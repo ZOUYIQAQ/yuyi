@@ -188,6 +188,7 @@ class CaptionWindowAnchorDeviceTest {
             examples.forEachIndexed { index, (final, draft, status) ->
                 instrumentation.runOnMainSync {
                     phase = index + 1
+                    view.setReserveDraftSpace(index % 2 == 0)
                     view.setLines(buildList {
                         add(CaptionOverlayView.Line(final, null, true))
                         if (draft.isNotEmpty()) add(CaptionOverlayView.Line(draft, null, false))

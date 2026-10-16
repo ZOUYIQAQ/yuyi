@@ -49,6 +49,53 @@ class CaptionDraftSlotDeviceTest {
         }
     }
 
+    /** 背景预留开关只改变空槽像素，草稿显隐、开关切换均不得移动定稿或窗口。 */
+    @Test fun reservedDraftBackgroundPersistsWithoutChangingLayoutOrFinalBaseline() = onMain {
+        for (fixed in listOf(false, true)) for (original in listOf(false, true)) {
+            val view = overlay(original)
+            val width = px(view, 280)
+            view.setCaptionHeight(if (fixed) px(view, 96) else 0)
+            val final = CaptionOverlayView.Line("正式字幕固定不动", if (original) "確定字幕" else null, true)
+            view.setLines(listOf(final), null)
+            layout(view, width)
+            val geometry = listOf(view.height, view.getChildAt(0).top, view.getChildAt(0).bottom,
+                view.finalLineBaselineInWindowPx(), view.draftSlotHeightPx())
+            for (reserved in listOf(true, false, true)) {
+                view.setReserveDraftSpace(reserved)
+                for (draft in listOf("", "实时译文", "", "较长实时字幕".repeat(50), "")) {
+                    view.setLines(if (draft.isEmpty()) listOf(final) else listOf(final,
+                        CaptionOverlayView.Line(draft, if (original) "仮字幕" else null, false)), null)
+                    layout(view, width)
+                    assertEquals("空槽背景选项不能改变正式字幕和窗口布局", geometry,
+                        listOf(view.height, view.getChildAt(0).top, view.getChildAt(0).bottom,
+                            view.finalLineBaselineInWindowPx(), view.draftSlotHeightPx()))
+                    val bitmap = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+                    try {
+                        view.draw(Canvas(bitmap))
+                        if (!fixed && !original && draft.isEmpty()) {
+                            val directory = java.io.File(view.context.getExternalFilesDir(null), "qa-draft-reserve").apply { mkdirs() }
+                            java.io.File(directory, if (reserved) "empty-reserved.png" else "empty-collapsed.png")
+                                .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                        }
+                        assertEquals("开启后空槽仍须保留黑底；关闭时沿用草稿消失即收背景", reserved || draft.isNotEmpty(),
+                            Color.alpha(bitmap.getPixel(width / 2, bitmap.height - 1)) > 0)
+                    } finally { bitmap.recycle() }
+                }
+            }
+            view.setFinalOnly(true)
+            layout(view, width)
+            assertEquals("仅显示定稿时不应增加空槽", 0, view.draftSlotHeightPx())
+            assertEquals(view.measureCardHeight(width), view.height)
+            view.setFinalOnly(false)
+            layout(view, width)
+            val bitmap = Bitmap.createBitmap(width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                assertTrue("切回实时字幕应恢复已保存的空槽背景选择", Color.alpha(bitmap.getPixel(width / 2, bitmap.height - 1)) > 0)
+            } finally { bitmap.recycle() }
+        }
+    }
+
     /** 用真实TextView的最后一行基线核对宿主定位，草稿、诊断与正式内容换行都不能重设锚点。 */
     @Test fun actualFinalBaselineRemainsFixedAcrossTransientAndFinalUpdates() = onMain {
         for (fixed in listOf(false, true)) for (original in listOf(false, true)) {

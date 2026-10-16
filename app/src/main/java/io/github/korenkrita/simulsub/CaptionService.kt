@@ -717,6 +717,7 @@ class CaptionService : Service() {
         }
         v.onStop = { stopSelf() }
         v.setFinalOnly(prefs.finalOnly)
+        v.setReserveDraftSpace(prefs.reserveDraftSpace)
         v.onToggleMode = { prefs.finalOnly = !prefs.finalOnly } // the listener below updates the button and captions
         v.setShown(prefs.showJa, prefs.showStats)
         v.onToggleJa = { prefs.showJa = !prefs.showJa }
@@ -755,6 +756,7 @@ class CaptionService : Service() {
                     refresh()
                 }
                 "finalOnly" -> { v.setFinalOnly(prefs.finalOnly); refresh() }
+                "reserveDraftSpace" -> v.setReserveDraftSpace(prefs.reserveDraftSpace)
                 // translation settings: the session rebuilds its setup off the main thread, from the next sentence on
                 in setupKeys -> { order?.changed(); onSetupChange?.invoke() }
                 else -> if (key?.startsWith("jevKey:") == true) { order?.changed(); onSetupChange?.invoke() }

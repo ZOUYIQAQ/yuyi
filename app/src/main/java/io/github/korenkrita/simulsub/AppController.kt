@@ -575,6 +575,7 @@ class AppController internal constructor(application: Application,
             heightFraction = prefs.heightFrac, keepSentences = range.first, maxSentences = prefs.captionSentenceCount,
             keepChars = prefs.keepChars.coerceIn(10, 300), maxLines = 0, limitMode = prefs.captionLimitMode,
             showOriginal = prefs.showJa, showStats = prefs.showStats, paletteId = prefs.palette,
+            reserveDraftSpace = prefs.reserveDraftSpace,
             minTextSp = CaptionOverlayView.MIN_SP, maxTextSp = CaptionOverlayView.MAX_SP,
             palettes = CaptionOverlayView.PALETTES.map { CaptionPaletteUiState(it.id, it.label, it.zh, it.bg, it.ja) },
         )
@@ -587,6 +588,7 @@ class AppController internal constructor(application: Application,
         prefs.heightFrac = style.heightFraction.coerceIn(0f, CaptionService.MAX_CAPTION_FRAC)
         prefs.setCaptionRetention(style.limitMode, style.maxSentences, style.keepChars)
         prefs.showJa = style.showOriginal; prefs.showStats = style.showStats; prefs.palette = style.paletteId
+        prefs.reserveDraftSpace = style.reserveDraftSpace
         refresh()
     }
 

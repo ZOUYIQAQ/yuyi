@@ -42,6 +42,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     private val draftSource = TextView(ctx)
     private val draftText = CaptionTextView(ctx)
     private var draftSlotEnabled = false
+    private var reserveDraftSpace = false
     private var draftOriginalShown = false
     /** resize marks, one per corner: top-left, top-right, bottom-right, bottom-left */
     private val corners = List(4) { android.widget.ImageView(ctx) }
@@ -128,6 +129,13 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         setLines(lastLines, lastStats)
     }
 
+    /** 仅改变临时区域是否持续绘制背景，不重测布局或改变正式末行锚点。 */
+    fun setReserveDraftSpace(enabled: Boolean) {
+        if (reserveDraftSpace == enabled) return
+        reserveDraftSpace = enabled
+        invalidate()
+    }
+
     /** 草稿对窗口增加的固定高度，扣除与正文底部共用的留白，不计工具栏。 */
     fun draftSlotHeightPx(): Int = if (draftSlotEnabled) {
         val params = draftSlot.layoutParams as LayoutParams
@@ -192,7 +200,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 统一绘制正文和草稿的圆角背景；只有背景向下伸展，布局和定稿不随草稿改变。 */
     override fun dispatchDraw(canvas: Canvas) {
-        val bottom = if (draftSlotEnabled && draftText.visibility == VISIBLE)
+        val bottom = if (draftSlotEnabled && (reserveDraftSpace || draftText.visibility == VISIBLE))
             maxOf(card.bottom, draftSlot.bottom) else card.bottom
         bg.setBounds(card.left, card.top, card.right, bottom)
         bg.draw(canvas)

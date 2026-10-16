@@ -23,8 +23,8 @@ android {
         minSdk = 29 // AudioPlaybackCapture
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 29
-        versionName = "1.6.1"
+        versionCode = 30
+        versionName = "1.6.2"
         ndk { abiFilters += "arm64-v8a" }
     }
 
