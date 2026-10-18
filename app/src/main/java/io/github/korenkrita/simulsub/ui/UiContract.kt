@@ -1,19 +1,21 @@
 package io.github.korenkrita.simulsub.ui
 
 import io.github.korenkrita.simulsub.icons.LauncherIconChoice
+import io.github.korenkrita.simulsub.ListeningMode
 
 /** 字幕显示策略直接复用核心，预览与实际服务使用同一裁剪规则。 */
 typealias CaptionLimitMode = io.github.korenkrita.simulsub.CaptionLimitMode
 
 /** 页面标识由控制器持有，重建后可恢复当前入口。 */
-enum class UiDestination(val title: String) { LIVE("同传"), SUBTITLE("字幕"), MODELS("模型库"), SCENES("场景术语"), SETTINGS("设置") }
+enum class UiDestination(val title: String) { LIVE("同传"), SUBTITLE("字幕"), MODELS("听写服务"), SCENES("场景术语"), SETTINGS("设置") }
 
-/** 首次配置只包含不可缺少的权限、翻译服务和识别模型，各步均可跳过。 */
-enum class OnboardingStep { PERMISSIONS, API, MODEL }
+/** 首次配置区分本地、直接听译、在线听写后文字翻译三条路径，各步均可跳过。 */
+enum class OnboardingStep { PERMISSIONS, MODE, API, MODEL, ONLINE }
 
 /** 引导完成状态来自真实持久化配置，不将草稿或下载中模型视为可用。 */
 data class OnboardingUiState(val step: OnboardingStep = OnboardingStep.PERMISSIONS,
-    val apiReady: Boolean = false, val modelReady: Boolean = false)
+    val apiReady: Boolean = false, val modelReady: Boolean = false,
+    val listeningMode: ListeningMode = ListeningMode.LOCAL, val onlineReady: Boolean = false)
 
 /** 主题仅影响应用界面，悬浮字幕的配色独立设置。 */
 enum class UiThemeMode(val title: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
@@ -51,13 +53,13 @@ internal fun List<PermissionUiState>.withRequiredPermissions(): List<PermissionU
 /** 每句字幕保留原文和译文；未定稿状态与真实计时信息由服务提供。 */
 data class CaptionUiState(val id: String, val original: String, val translated: String, val isDraft: Boolean = false, val detail: String = "")
 
-/** 同传页：canStart 必须同时反映模型完整、翻译配置和必要权限的检查结果。 */
+/** 同传页就绪状态由控制器按模式计算，本地检查模型与翻译配置，在线检查已保存的连接配置。 */
 data class LiveUiState(
     val running: Boolean = false,
     val busy: Boolean = false,
     val canStart: Boolean = false,
     val statusTitle: String = "准备同传字幕",
-    val statusDetail: String = "先在模型库安装识别模型，再配置翻译服务。",
+    val statusDetail: String = "先选择听写服务，再配置翻译服务。",
     val modelLabel: String = "未选择模型",
     val translationLabel: String = "未配置翻译服务",
     val sourceId: String = "ja",
@@ -73,6 +75,32 @@ data class LiveUiState(
     val permissions: List<PermissionUiState> = emptyList(),
     val captions: List<CaptionUiState> = emptyList(),
     val elapsed: String = "",
+    val listeningMode: ListeningMode = ListeningMode.LOCAL,
+    val cloudReady: Boolean = false,
+    /** 独立文字翻译就绪；在线听写必须同时具备此项。 */
+    val translationReady: Boolean = false,
+    val listeningServiceId: String = "local",
+    val listeningServices: List<UiOption> = emptyList(),
+    val translationServiceId: String = "",
+    val translationServices: List<UiOption> = emptyList(),
+    val costs: UsageCostUiState = UsageCostUiState(),
+)
+
+/** 费用仅展示控制器提供的用量估算；未计价服务单独列出，不按零费用处理。 */
+data class UsageCostUiState(
+    val todayAmount: String = "¥0.0000",
+    val lastAmount: String = "暂无会话",
+    val currentAmount: String = "",
+    val todayDetail: String = "",
+    val lastDetail: String = "",
+    val currentDetail: String = "",
+    val breakdown: List<UiOption> = emptyList(),
+    val unpricedModels: List<String> = emptyList(),
+    val priceNote: String = "按接口用量与公开单价估算",
+    val ratesUpdated: String = "2026-10-17",
+    val todayPartial: Boolean = false,
+    val lastPartial: Boolean = false,
+    val currentPartial: Boolean = false,
 )
 
 /** 状态与可执行动作分开：下载器必须明确给出取消、重试、启用能力。 */
@@ -139,6 +167,9 @@ data class TranslationApiUiState(
     val profileId: String = "",
     val profiles: List<UiOption> = listOf(UiOption("", "默认")),
     val presetId: String = "custom",
+    val credentialOptions: List<UiOption> = emptyList(),
+    val credentialId: String = "",
+    val credentialLabel: String = "",
     val url: String = "",
     val model: String = "",
     val key: String? = null,
@@ -155,10 +186,51 @@ data class TranslationApiUiState(
     val hasUnsavedChanges: Boolean = false,
     /** 来自持久化配置的就绪状态，草稿合法不代表已保存。 */
     val hasSavedConfiguration: Boolean = false,
+    val platformId: String = "",
+    val platformLabel: String = "",
 )
 
 /** 自定义请求头以稳定标识编辑，合法性与持久化由控制器校验。 */
 data class HeaderUiState(val id: String, val name: String = "", val value: String = "")
+
+/** 每份命名密钥独立持有草稿；同平台的多条凭据不互相覆盖。 */
+data class PlatformKeyUiState(
+    val id: String,
+    val label: String,
+    val key: String = "",
+    val hasSavedKey: Boolean = false,
+    val hasUnsavedChanges: Boolean = false,
+    val message: UiMessage? = null,
+    val credentialId: String = "default",
+    val credentialLabel: String = "默认密钥",
+    val isNew: Boolean = false,
+    val isDefault: Boolean = false,
+)
+
+/** 快捷密钥表单仅留在控制器内存；服务标识只决定保存后的凭据绑定。 */
+data class QuickPlatformKeyUiState(
+    val platformId: String,
+    val platformLabel: String,
+    val credentialId: String,
+    val serviceId: String = "",
+    val name: String = "",
+    val key: String = "",
+    val message: UiMessage? = null,
+)
+
+/** 在线连接草稿独立保存；key 仅保留兼容契约，界面统一从平台密钥页编辑。 */
+data class OnlineListeningUiState(
+    val endpoint: String = io.github.korenkrita.simulsub.online.LiveTranslateConfig.DEFAULT_ENDPOINT,
+    val model: String = io.github.korenkrita.simulsub.online.LiveTranslateConfig.DEFAULT_MODEL,
+    val key: String = "",
+    val testing: Boolean = false,
+    val hasUnsavedChanges: Boolean = false,
+    val hasSavedConfiguration: Boolean = false,
+    val message: UiMessage? = null,
+    val credentialOptions: List<UiOption> = emptyList(),
+    val credentialId: String = "",
+    val credentialLabel: String = "",
+)
 
 /** 字幕配色来自实际 overlay 调色板，界面只渲染 ARGB 色值。 */
 data class CaptionPaletteUiState(val id: String, val label: String, val foregroundArgb: Int, val backgroundArgb: Int, val originalArgb: Int = foregroundArgb)
@@ -201,6 +273,10 @@ data class AdvancedUiState(
     val jevHasSavedKey: Boolean = false,
     val jevKey: String? = null,
     val jevMessage: UiMessage? = null,
+    val jevTesting: Boolean = false,
+    val jevCredentialOptions: List<UiOption> = emptyList(),
+    val jevCredentialId: String = "",
+    val jevCredentialLabel: String = "",
 )
 
 /** 使用记录由本地日志索引提供；share 只传记录标识，由控制器创建分享 Intent。 */
@@ -221,6 +297,16 @@ data class AppUpdateUiState(
     val prompt: UpdateReleaseUiState? = null,
 )
 
+/** 调用服务列表由控制器按平台和模型汇总，选中状态和配置就绪状态分别展示。 */
+data class ServiceProfileUiState(val id: String, val name: String, val detail: String = "",
+    val kind: String = "", val selected: Boolean = false, val configured: Boolean = true,
+    val platformId: String = "", val credentialOptions: List<UiOption> = emptyList(),
+    val credentialId: String = "", val credentialLabel: String = "", val builtIn: Boolean = true)
+
+/** 听写编辑器仅描述当前草稿；新建服务在保存前不写入服务列表。 */
+data class ListeningEditorUiState(val id: String, val name: String, val mode: ListeningMode,
+    val isNew: Boolean = false)
+
 /** 设置分区的草稿与持久化状态由控制器统一维护。 */
 data class SettingsUiState(
     val api: TranslationApiUiState = TranslationApiUiState(),
@@ -240,6 +326,23 @@ data class SettingsUiState(
     val updates: AppUpdateUiState = AppUpdateUiState(),
     val updateMessage: String = "",
     val checkingUpdate: Boolean = false,
+    val listeningMode: ListeningMode = ListeningMode.LOCAL,
+    val online: OnlineListeningUiState = OnlineListeningUiState(),
+    val cloudAsr: OnlineListeningUiState = OnlineListeningUiState(
+        endpoint = io.github.korenkrita.simulsub.online.CloudAsrConfig.DEFAULT_ENDPOINT,
+        model = io.github.korenkrita.simulsub.online.CloudAsrConfig.DEFAULT_MODEL,
+    ),
+    val platformKeys: List<PlatformKeyUiState> = emptyList(),
+    val quickPlatformKey: QuickPlatformKeyUiState? = null,
+    val listeningServiceId: String = "local",
+    val listeningServices: List<UiOption> = emptyList(),
+    val translationServiceId: String = "",
+    val translationServices: List<UiOption> = emptyList(),
+    val costs: UsageCostUiState = UsageCostUiState(),
+    val listeningProfiles: List<ServiceProfileUiState> = emptyList(),
+    val translationProfiles: List<ServiceProfileUiState> = emptyList(),
+    val listeningEditor: ListeningEditorUiState? = null,
+    val translationEditorId: String? = null,
 )
 
 /**
@@ -288,6 +391,7 @@ data class SimulSubActions(
     val onAddApiProfile: (String) -> Unit = {},
     val onRenameApiProfile: (String) -> Unit = {},
     val onDeleteApiProfile: () -> Unit = {},
+    val onDeleteTranslationService: (String) -> Unit = {},
     val onAddHeader: () -> Unit = {},
     val onRemoveHeader: (String) -> Unit = {},
     val onSaveApi: () -> Unit = {},
@@ -304,6 +408,8 @@ data class SimulSubActions(
     val onDynamicColorsChange: (Boolean) -> Unit = {},
     val onAdvancedChange: (AdvancedUiState) -> Unit = {},
     val onSaveJevKey: () -> Unit = {},
+    val onTestJevConnection: () -> Unit = {},
+    val onCancelJevTest: () -> Unit = {},
     val onKeepLogsChange: (Boolean) -> Unit = {},
     val onRefreshRecords: () -> Unit = {},
     val onShareRecord: (String) -> Unit = {},
@@ -319,4 +425,51 @@ data class SimulSubActions(
     val onOpenRepository: () -> Unit = {},
     val onOpenUpstreamRepository: () -> Unit = {},
     val onDismissMessage: () -> Unit = {},
+    val onListeningModeChange: (ListeningMode) -> Unit = {},
+    val onOnlineDraftChange: (OnlineListeningUiState) -> Unit = {},
+    val onSaveOnline: () -> Unit = {},
+    val onTestOnline: () -> Unit = {},
+    val onCancelOnlineTest: () -> Unit = {},
+    val onDiscardOnlineDraft: () -> Unit = {},
+    val onCloudAsrDraftChange: (OnlineListeningUiState) -> Unit = {},
+    val onSaveCloudAsr: () -> Unit = {},
+    val onTestCloudAsr: () -> Unit = {},
+    val onCancelCloudAsrTest: () -> Unit = {},
+    val onDiscardCloudAsrDraft: () -> Unit = {},
+    val onOpenCloudAsrHelp: () -> Unit = {},
+    /** 由根界面内部接管的直达路由，控制器无需实现。 */
+    val onOpenListeningSettings: () -> Unit = {},
+    val onOpenApiSettings: () -> Unit = {},
+    val onOpenOnlineHelp: () -> Unit = {},
+    val onOpenPlatformKeys: () -> Unit = {},
+    val onPlatformKeyChange: (String, String) -> Unit = { _, _ -> },
+    val onSavePlatformKey: (String) -> Unit = {},
+    val onAddPlatformKey: (String) -> Unit = {},
+    val onPlatformKeyLabelChange: (String, String, String) -> Unit = { _, _, _ -> },
+    val onPlatformCredentialChange: (String, String, String) -> Unit = { _, _, _ -> },
+    val onSavePlatformCredential: (String, String) -> Unit = { _, _ -> },
+    val onServiceCredentialChange: (String, String) -> Unit = { _, _ -> },
+    val onSetDefaultPlatformKey: (String, String) -> Unit = { _, _ -> },
+    val onOpenQuickPlatformKey: (String, String) -> Unit = { _, _ -> },
+    val onQuickPlatformKeyNameChange: (String) -> Unit = {},
+    val onQuickPlatformKeyValueChange: (String) -> Unit = {},
+    val onSaveQuickPlatformKey: () -> Unit = {},
+    val onDismissQuickPlatformKey: () -> Unit = {},
+    val onDiscardPlatformKeys: () -> Unit = {},
+    val onSelectListeningService: (String) -> Unit = {},
+    val onChooseOnboardingListeningService: (String) -> Unit = {},
+    /** 创建类型为 asr、realtime 或 segmented；第二参数保留兼容，界面传空字符串。 */
+    val onCreateListeningService: (String, String) -> Unit = { _, _ -> },
+    val onEditListeningService: (String) -> Unit = {},
+    val onListeningServiceNameChange: (String) -> Unit = {},
+    val onSaveListeningService: () -> Unit = {},
+    val onCloseListeningServiceEditor: () -> Unit = {},
+    /** 翻译编辑使用独立草稿选择，进入与关闭编辑均不改变当前使用的服务。 */
+    val onEditTranslationService: (String) -> Unit = {},
+    val onCreateTranslationService: (String) -> Unit = {},
+    /** 按平台预设标识创建翻译连接；custom 表示手动填写兼容接口。 */
+    val onCreateTranslationProvider: (String) -> Unit = {},
+    val onCloseTranslationServiceEditor: () -> Unit = {},
+    val onSelectTranslationService: (String) -> Unit = {},
+    val onOpenCosts: () -> Unit = {},
 )

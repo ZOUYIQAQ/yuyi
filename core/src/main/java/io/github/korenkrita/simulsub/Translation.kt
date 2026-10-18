@@ -332,12 +332,14 @@ const val MAX_GENERATE = 100
  * Left: the new terms (possibly none), right: why it failed, for the user.
  */
 fun generateTerms(service: ByokService, stored: String?, remember: (String) -> Unit, label: String,
-                  background: String, have: Set<String>, max: Int, source: Lang?, target: Target)
+                  background: String, have: Set<String>, max: Int, source: Lang?, target: Target,
+                  onUsage: (MtResult) -> Unit = {})
     : Pair<List<Pair<String, String>>?, String?> {
     val n = max.coerceIn(1, MAX_GENERATE)
     var variant = ByokTranslator.variant(stored)
     if (stored == null) {
-        val p = ByokTranslator(service, byokSystem(Scene.GENERAL, source, target), null, maxTokens = mtMaxTokens(target))
+        val p = ByokTranslator(service, byokSystem(Scene.GENERAL, source, target), null,
+            maxTokens = mtMaxTokens(target), onUsage = onUsage)
         val steps = mutableListOf<ByokTranslator.Step>()
         variant = p.probe(steps)
         when {
@@ -348,7 +350,7 @@ fun generateTerms(service: ByokService, stored: String?, remember: (String) -> U
         }
     }
     val t = ByokTranslator(service, termsSystem(label, background, have, n, source, target), variant,
-        deadlineMs = 60_000, maxTokens = 40 * n + 200, firstContentMs = 30_000)
+        deadlineMs = 60_000, maxTokens = 40 * n + 200, firstContentMs = 30_000, onUsage = onUsage)
     val r = t.translate("列出术语。") ?: return null to "没有收到回复"
     if (r.stop == 'f' && r.text.isEmpty()) return null to when {
         r.error?.startsWith("deadline") == true || r.error?.startsWith("no content") == true -> "一分钟内没有生成完，可以少要几条再试"
@@ -468,6 +470,7 @@ class ByokTranslator(
     private val deadlineMs: Long = 8_000,
     private val maxTokens: Int = mtMaxTokens(Target.ZH),
     private val firstContentMs: Long = FIRST_CONTENT_MS,
+    private val onUsage: (MtResult) -> Unit = {},
 ) : Mt {
     private val calls = Calls(deadlineMs)
     @Volatile private var cancelled = false
@@ -489,9 +492,18 @@ class ByokTranslator(
         val seen = StringBuilder() // this request's content so far, for the first-text check (one per call: a late reader
         // of an earlier, abandoned call must not touch the next one)
         // the URL was checked by chatUrl; anything OkHttp still refuses is a failed call, never a crash
+        val sent = java.util.concurrent.atomic.AtomicBoolean(false)
+        val completed = java.util.concurrent.atomic.AtomicReference<MtResult?>()
+        val reported = java.util.concurrent.atomic.AtomicBoolean(false)
+        /** 请求发出和调用结束可能并发，确保计量恰好通知一次。 */
+        fun reportUsage() {
+            val result = completed.get() ?: return
+            if (sent.get() && reported.compareAndSet(false, true)) runCatching { onUsage(result) }
+        }
         val r = try {
             calls.post(endpoint, body, service.requestHeaders(),
-                firstContentMs = firstMs, isContent = { hasAnswer(it, seen) }, isEnd = SseStream::isDone)
+                firstContentMs = firstMs, isContent = { hasAnswer(it, seen) }, isEnd = SseStream::isDone,
+                onSent = { sent.set(true); reportUsage() })
         } catch (e: IllegalArgumentException) { HttpResult(0, null, 0, "bad url") }
         // The key is in a header, not the body, but a service may echo it anywhere (split over chunks, inside
         // reasoning, in an error), where no text replacement on the body can find it. So no BYOK reply body is kept:
@@ -509,10 +521,14 @@ class ByokTranslator(
             clean = next
         }
         // an answer cut at the token cap inside reasoning is a conclusive "it thinks" for the probe, but no caption
-        return MtResult(clean, if (open) 'f' else res.stop, res.promptTokens,
+        val result = MtResult(clean, if (open) 'f' else res.stop, res.promptTokens,
             res.outputTokens, firstContentMs = res.firstContentMs, request = res.request, response = null, http = res.http,
             error = if (open) (if (res.stop == 'l' || res.stop == 'e') "unfinished thinking" else res.error ?: "unfinished thinking") else res.error,
             thinking = res.thinking || open || res.raw.contains("<think>"), cachedTokens = res.cachedTokens)
+        // 只记录确实开始写出请求的调用；探测的每个候选请求也分别上报。
+        completed.set(result)
+        reportUsage()
+        return result
     }
 
     /**

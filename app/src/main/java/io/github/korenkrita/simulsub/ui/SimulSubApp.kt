@@ -1,6 +1,7 @@
 package io.github.korenkrita.simulsub.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,11 +24,35 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import io.github.korenkrita.simulsub.ListeningMode
 
 /** 统一入口仅依赖状态与动作，按当前窗口可用宽度适应旋转和分屏。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
+    val routeScrollStateHolder = rememberSaveableStateHolder()
+    CompositionLocalProvider(LocalRouteScrollStateHolder provides routeScrollStateHolder) {
+        val flowStateHolder = rememberSaveableStateHolder()
+        val guiding = state.onboarding != null
+        AnimatedContent(targetState = guiding, modifier = Modifier.fillMaxSize(),
+            transitionSpec = { routeTransition(forward = !targetState) }, label = "引导与应用切换") { guidePage ->
+            val rendered = rememberRouteSnapshot(guidePage == guiding, state)
+            flowStateHolder.SaveableStateProvider(if (guidePage) "guide" else "application") {
+                SimulSubRoot(rendered, actions)
+            }
+        }
+        state.settings.quickPlatformKey?.let { draft ->
+            SimulSubTheme(state.settings) {
+                QuickPlatformKeyDialog(draft, actions, !state.live.running && !state.live.busy)
+            }
+        }
+    }
+}
+
+/** 导航与确认仍由根页面处理，滚动容器在导航树之外存活，不接收业务草稿。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SimulSubRoot(state: SimulSubUiState, actions: SimulSubActions) {
     val pageStateHolder = rememberSaveableStateHolder()
     if (state.onboarding != null) {
         OnboardingScreen(state, actions)
@@ -36,19 +60,66 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
     }
     val mainDestinations = listOf(UiDestination.LIVE, UiDestination.SUBTITLE, UiDestination.SETTINGS)
     var detailReturnDestination by rememberSaveable { mutableStateOf(UiDestination.SETTINGS) }
+    var detailReturnSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var settingsReturnDestination by rememberSaveable { mutableStateOf(UiDestination.SETTINGS) }
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
-    var pendingApiExit by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var translationEditorOpen by rememberSaveable { mutableStateOf(false) }
+    // 进程重建只恢复列表；不能把旧编辑路由错误绑定到当前活动服务。
+    LaunchedEffect(Unit) {
+        if (translationEditorOpen && state.settings.translationEditorId == null) translationEditorOpen = false
+    }
+    var keysReturnSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    var keysReturnDestination by rememberSaveable { mutableStateOf(UiDestination.SETTINGS) }
+    var pendingExit by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var discardOnlyKeys by remember { mutableStateOf(false) }
     val editingApi = state.destination == UiDestination.SETTINGS && settingsSection == SettingsSection.API
+    val editingOnline = state.destination == UiDestination.SETTINGS && settingsSection == SettingsSection.LISTENING
+    val editingKeys = state.destination == UiDestination.SETTINGS && settingsSection == SettingsSection.KEYS
+    OnlineProbeRouteLifetime(editingOnline && state.settings.listeningEditor != null,
+        { actions.onCancelOnlineTest(); actions.onCancelCloudAsrTest() })
+    val hasDirtyKeys = state.settings.platformKeys.any { it.hasUnsavedChanges }
+    val hasDirtyConfiguration = state.settings.api.hasUnsavedChanges || state.settings.online.hasUnsavedChanges ||
+        state.settings.cloudAsr.hasUnsavedChanges || hasDirtyKeys
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    var forwardingRootBack by remember { mutableStateOf(false) }
 
     /** 所有离开入口共用确认，只保留首次意图，取消时不修改控制器草稿。 */
     fun requestExit(exit: () -> Unit) {
-        if (pendingApiExit != null) return
-        if (editingApi && state.settings.api.hasUnsavedChanges) pendingApiExit = exit else exit()
+        if (pendingExit != null) return
+        discardOnlyKeys = false
+        if (hasDirtyConfiguration) pendingExit = exit else exit()
+    }
+
+    /** 从密钥管理返回来源页只保护密钥草稿，保留来源表单尚未保存的连接信息。 */
+    fun returnFromKeys() {
+        if (pendingExit != null) return
+        val exit: () -> Unit = {
+            settingsSection = keysReturnSection
+            if (keysReturnDestination != UiDestination.SETTINGS) actions.onNavigate(keysReturnDestination)
+        }
+        if (hasDirtyKeys) {
+            discardOnlyKeys = true
+            pendingExit = exit
+        } else exit()
+    }
+
+    /** 切换主页面前恢复服务编辑的临时选择，进入平台密钥子页时保留当前编辑器。 */
+    fun closeServiceEditors() {
+        if (state.settings.listeningEditor != null) actions.onCloseListeningServiceEditor()
+        if (translationEditorOpen) {
+            actions.onCloseTranslationServiceEditor()
+            translationEditorOpen = false
+        }
     }
 
     val returnToSettings: () -> Unit = {
-        requestExit {
+        if (editingKeys) returnFromKeys()
+        else if (editingOnline && state.settings.listeningEditor != null) requestExit(actions.onCloseListeningServiceEditor)
+        else if (editingApi && translationEditorOpen) requestExit {
+            actions.onCloseTranslationServiceEditor()
+            translationEditorOpen = false
+        }
+        else requestExit {
             settingsSection = null
             if (settingsReturnDestination == UiDestination.LIVE) actions.onNavigate(UiDestination.LIVE)
             settingsReturnDestination = UiDestination.SETTINGS
@@ -56,30 +127,104 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
     }
     val navigate: (UiDestination) -> Unit = { destination ->
         requestExit {
+            closeServiceEditors()
+            if (destination == UiDestination.MODELS) {
+                settingsSection = SettingsSection.LISTENING
+                settingsReturnDestination = if (state.destination == UiDestination.LIVE) UiDestination.LIVE else UiDestination.SETTINGS
+                actions.onNavigate(UiDestination.SETTINGS)
+                return@requestExit
+            }
             if (destination == UiDestination.MODELS || destination == UiDestination.SCENES) {
                 detailReturnDestination = if (state.destination in mainDestinations) state.destination else UiDestination.SETTINGS
+                detailReturnSection = if (state.destination == UiDestination.SETTINGS) settingsSection else null
             }
             if (destination == UiDestination.SETTINGS) {
                 settingsSection = null
+                translationEditorOpen = false
                 settingsReturnDestination = UiDestination.SETTINGS
             }
             actions.onNavigate(destination)
         }
     }
     val routedActions = actions.copy(onNavigate = { destination ->
-        if (destination == UiDestination.SETTINGS && state.destination == UiDestination.LIVE) {
+        if (destination == UiDestination.SETTINGS && (state.destination == UiDestination.LIVE || editingOnline)) requestExit {
+            closeServiceEditors()
             settingsSection = SettingsSection.API
-            settingsReturnDestination = UiDestination.LIVE
+            translationEditorOpen = false
+            if (state.destination == UiDestination.LIVE) settingsReturnDestination = UiDestination.LIVE
             actions.onNavigate(destination)
         } else navigate(destination)
-    })
-    val returnFromDetail: () -> Unit = { navigate(detailReturnDestination) }
+    }, onOpenApiSettings = {
+        requestExit {
+            closeServiceEditors()
+            settingsSection = SettingsSection.API
+            translationEditorOpen = false
+            settingsReturnDestination = if (state.destination == UiDestination.LIVE) UiDestination.LIVE else UiDestination.SETTINGS
+            actions.onNavigate(UiDestination.SETTINGS)
+        }
+    }, onOpenListeningSettings = {
+        val open: () -> Unit = {
+            closeServiceEditors()
+            settingsSection = SettingsSection.LISTENING
+            settingsReturnDestination = if (state.destination == UiDestination.LIVE) UiDestination.LIVE else UiDestination.SETTINGS
+            actions.onNavigate(UiDestination.SETTINGS)
+        }
+        requestExit(open)
+    }, onOpenPlatformKeys = {
+        if (!editingKeys) {
+            keysReturnSection = if (state.destination == UiDestination.SETTINGS) settingsSection else null
+            keysReturnDestination = state.destination
+            settingsSection = SettingsSection.KEYS
+            actions.onNavigate(UiDestination.SETTINGS)
+        }
+    }, onOpenCosts = {
+        requestExit {
+            closeServiceEditors()
+            settingsSection = SettingsSection.COSTS
+            settingsReturnDestination = if (state.destination == UiDestination.LIVE) UiDestination.LIVE else UiDestination.SETTINGS
+            actions.onNavigate(UiDestination.SETTINGS)
+        }
+    }, onSelectListeningService = { id ->
+        if (!state.live.running && !state.live.busy && !state.settings.online.testing && !state.settings.cloudAsr.testing &&
+            !state.settings.api.testing && !state.settings.api.saving) {
+            requestExit {
+                actions.onSelectListeningService(id)
+            }
+        }
+    }, onSelectTranslationService = { id ->
+        if (!state.live.running && !state.live.busy && !state.settings.online.testing && !state.settings.cloudAsr.testing &&
+            !state.settings.api.testing && !state.settings.api.saving) {
+            requestExit {
+                actions.onSelectTranslationService(id)
+            }
+        }
+    }, onListeningModeChange = { mode ->
+        if (!state.live.running && !state.live.busy && !state.settings.online.testing && !state.settings.cloudAsr.testing && mode != state.settings.listeningMode) {
+            requestExit { actions.onListeningModeChange(mode) }
+        }
+    }, onRestartOnboarding = { requestExit { closeServiceEditors(); actions.onRestartOnboarding() } })
+    val returnFromDetail: () -> Unit = {
+        requestExit {
+            settingsSection = detailReturnSection
+            actions.onNavigate(detailReturnDestination)
+        }
+    }
     val isDetail = state.destination == UiDestination.MODELS || state.destination == UiDestination.SCENES
+    BackHandler(enabled = !isDetail && (state.destination != UiDestination.SETTINGS || settingsSection == null) && hasDirtyConfiguration && !forwardingRootBack) {
+        requestExit { forwardingRootBack = true }
+    }
+    // 下一次组合先关闭本层拦截，再把已确认的根返回交还系统分发器。
+    LaunchedEffect(forwardingRootBack) {
+        if (forwardingRootBack) {
+            backDispatcher?.onBackPressed()
+            forwardingRootBack = false
+        }
+    }
     BackHandler(enabled = isDetail && !(state.destination == UiDestination.SCENES && state.scenes.editor != null), onBack = returnFromDetail)
     BackHandler(enabled = state.destination == UiDestination.SETTINGS && settingsSection != null, onBack = returnToSettings)
     val updatePrompt = state.settings.updates.prompt
     val canShowUpdate = updatePrompt != null && !state.live.running && !state.live.busy &&
-        !editingApi && pendingApiExit == null && state.scenes.editor == null
+        !editingApi && !editingOnline && !editingKeys && pendingExit == null && !hasDirtyConfiguration && state.scenes.editor == null
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     var updateDialogOpened by remember(updatePrompt?.versionName) { mutableStateOf(false) }
     // 已有对话框会让Activity窗口失焦；更新自身取得焦点后保留打开状态，避免反复开关。
@@ -89,24 +234,22 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
     }
     SimulSubTheme(state.settings) {
         if (canShowUpdate && updateDialogOpened) UpdatePrompt(updatePrompt!!, routedActions)
-        if (pendingApiExit != null) {
-            AlertDialog(
-                onDismissRequest = { pendingApiExit = null },
-                title = { Text("配置尚未保存") },
-                text = { Text("离开将放弃本次修改，是否继续编辑？") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        // 先取走待执行意图，避免重组前的多次点击重复恢复和导航。
-                        val exit = pendingApiExit
-                        pendingApiExit = null
-                        if (exit != null) {
+        if (pendingExit != null) {
+            UnsavedConfigurationDialog(
+                onContinueEditing = { pendingExit = null },
+                onDiscard = {
+                    // 先取走待执行意图，避免重组前的多次点击重复恢复和导航。
+                    val exit = pendingExit
+                    pendingExit = null
+                    if (exit != null) {
+                        if (!discardOnlyKeys) {
                             if (state.settings.api.hasUnsavedChanges) actions.onDiscardApiDraft()
-                            exit()
+                            if (state.settings.online.hasUnsavedChanges) actions.onDiscardOnlineDraft()
+                            if (state.settings.cloudAsr.hasUnsavedChanges) actions.onDiscardCloudAsrDraft()
                         }
-                    }) { Text("放弃修改") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingApiExit = null }) { Text("继续编辑") }
+                        if (hasDirtyKeys) actions.onDiscardPlatformKeys()
+                        exit()
+                    }
                 },
             )
         }
@@ -148,13 +291,22 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                 TopAppBar(
                                     modifier = Modifier.widthIn(max = if (wide) 1120.dp else 640.dp).fillMaxWidth(),
-                                    title = { Text(if (editing) "编辑场景" else if (state.destination == UiDestination.SETTINGS) settingsSection?.title ?: "设置" else state.destination.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = if (wide) 8.dp else 0.dp)) },
+                                    title = { Text(if (editing) "编辑场景"
+                                        else if (editingOnline && state.settings.listeningEditor != null) "编辑听写服务"
+                                        else if (editingApi && translationEditorOpen) "编辑翻译服务"
+                                        else if (state.destination == UiDestination.SETTINGS) settingsSection?.title ?: "设置" else state.destination.title,
+                                        style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = if (wide) 8.dp else 0.dp)) },
                                     navigationIcon = {
                                         if (editing) IconButton(onClick = actions.onCloseSceneEditor, enabled = !editorBusy) {
                                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回场景列表")
                                         }
                                         else if (state.destination == UiDestination.SETTINGS && settingsSection != null) IconButton(onClick = returnToSettings) {
-                                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回${settingsReturnDestination.title}")
+                                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = when {
+                                                editingKeys -> "返回${keysReturnSection?.title ?: keysReturnDestination.title}"
+                                                editingOnline && state.settings.listeningEditor != null -> "返回听写服务列表"
+                                                editingApi && translationEditorOpen -> "返回翻译服务列表"
+                                                else -> "返回${settingsReturnDestination.title}"
+                                            })
                                         }
                                         else if (isDetail) IconButton(onClick = returnFromDetail) {
                                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回${detailReturnDestination.title}")
@@ -190,16 +342,25 @@ fun SimulSubApp(state: SimulSubUiState, actions: SimulSubActions) {
                             }
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                 AnimatedContent(targetState = state.destination,
-                                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(100)) }, label = "主页面切换") { destination ->
+                                    transitionSpec = { routeTransition(forward = targetState != UiDestination.LIVE) }, label = "主页面切换") { destination ->
+                                    val page = rememberRouteSnapshot(destination == state.destination, state)
+                                    val settingsRoute = rememberRouteSnapshot(destination == state.destination, settingsSection to translationEditorOpen)
                                     // 页面退出动画组合后仍按稳定路由保留位置，业务状态继续仅由控制器持有。
                                     pageStateHolder.SaveableStateProvider(destination.name) {
                                         when (destination) {
-                                            UiDestination.LIVE -> PageScrollStateProvider { LiveScreen(state.live, routedActions, wide) }
-                                            UiDestination.SUBTITLE -> PageScrollStateProvider { SubtitleSettings(state.settings.subtitle, routedActions, wide, null, state.live.finalOnly) }
-                                            UiDestination.MODELS -> PageScrollStateProvider { ModelsScreen(state.models, routedActions, wide) }
-                                            UiDestination.SCENES -> ScenesScreen(state.scenes, routedActions, wide)
-                                            UiDestination.SETTINGS -> SettingsScreen(state.settings, state.live.running || state.live.busy, routedActions, wide,
-                                                selected = settingsSection, finalOnly = state.live.finalOnly, onSelect = { settingsSection = it })
+                                            UiDestination.LIVE -> RouteScrollStateProvider("main/live") { LiveScreen(page.live, routedActions, wide) }
+                                            UiDestination.SUBTITLE -> RouteScrollStateProvider("main/subtitle") { SubtitleSettings(page.settings.subtitle, routedActions, wide, null, page.live.finalOnly) }
+                                            UiDestination.MODELS -> RouteScrollStateProvider("main/models") { ModelsScreen(page.models, routedActions, wide) }
+                                            UiDestination.SCENES -> ScenesScreen(page.scenes, routedActions, wide)
+                                            UiDestination.SETTINGS -> SettingsScreen(page.settings, page.live.running || page.live.busy, routedActions, wide,
+                                                models = page.models,
+                                                selected = settingsRoute.first, finalOnly = page.live.finalOnly,
+                                                translationEditorOpen = settingsRoute.second,
+                                                onOpenTranslationEditor = { translationEditorOpen = true }, onSelect = { section ->
+                                                    if (section == SettingsSection.KEYS) routedActions.onOpenPlatformKeys()
+                                                    else if (section == SettingsSection.COSTS) routedActions.onOpenCosts()
+                                                    else requestExit { settingsSection = section; translationEditorOpen = false }
+                                                })
                                         }
                                     }
                                 }

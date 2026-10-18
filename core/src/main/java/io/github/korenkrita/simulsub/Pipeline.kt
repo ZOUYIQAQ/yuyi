@@ -927,6 +927,28 @@ class CaptionBoard(minFinals: Int = DEFAULT_SENTENCES, maxChars: Int = DEFAULT_C
         return true
     }
 
+    /** 迟到的云端原文只原位补全已有定稿，不重计句数、不改变译文或动画修订，也不复活旧句。 */
+    @Synchronized
+    fun updateOriginal(segmentId: Long, original: String): Boolean {
+        val index = finals.indexOfFirst { it.segmentId == segmentId }
+        if (index < 0 || finals[index].ja == original) return false
+        finals[index] = finals[index].copy(ja = original)
+        return true
+    }
+
+    /** 云端已确认短句的全文校正沿用原位置，空校正撤回该句；已裁剪的旧句不能复活。 */
+    @Synchronized
+    fun updateOnlineFinal(caption: Caption): Boolean {
+        if (!caption.isFinal) return false
+        val index = finals.indexOfFirst { it.segmentId == caption.segmentId }
+        if (index < 0) return false
+        val old = finals[index]
+        if (caption.revision < old.revision || (old.zh == caption.zh && old.ja == caption.ja)) return false
+        if (caption.zh.isEmpty()) finals.removeAt(index) else finals[index] = caption
+        trim()
+        return true
+    }
+
     /** 运行中原子更新限制；省略最多句数时保留当前上限，裁剪或显示内容变化时返回 true。 */
     @Synchronized
     fun setLimits(sentences: Int, chars: Int, max: Int = maxFinals): Boolean {

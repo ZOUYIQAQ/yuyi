@@ -21,7 +21,9 @@ import org.junit.runners.Parameterized
 class HomeNavigationDeviceTest(private val tablet: Boolean) {
     @get:Rule val compose = createComposeRule()
     private var state by mutableStateOf(SimulSubUiState())
-    private val savedApi = TranslationApiUiState(url = "https://example.com/v1", model = "已保存的测试模型")
+    private val savedApi = TranslationApiUiState(profileId = "test-translation",
+        profiles = listOf(UiOption("test-translation", "测试翻译服务")),
+        url = "https://example.com/v1", model = "已保存的测试模型")
     private val apiEvents = mutableListOf<String>()
     private val permissions = listOf(
         PermissionUiState("record", "测试录音权限", "录音授权说明", true),
@@ -38,7 +40,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 必需权限均已授予时，未授予的可选通知也不能让首页权限区重新出现。 */
     @Test fun grantedRequiredPermissionsHideHomePermissionSection() {
         show()
-        scrollToText("当前服务")
+        scrollToText("① 听写服务")
         compose.onNodeWithText("需要系统权限").assertDoesNotExist()
         permissions.forEach { compose.onNodeWithText(it.title).assertDoesNotExist() }
         compose.onNodeWithText("去允许").assertDoesNotExist()
@@ -62,7 +64,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
             state = state.copy(live = state.live.copy(running = true, showOriginal = true, showStats = true,
                 captions = listOf(CaptionUiState("仅内存", "内存原文不得展示", "内存译文不得展示", detail = "内存耗时不得展示"))))
         }
-        scrollToText("当前服务")
+        scrollToText("① 听写服务")
         listOf("本次字幕", "内存原文不得展示", "内存译文不得展示", "内存耗时不得展示").forEach {
             compose.onNodeWithText(it).assertDoesNotExist()
         }
@@ -95,7 +97,7 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
         navigation("设置").performClick()
         for ((label, destination, heading) in listOf(
             Triple("模型库", UiDestination.MODELS, "离线识别模型"),
-            Triple("场景与术语", UiDestination.SCENES, "内容场景"),
+            Triple("场景术语", UiDestination.SCENES, "内容场景"),
         )) {
             scrollToText(label)
             compose.onNodeWithText(label).performClick()
@@ -113,10 +115,24 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 首页快捷入口保留来源信息，详情返回不能误跳到设置首页。 */
     @Test fun homeShortcutsReturnToLiveWithTopBack() {
         show()
-        for ((label, destination) in listOf("模型库" to UiDestination.MODELS, "场景与术语" to UiDestination.SCENES)) {
-            scrollToText(label)
-            compose.onNodeWithText(label).performClick()
+        for ((label, destination) in listOf("管理听写" to UiDestination.MODELS, "场景与术语" to UiDestination.SCENES)) {
+            if (destination == UiDestination.MODELS) {
+                scrollToText(label)
+                compose.onNodeWithText(label).performClick()
+                scrollToText("本地测试模型")
+                compose.onNode(hasText("编辑") and hasAnyAncestor(hasTestTag("service-profile-local:test-model")))
+                    .performScrollTo().performClick()
+            } else {
+                scrollToText(label)
+                compose.onNodeWithText(label).performClick()
+            }
             compose.runOnIdle { assertEquals(destination, state.destination) }
+            if (destination == UiDestination.MODELS) {
+                compose.onNodeWithContentDescription("返回设置").assertIsDisplayed().performClick()
+                compose.runOnIdle { assertEquals(UiDestination.SETTINGS, state.destination) }
+                scrollToText("本地测试模型")
+                compose.onNodeWithText("本地测试模型").assertIsDisplayed()
+            }
             compose.onNodeWithContentDescription("返回同传").assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(UiDestination.LIVE, state.destination) }
             scrollToText("开始同传")
@@ -127,15 +143,15 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 首页翻译快捷入口返回同传；普通设置内的接口详情仍返回设置，不能沿用上次来源。 */
     @Test fun translationSettingsTopBackReturnsToItsActualSource() {
         show()
-        scrollToText("翻译设置")
-        compose.onNodeWithText("翻译设置").performClick()
+        scrollToText("管理翻译")
+        compose.onNodeWithText("管理翻译").performClick()
         compose.runOnIdle { assertEquals(UiDestination.SETTINGS, state.destination) }
         compose.onNodeWithContentDescription("返回同传").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(UiDestination.LIVE, state.destination) }
         navigation("同传").assertIsSelected()
         navigation("设置").performClick()
-        scrollToText("翻译 API")
-        compose.onNodeWithText("翻译 API").performClick()
+        scrollToText("翻译服务")
+        compose.onNodeWithText("翻译服务").performClick()
         compose.onNodeWithContentDescription("返回设置").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(UiDestination.SETTINGS, state.destination) }
         scrollToText("个性化")
@@ -145,13 +161,16 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 首页来源的接口草稿取消返回时保持原文，确认放弃后先恢复配置，再准确返回同传。 */
     @Test fun dirtyTranslationShortcutKeepsDraftUntilDiscardThenReturnsLive() {
         show()
-        scrollToText("翻译设置")
-        compose.onNodeWithText("翻译设置").performClick()
+        scrollToText("管理翻译")
+        compose.onNodeWithText("管理翻译").performClick()
+        scrollToText("测试翻译服务")
+        compose.onNode(hasText("编辑") and hasAnyAncestor(hasTestTag("service-profile-test-translation")))
+            .performScrollTo().performClick()
         compose.runOnIdle { apiEvents.clear() }
         scrollToText("模型 ID")
         compose.onNode(hasSetTextAction() and hasText("模型 ID", substring = true)).performTextReplacement("尚未保存的模型")
         val draft = compose.runOnIdle { state.settings.api }
-        compose.onNodeWithContentDescription("返回同传").performClick()
+        compose.onNodeWithContentDescription("返回翻译服务列表").performClick()
         compose.onNodeWithText("配置尚未保存").assertIsDisplayed()
         compose.onNodeWithText("继续编辑").performClick()
         compose.runOnIdle {
@@ -160,10 +179,19 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
             assertEquals(true, state.settings.api.hasUnsavedChanges)
             assertEquals(emptyList<String>(), apiEvents)
         }
-        compose.onNodeWithContentDescription("返回同传").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("返回翻译服务列表").assertIsDisplayed().performClick()
         compose.onNodeWithText("放弃修改").performClick()
         compose.runOnIdle {
-            assertEquals(listOf("放弃", "导航:LIVE"), apiEvents)
+            assertEquals(listOf("放弃", "关闭编辑"), apiEvents)
+            assertEquals(savedApi, state.settings.api)
+            assertEquals(null, state.settings.translationEditorId)
+            assertEquals(UiDestination.SETTINGS, state.destination)
+        }
+        scrollToText("测试翻译服务")
+        compose.onNodeWithText("测试翻译服务").assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回同传").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf("放弃", "关闭编辑", "导航:LIVE"), apiEvents)
             assertEquals(savedApi, state.settings.api)
             assertEquals(UiDestination.LIVE, state.destination)
         }
@@ -190,12 +218,25 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
     /** 只更新夹具状态，实际渲染根组件并沿用生产导航和权限入口。 */
     private fun show(value: List<PermissionUiState> = permissions) {
         apiEvents.clear()
-        state = SimulSubUiState(live = LiveUiState(canStart = true, permissions = value),
-            settings = SettingsUiState(permissions = value, api = savedApi))
+        state = SimulSubUiState(live = LiveUiState(canStart = true, permissions = value,
+            listeningServiceId = "local:test-model", listeningServices = listOf(UiOption("local:test-model", "本地测试模型"),
+                UiOption("catalog", "下载更多本地模型")),
+            translationServiceId = "test-translation", translationServices = savedApi.profiles),
+            settings = SettingsUiState(permissions = value, api = savedApi,
+                listeningProfiles = listOf(ServiceProfileUiState("local:test-model", "本地测试模型", kind = "local", selected = true)),
+                translationServiceId = "test-translation", translationProfiles = listOf(
+                    ServiceProfileUiState("test-translation", "测试翻译服务", "已保存的测试模型", selected = true))))
         val actions = SimulSubActions(
             onNavigate = { apiEvents += "导航:${it.name}"; state = state.copy(destination = it) },
             onApiDraftChange = { draft -> state = state.copy(settings = state.settings.copy(api = draft.copy(hasUnsavedChanges = true))) },
             onDiscardApiDraft = { apiEvents += "放弃"; state = state.copy(settings = state.settings.copy(api = savedApi)) },
+            onEditTranslationService = { id ->
+                state = state.copy(settings = state.settings.copy(translationEditorId = id, api = savedApi.copy(profileId = id)))
+            },
+            onCloseTranslationServiceEditor = {
+                apiEvents += "关闭编辑"
+                state = state.copy(settings = state.settings.copy(translationEditorId = null, api = savedApi))
+            },
             onPermission = { id ->
                 val granted = state.live.permissions.map { if (it.id == id) it.copy(granted = true) else it }
                 state = state.copy(live = state.live.copy(permissions = granted), settings = state.settings.copy(permissions = granted))
@@ -213,6 +254,8 @@ class HomeNavigationDeviceTest(private val tablet: Boolean) {
 
     /** 在单列或双列懒列表中查找真实入口，最终仍要求目标实际可见。 */
     private fun scrollToText(label: String) {
+        compose.waitForIdle()
+        try { compose.onNodeWithText(label).assertIsDisplayed(); return } catch (_: AssertionError) { }
         var failure: AssertionError? = null
         val lists = compose.onAllNodes(hasScrollToIndexAction())
         for (index in lists.fetchSemanticsNodes().indices) {

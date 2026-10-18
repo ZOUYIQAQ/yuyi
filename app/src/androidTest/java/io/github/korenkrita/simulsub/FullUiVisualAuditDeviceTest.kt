@@ -46,7 +46,7 @@ class FullUiVisualAuditDeviceTest {
     private lateinit var focusManager: FocusManager
     private var keyboard: SoftwareKeyboardController? = null
 
-    /** 三步都通过真实页脚跳过；正文滚到底部后，页脚仍必须可见、可操作。 */
+    /** 本地四步都通过真实页脚跳过；正文滚动后，页脚仍必须可见、可操作。 */
     @Test fun onboardingThreeStepsCanBeSkippedAtDeviceSize() {
         show(sampleState().copy(onboarding = OnboardingUiState(),
             live = sampleLive().copy(permissions = permissions(false), canStart = false,
@@ -60,7 +60,11 @@ class FullUiVisualAuditDeviceTest {
         screenshot("引导_01_权限_底部与跳过")
         compose.onNodeWithText("跳过这步").performClick()
 
-        compose.onNodeWithText("配置翻译 API").assertIsDisplayed()
+        compose.onNodeWithText("选择听写与翻译服务").assertIsDisplayed()
+        reveal(hasTestTag("listening-service-picker"))
+        screenshot("引导_02_服务选择")
+        compose.onNodeWithText("跳过这步").performClick()
+        compose.onNodeWithText("第二步 · 配置文字翻译").assertIsDisplayed()
         screenshot("引导_02_API_顶部")
         reveal(button("保存翻译配置")).assertIsEnabled()
         reveal(button("测试连接")).assertIsNotEnabled()
@@ -90,14 +94,17 @@ class FullUiVisualAuditDeviceTest {
         compose.runOnIdle { assertEquals(Lang.EN.code, state.live.sourceId) }
         reveal(button("仅显示定稿")).performClick()
         compose.runOnIdle { assertTrue("开关必须实际回填", state.live.finalOnly) }
-        reveal(button("翻译设置")).assertIsEnabled()
+        reveal(button("管理翻译")).assertIsEnabled()
         val modelLayouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
         compose.onNodeWithText(ModelCatalog.entries.first().name, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(modelLayouts) }
         assertEquals("识别模型名应获得实际排版", 1, modelLayouts.size)
-        assertEquals("服务入口不能将模型名称挤成碎片", 1, modelLayouts.single().lineCount)
+        val modelLayout = modelLayouts.single()
+        assertFalse("服务名称不能超出最大行数", modelLayout.multiParagraph.didExceedMaxLines)
+        assertTrue("服务名称应保留完整段落高度", modelLayout.multiParagraph.height <= modelLayout.size.height + 1f)
+        repeat(modelLayout.lineCount) { assertFalse("服务名称不能省略", modelLayout.isLineEllipsized(it)) }
         screenshot("同传_03_底部服务与开关")
-        compose.onNodeWithText("开始同传").assertIsDisplayed().performClick()
+        reveal(button("开始同传")).assertIsDisplayed().performClick()
         reveal(hasText("同传进行中"))
         compose.onNodeWithText("停止同传").assertIsDisplayed().assertIsEnabled()
         screenshot("同传_04_运行中")
@@ -108,7 +115,7 @@ class FullUiVisualAuditDeviceTest {
             statusTitle = "开启权限后即可开始", permissions = permissions(true).map {
                 if (it.id == "overlay") it.copy(granted = false) else it
             })))
-        compose.onNodeWithText("开启显示悬浮字幕").assertIsDisplayed().assertIsEnabled()
+        reveal(button("开启显示悬浮字幕")).assertIsDisplayed().assertIsEnabled()
         screenshot("同传_05_缺少悬浮字幕权限")
         reveal(button("查看全部权限"))
         screenshot("同传_06_权限说明底部")
@@ -527,6 +534,8 @@ class FullUiVisualAuditDeviceTest {
 
     /** 原声与字幕语言直接取核心真实枚举，避免把字符串误当成后台语言对象。 */
     private fun sampleLive() = LiveUiState(canStart = true, statusTitle = "准备就绪",
+        listeningServiceId = "local:${ModelCatalog.entries.first().id}",
+        listeningServices = listOf(UiOption("local:${ModelCatalog.entries.first().id}", ModelCatalog.entries.first().name)),
         statusDetail = "ReazonSpeech · 音频仅在设备上识别", modelLabel = ModelCatalog.entries.first().name,
         translationLabel = "默认 · ${TranslationPresets.entries.first().model}",
         sourceId = Lang.JA.code, targetId = Target.ZH.stored,

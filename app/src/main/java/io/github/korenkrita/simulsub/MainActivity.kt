@@ -116,11 +116,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 模型和翻译配置完整后申请本次会话的播放捕获授权。 */
+    /** 按所选路径核对配置，在线听译不要求下载或启用本地模型。 */
     private fun beginCapture() {
         if (CaptionService.running) return
-        if (ModelRepository.get(this).selectedPaths() == null) { controller.message("请先下载并启用识别模型", true); return }
-        if (!Prefs(this).byokReady) { controller.message("请先保存翻译服务地址和模型 ID", true); return }
+        val prefs = Prefs(this)
+        if (prefs.listeningMode == ListeningMode.LOCAL) {
+            if (ModelRepository.get(this).selectedPaths() == null) { controller.message("请先下载并启用识别模型", true); return }
+            if (!prefs.byokReady) { controller.message("请先保存翻译服务地址和模型 ID", true); return }
+        } else if (prefs.listeningMode == ListeningMode.CLOUD_ASR) {
+            if (!prefs.cloudAsrReady) { controller.message("请先保存有效的千问 3.1 Streaming 在线听写配置与 API 密钥", true); return }
+            if (!prefs.byokReady) { controller.message("在线听写已配置，请再保存文字翻译 API（推荐 DeepSeek）", true); return }
+        } else if (!prefs.onlineReady) {
+            controller.message("请先保存有效的千问听译配置与 API 密钥", true); return
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             continueAfterAudioPermission = true
             requestPermission("audio")

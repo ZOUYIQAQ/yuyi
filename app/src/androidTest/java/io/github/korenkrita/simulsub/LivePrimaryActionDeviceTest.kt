@@ -163,7 +163,8 @@ class LivePrimaryActionDeviceTest {
     @Test fun narrowLargeTextWindowKeepsControlsAndServicesReachable() {
         val model = "ReazonSpeech 完整模型名称与识别服务说明"
         show(width = 280.dp, height = 640.dp, fontScale = 2f,
-            state = { readyState().copy(modelLabel = model) })
+            state = { readyState().copy(modelLabel = model, listeningServiceId = "local:test-model",
+                listeningServices = listOf(UiOption("local:test-model", model))) })
         // 大字号时优先控制舱，开屏不必先滚过两行语言配置。
         compose.onNodeWithTag("live-primary-action").assertIsDisplayed()
         val list = compose.onNode(hasScrollToIndexAction())
@@ -177,8 +178,8 @@ class LivePrimaryActionDeviceTest {
         compose.onNodeWithText("自定义字幕语言").assertIsDisplayed()
         list.performScrollToNode(hasText(model))
         compose.onNodeWithText(model).assertIsDisplayed()
-        list.performScrollToNode(hasText("翻译设置"))
-        compose.onNodeWithText("翻译设置").assertIsDisplayed()
+        list.performScrollToNode(hasText("管理翻译"))
+        compose.onNodeWithText("管理翻译").assertIsDisplayed()
     }
 
     /** 将真实组件放入有界测试窗口，压低像素密度以在同一设备覆盖手机、低横屏与平板。 */

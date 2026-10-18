@@ -48,6 +48,10 @@ class CaptionService : Service() {
     private var projection: MediaProjection? = null
     /** 启动尚未交给会话线程时由服务保管，启动失败在销毁时释放。 */
     private var pendingModelLease: ModelSessionLease? = null
+    /** 听译路径固定于启动时，在线会话不持有或加载本地模型。 */
+    private var sessionMode = ListeningMode.LOCAL
+    private var onlineSession: OnlinePlaybackSession? = null
+    private var cloudAsrSession: CloudAsrPlaybackSession? = null
 
     /**
      * One "session" thread owns every native object (VAD, ASR, MT, AudioRecord) from creation to release:
@@ -115,6 +119,8 @@ class CaptionService : Service() {
 
     private var overlay: CaptionOverlayView? = null
     private val prefs by lazy { Prefs(this) }
+    private val costs by lazy { UsageCostRepository.get(this) }
+    private var costSessionId: String? = null
     @Volatile private var status = "正在准备…"
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -125,9 +131,21 @@ class CaptionService : Service() {
 
         startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         // 同一次会话固定使用已完成校验的模型，后台切换不能释放正在推理的对象。
-        val lease = ModelRepository.get(this).acquireSelectedForSession()
+        sessionMode = prefs.listeningMode
+        val onlineConfig = prefs.onlineConfig()
+        if (sessionMode == ListeningMode.ONLINE && !prefs.onlineReady) {
+            sessionState.value = SessionSnapshot(false, "请先保存有效的在线听译配置")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (sessionMode == ListeningMode.CLOUD_ASR && (!prefs.cloudAsrReady || !prefs.byokReady)) {
+            sessionState.value = SessionSnapshot(false, "请先保存在线听写与文字翻译配置")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val lease = if (sessionMode == ListeningMode.LOCAL) ModelRepository.get(this).acquireSelectedForSession() else null
         pendingModelLease = lease
-        if (lease == null) {
+        if (sessionMode == ListeningMode.LOCAL && lease == null) {
             sessionState.value = SessionSnapshot(false, "请先在模型库下载并启用模型")
             stopSelf()
             return START_NOT_STICKY
@@ -143,14 +161,125 @@ class CaptionService : Service() {
             override fun onStop() { stopSelf() } // user revoked sharing
         }, main)
         projection = p
+        val ledgerSession = costs.beginSession(when (sessionMode) {
+            ListeningMode.LOCAL -> "本地听写与文字翻译"
+            ListeningMode.CLOUD_ASR -> "在线听写与文字翻译"
+            ListeningMode.ONLINE -> "千问语音直译"
+        })
+        costSessionId = ledgerSession
         running = true
-        sessionState.value = SessionSnapshot(true, "正在加载识别模型…")
+        sessionState.value = SessionSnapshot(true, if (sessionMode != ListeningMode.LOCAL) "正在连接在线服务…" else "正在加载识别模型…")
         showOverlay()
         // fixed at the start: switching it while models load affects the next session, as the switch says
         val keepLogs = prefs.keepLogs
-        Thread({ session(p, keepLogs, lease) }, "jpsub-session").start()
+        Thread({
+            try {
+                when (sessionMode) {
+                    ListeningMode.ONLINE -> runOnlineSession(p, keepLogs, onlineConfig)
+                    ListeningMode.CLOUD_ASR -> runCloudAsrSession(p, keepLogs)
+                    ListeningMode.LOCAL -> session(p, keepLogs, requireNotNull(lease))
+                }
+            } finally { costs.endSession(ledgerSession) }
+        }, "jpsub-session").start()
         pendingModelLease = null
         return START_NOT_STICKY
+    }
+
+    /** 在线直接接收听译字幕，仍使用原字幕板、样式、日志开关和防抖窗口。 */
+    private fun runOnlineSession(p: MediaProjection, keepLogs: Boolean,
+        config: io.github.korenkrita.simulsub.online.LiveTranslateConfig) {
+        var log: SessionLog? = null
+        var runner: OnlinePlaybackSession? = null
+        try {
+            if (stopping) return
+            if (keepLogs) {
+                val root = requireNotNull(getExternalFilesDir(null))
+                log = SessionLog(SessionLog.dir(root), onFail = { logWarned = true; refresh() })
+                log.write(mapOf("ev" to "session_start", "app" to BuildConfig.VERSION_NAME,
+                    "mt_engine" to "qwen_livetranslate", "source_lang" to (config.sourceLang ?: "auto"),
+                    "target_lang" to config.targetLang))
+            }
+            val activeLog = log
+            runner = OnlinePlaybackSession(config, p, { caption ->
+                if (!stopping) onCaption(caption, activeLog)
+            }, { next -> if (!stopping) setStatus(next) }, costs, costSessionId)
+            synchronized(cancelLock) {
+                if (stopping) { runner.stop(); return }
+                onlineSession = runner
+            }
+            runner.run()
+        } catch (_: Exception) {
+            if (!stopping) setStatus("⚠ 在线听译启动失败，请检查配置后重试")
+        } finally {
+            runner?.stop()
+            synchronized(cancelLock) { onlineSession = null }
+            log?.let { it.write(mapOf("ev" to "session_end")); it.close() }
+            if (!stopping) main.post { stopSelf() }
+        }
+    }
+
+    /** 第三条路径复用文字翻译配置与场景，语音识别交给在线听写，不持有本地模型。 */
+    private fun runCloudAsrSession(p: MediaProjection, keepLogs: Boolean) {
+        var runner: CloudAsrPlaybackSession? = null
+        var log: SessionLog? = null
+        try {
+            if (stopping) return
+            val service = prefs.byokService() ?: return
+            val scene = prefs.scene
+            val source = prefs.sourceLang
+            val target = prefs.targetLang
+            val config = prefs.cloudAsrConfig().copy(
+                context = scene.background.orEmpty().take(400),
+                vocabulary = scene.terms.take(200).associate { it.first to 3 },
+            )
+            val system = byokSystem(scene, source, target)
+            var storedVariant = prefs.byokVariant(service.url, service.model)
+            if (storedVariant == null) {
+                val probe = ByokTranslator(service, system, null, maxTokens = mtMaxTokens(target),
+                    onUsage = { costs.recordTranslation(costSessionId, CostCategory.TEST, service, it) })
+                synchronized(cancelLock) { if (stopping) { probe.cancel(); return }; probing = probe }
+                try {
+                    setStatus("正在验证文字翻译配置…")
+                    val steps = mutableListOf<ByokTranslator.Step>()
+                    val found = probe.probe(steps)
+                    if (stopping) return
+                    storedVariant = found?.name ?: if (probe.exhausted(steps)) ByokTranslator.NONE_WORKED else null
+                    if (storedVariant == null) {
+                        setStatus("⚠ 文字翻译服务不可用，请在设置中测试后重试")
+                        return
+                    }
+                    prefs.setByokVariant(service.url, service.model, storedVariant)
+                } finally {
+                    synchronized(cancelLock) { if (probing === probe) probing = null }
+                    probe.cancel()
+                }
+            }
+            if (stopping) return
+            if (keepLogs) {
+                log = SessionLog(SessionLog.dir(requireNotNull(getExternalFilesDir(null))),
+                    onFail = { logWarned = true; refresh() })
+                log.write(mapOf("ev" to "session_start", "app" to BuildConfig.VERSION_NAME,
+                    "asr_engine" to config.model, "mt_engine" to service.model,
+                    "listening_mode" to "cloud_asr", "source_lang" to (source?.code ?: "auto"),
+                    "target_lang" to target.stored))
+            }
+            val activeLog = log
+            runner = CloudAsrPlaybackSession(config, p, service, scene, source, target,
+                ByokTranslator.variant(storedVariant), if (prefs.contextOn) prefs.contextSentences else 0,
+                { if (!stopping) onCaption(it, activeLog) }, { if (!stopping) setStatus(it) }, costs, costSessionId)
+            synchronized(cancelLock) {
+                if (stopping) { runner.stop(); return }
+                cloudAsrSession = runner
+            }
+            runner.run()
+        } catch (_: Exception) {
+            if (!stopping) setStatus("⚠ 在线听写启动失败，请检查听写和翻译配置后重试")
+        } finally {
+            runner?.stop()
+            synchronized(cancelLock) { cloudAsrSession = null }
+            log?.let { it.write(mapOf("ev" to "session_end")); it.close() }
+            if (!stopping) main.post { stopSelf() }
+        }
     }
 
     /** 持有模型租约到原生对象完全释放，停止页面状态不能提前允许删除。 */
@@ -176,6 +305,7 @@ class CaptionService : Service() {
             // 模型由用户安装后下载，整个会话从同一个完整目录读取。
             val model = lease.paths
             vad = SileroProb(model.directory)
+            // 多语识别保持自动检测，原声选项继续用于翻译上下文，运行中可从下一句调整。
             asr = SherpaAsr(model, ASR_THREADS)
             val t1 = monoMs()
             // warm-up so the first real sentence does not pay page-in / first-run costs (nothing is sent anywhere)
@@ -209,7 +339,8 @@ class CaptionService : Service() {
             fun runProbe(t: ByokService, token: Long, system: String, target: Target): Boolean {
                 val asking = "第一次用这个模型，正在试怎样关闭思考…"
                 val before = status
-                val probe = ByokTranslator(t, system, null, maxTokens = mtMaxTokens(target))
+                val probe = ByokTranslator(t, system, null, maxTokens = mtMaxTokens(target),
+                    onUsage = { costs.recordTranslation(costSessionId, CostCategory.TEST, t, it) })
                 synchronized(cancelLock) {
                     // registered under the lock a newer save or the session end cancels under: neither slips in between
                     if (stopping || !order.current(token)) return false
@@ -260,7 +391,8 @@ class CaptionService : Service() {
                 }
                 // the log names the service really used (never the key): the one saved last may still be in its probe
                 fun use(k: ByokService, variant: ByokTranslator.ThinkingOff?) = Triple(
-                    ByokTranslator(k, system, variant, maxTokens = mtMaxTokens(s.target)), k,
+                    ByokTranslator(k, system, variant, maxTokens = mtMaxTokens(s.target),
+                        onUsage = { costs.recordTranslation(costSessionId, CostCategory.TRANSLATION, k, it) }), k,
                     mapOf("variant" to variant?.name, "system" to system, "mt_url" to k.url, "mt_model" to k.model) + k.log())
                 var (ready, variant) = known(t)
                 if (!ready) {
@@ -300,7 +432,8 @@ class CaptionService : Service() {
                 // one Jev client for both features; no key = both paused until one is entered
                 // pauses count deep sleep: one kept across sessions ends at the time the service named
                 val judge = s.jevKey?.let {
-                    Jev(s.provider, it, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime)
+                    Jev(s.provider, it, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime,
+                        onUsage = { usage -> costs.recordObserved(costSessionId, CostCategory.JEV, s.provider.url, s.provider.model, usage) })
                 }
                 if (wantJev && judge == null) notices += "⚠ 在线 Decisions 模型辅助已暂停：还没填 ${s.provider.label} 的 key"
                 return Built(Setup(mt, s.scene, s.source, s.target, judge, s.dedupe, s.contextN, version),
@@ -541,7 +674,7 @@ class CaptionService : Service() {
             "final" to c.isFinal, "ja" to c.ja,
             "zh" to c.zh, "audio_ms" to t.audioMs, "wait_ms" to t.segmentWaitMs, "asr_q_ms" to t.asrQueueMs, "asr_ms" to t.asrMs,
             "mt_q_ms" to t.mtQueueMs, "mt_ms" to t.mtMs, "check_ms" to t.checkMs, "done_ms" to t.mtDoneMs, "hal" to !c.timeEstimated))
-        if (board.accept(c)) refresh()
+        if (board.accept(c) || (sessionMode != ListeningMode.LOCAL && board.updateOnlineFinal(c))) refresh()
     }
 
     /** 更新服务提示并同步到应用界面和悬浮字幕。 */
@@ -567,7 +700,7 @@ class CaptionService : Service() {
                 append("${if (isNotEmpty()) "  ·  " else ""}$it")
             }
             // an operational status (stopped, error) must never be pushed out of the capped area by timings
-            if (prefs.showStats && status.isEmpty()) shown.lastOrNull()?.let { c ->
+            if (prefs.showStats && sessionMode == ListeningMode.LOCAL && status.isEmpty()) shown.lastOrNull()?.let { c ->
                 val t = c.timing
                 if (isNotEmpty()) append("  ·  ")
                 append("识别 ${t.asrMs}ms · 翻译 ${t.mtMs}ms")
@@ -758,6 +891,7 @@ class CaptionService : Service() {
         // Never block the main thread and never free native objects here: the session thread
         // notices `stopping`, finishes, waits for the pipeline workers and releases everything itself.
         stopping = true
+        costSessionId?.let { costs.endSession(it) }
         main.removeCallbacks(pauseOver)
         activeJudge = null // stops watching its service
         runCatching { unregisterReceiver(screenOn) }
@@ -768,7 +902,7 @@ class CaptionService : Service() {
         pendingModelLease = null
         // Only flags and request cancels (the session thread detaches the pipeline under the same lock before
         // freeing). The session thread notices `stopping` within ~10 ms (non-blocking reads).
-        synchronized(cancelLock) { probing?.cancel(); pipeline?.stop() }
+        synchronized(cancelLock) { probing?.cancel(); pipeline?.stop(); onlineSession?.stop(); cloudAsrSession?.stop() }
         projection?.stop()
         projection = null
         prefListener?.let { prefs.unlisten(it) }; prefListener = null
@@ -812,7 +946,7 @@ class CaptionService : Service() {
         val byok = prefs.byokForSession(fallback)
         val provider = prefs.jevProvider
         /** null: no Jev wanted, or its key is missing; "" for a provider without a key */
-        val jevKey = if (!wantJev) null else if (provider.needsKey) prefs.jevKey(provider) else ""
+        val jevKey = if (!wantJev) null else if (provider.needsKey) prefs.jevKey(provider)?.takeIf { it.isNotEmpty() } else ""
 
         fun log() = mapOf("scene" to scene.label, "source_lang" to (source?.code ?: "auto"), "target_lang" to target.stored,
             "jev" to jevKey?.let { provider.name }, "jev_model" to jevKey?.let { provider.model },

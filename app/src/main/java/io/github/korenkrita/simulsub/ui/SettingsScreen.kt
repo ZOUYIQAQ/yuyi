@@ -6,7 +6,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -18,44 +17,68 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.*
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
+import io.github.korenkrita.simulsub.ListeningMode
 
 /** 设置入口与详情使用独立页面，返回路径由顶栏和系统返回统一处理。 */
 internal enum class SettingsSection(val title: String, val detail: String) {
-    API("翻译 API", "服务预设、地址与连接测试"),
+    LISTENING("听写服务", "本地识别模型与云端听写、听译接口"),
+    API("翻译服务", "文字翻译平台、模型与接口连接"),
+    KEYS("平台密钥", "保存密钥与设置默认项"),
     SUBTITLE("字幕样式", "显示句数、文字和浮窗尺寸"),
     APPEARANCE("外观", "主题模式、配色与动态取色"),
     PERMISSIONS("系统权限", "录音、悬浮字幕与通知授权"),
     ADVANCED("高级设置", "上下文与在线辅助"),
     RECORDS("使用记录", "保存、分享与清理文字记录"),
+    COSTS("用量与费用", "今日与会话估算、分类成本和未计价服务"),
     UPDATES("应用更新", "启动检测、版本提醒与手动检查"),
     ABOUT("关于", "Fork来源、原作者与许可")
+}
+
+/** 设置路由只包含页面与稳定服务标识；列表、各编辑器及密钥页不共享滚动位置。 */
+private data class SettingsRoute(val section: SettingsSection?, val editorId: String? = null) {
+    val scrollKey: String get() = "settings/${section?.name ?: "home"}/${editorId?.let { "editor/$it" } ?: "list"}"
+    val depth: Int get() = if (section == null) 0 else if (editorId == null) 1 else 2
 }
 
 /** 设置首页以官方列表项和填充卡片分组，详情不再堆叠横向标签。 */
 @Composable
 internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean,
-    selected: SettingsSection? = null, finalOnly: Boolean = false, onSelect: (SettingsSection) -> Unit = {}) {
-    val pageStateHolder = rememberSaveableStateHolder()
+    selected: SettingsSection? = null, finalOnly: Boolean = false, onSelect: (SettingsSection) -> Unit = {},
+    translationEditorOpen: Boolean = false, onOpenTranslationEditor: () -> Unit = {},
+    models: ModelsUiState = ModelsUiState()) {
+    val fallbackScrollHolder = rememberSaveableStateHolder()
+    val scrollHolder = LocalRouteScrollStateHolder.current ?: fallbackScrollHolder
+    val route = SettingsRoute(selected, when (selected) {
+        SettingsSection.LISTENING -> state.listeningEditor?.id
+        SettingsSection.API -> if (translationEditorOpen) state.translationEditorId ?: state.api.profileId else null
+        else -> null
+    })
     androidx.compose.animation.AnimatedContent(
-        targetState = selected,
-        transitionSpec = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) togetherWith
-            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(100)) },
+        targetState = route,
+        transitionSpec = { routeTransition(forward = targetState.depth >= initialState.depth) },
         label = "设置页面切换",
     ) { page ->
-        pageStateHolder.SaveableStateProvider(page?.name ?: "settings-home") {
-            PageScrollStateProvider {
-                when (page) {
-                    null -> SettingsHome(wide, actions, onSelect)
-                    SettingsSection.API -> TranslationApiSettings(state.api, sessionBusy, actions, wide, null)
-                    SettingsSection.SUBTITLE -> SubtitleSettings(state.subtitle, actions, wide, null, finalOnly)
-                    SettingsSection.APPEARANCE -> AppearanceSettings(state, actions, wide, null)
-                    SettingsSection.PERMISSIONS -> PermissionsSettings(state.permissions, actions, wide)
-                    SettingsSection.ADVANCED -> AdvancedSettings(state.advanced, sessionBusy, actions, wide, null)
-                    SettingsSection.RECORDS -> UsageRecords(state, actions, wide, null)
-                    SettingsSection.UPDATES -> UpdateSettings(state, actions, wide)
-                    SettingsSection.ABOUT -> AboutSettings(state, actions, wide, null)
+        val rendered = rememberRouteSnapshot(page == route, state)
+        val renderedModels = rememberRouteSnapshot(page == route, models)
+        CompositionLocalProvider(LocalRouteScrollStateHolder provides scrollHolder) {
+            RouteScrollStateProvider(page.scrollKey) {
+                when (page.section) {
+                    null -> SettingsHome(rendered.listeningMode, wide, actions, onSelect)
+                    SettingsSection.LISTENING -> ListeningSettings(rendered, sessionBusy, actions, wide, renderedModels)
+                    SettingsSection.API -> if (page.editorId != null) TranslationApiSettings(rendered.api, sessionBusy, actions, wide, null,
+                        mode = rendered.listeningMode, platformKeys = rendered.platformKeys, showProfiles = false)
+                    else TranslationServiceManagement(rendered, sessionBusy, actions, wide, onOpenTranslationEditor)
+                    SettingsSection.KEYS -> PlatformKeysSettings(rendered.platformKeys,
+                        sessionBusy || rendered.api.testing || rendered.api.saving || rendered.online.testing || rendered.cloudAsr.testing, actions, wide)
+                    SettingsSection.SUBTITLE -> SubtitleSettings(rendered.subtitle, actions, wide, null, finalOnly)
+                    SettingsSection.APPEARANCE -> AppearanceSettings(rendered, actions, wide, null)
+                    SettingsSection.PERMISSIONS -> PermissionsSettings(rendered.permissions, actions, wide)
+                    SettingsSection.ADVANCED -> AdvancedSettings(rendered.advanced, sessionBusy, actions, wide, null,
+                        mode = rendered.listeningMode, platformKeys = rendered.platformKeys)
+                    SettingsSection.RECORDS -> UsageRecords(rendered, actions, wide, null)
+                    SettingsSection.COSTS -> UsageCostSettings(rendered.costs, wide)
+                    SettingsSection.UPDATES -> UpdateSettings(rendered, actions, wide)
+                    SettingsSection.ABOUT -> AboutSettings(rendered, actions, wide, null)
                 }
             }
         }
@@ -64,25 +87,31 @@ internal fun SettingsScreen(state: SettingsUiState, sessionBusy: Boolean, action
 
 /** 设置入口保留简短说明，整行触控和官方水波纹可直接进入对应详情。 */
 @Composable
-private fun SettingsHome(wide: Boolean, actions: SimulSubActions, onSelect: (SettingsSection) -> Unit) {
+private fun SettingsHome(mode: ListeningMode, wide: Boolean, actions: SimulSubActions, onSelect: (SettingsSection) -> Unit) {
     PageColumns(wide, first = {
-        item { SectionHeading("字幕与翻译") }
-        item {
+        item("settings-services-heading") { SectionHeading("听写与翻译") }
+        item("settings-services") {
             Box(Modifier.testTag("settings-subtitle-translation-group")) {
                 SettingsCard(padding = 4.dp, spacing = 0.dp) {
+                    SettingsEntry(SettingsSection.LISTENING, if (mode != ListeningMode.LOCAL) Icons.Outlined.Cloud else Icons.Outlined.RecordVoiceOver, onSelect)
                     SettingsEntry(SettingsSection.API, Icons.Outlined.Translate, onSelect)
-                    SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
-                    SettingsLink("模型库", "下载、启用与删除离线识别模型", Icons.AutoMirrored.Outlined.LibraryBooks) { actions.onNavigate(UiDestination.MODELS) }
-                    SettingsLink("场景与术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
+                    SettingsEntry(SettingsSection.KEYS, Icons.Outlined.Key, onSelect)
+                    SettingsLink("场景术语", "内容背景和专有名词译法", Icons.Outlined.Tune) { actions.onNavigate(UiDestination.SCENES) }
                     SettingsEntry(SettingsSection.ADVANCED, Icons.Outlined.AutoAwesome, onSelect)
+                    SettingsEntry(SettingsSection.COSTS, Icons.Outlined.Payments, onSelect)
                 }
             }
         }
-        item { SectionHeading("个性化") }
-        item { SettingsCard(padding = 4.dp, spacing = 0.dp) { SettingsEntry(SettingsSection.APPEARANCE, Icons.Outlined.Palette, onSelect) } }
+        item("settings-personalization-heading") { SectionHeading("个性化") }
+        item("settings-personalization") {
+            SettingsCard(padding = 4.dp, spacing = 0.dp) {
+                SettingsEntry(SettingsSection.SUBTITLE, Icons.Outlined.Subtitles, onSelect)
+                SettingsEntry(SettingsSection.APPEARANCE, Icons.Outlined.Palette, onSelect)
+            }
+        }
     }, second = {
-        item { SectionHeading("应用") }
-        item {
+        item("settings-application-heading") { SectionHeading("应用") }
+        item("settings-application") {
             Box(Modifier.testTag("settings-application-group")) {
                 SettingsCard(padding = 4.dp, spacing = 0.dp) {
                     SettingsEntry(SettingsSection.PERMISSIONS, Icons.Outlined.Security, onSelect)
@@ -110,19 +139,28 @@ private fun SettingsEntry(section: SettingsSection, icon: androidx.compose.ui.gr
 
 /** 先选服务再编辑连接信息，附加请求参数默认收起，保存与测试始终明确。 */
 @Composable
-internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean, navigation: (@Composable () -> Unit)?, onboarding: Boolean = false) {
-    val editable = !api.testing && !api.saving
+internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boolean, actions: SimulSubActions, wide: Boolean, navigation: (@Composable () -> Unit)?, onboarding: Boolean = false,
+    mode: ListeningMode = ListeningMode.LOCAL, platformKeys: List<PlatformKeyUiState> = emptyList(), showProfiles: Boolean = true) {
+    val locked = sessionBusy && mode == ListeningMode.CLOUD_ASR
+    val editable = !locked && !api.testing && !api.saving
     var advancedOpen by rememberSaveable { mutableStateOf(api.headers.isNotEmpty() || api.userAgent.isNotEmpty()) }
     PageColumns(wide, header = navigation, first = {
-        if (!onboarding) item("api-profiles") { TranslationProfiles(api, actions, sessionBusy) }
+        if (!onboarding && showProfiles) item("api-profiles") {
+            // 配置目录复用原有保存期间禁用机制；不改变真实保存状态或其他分区提示。
+            TranslationProfiles(api.copy(saving = api.saving || locked), actions, sessionBusy)
+        }
         item("api-intro") {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                SectionHeading("连接翻译服务", "声音在本机识别，识别出的文字交给你选择的服务翻译。")
+                SectionHeading("第二步 · 翻译", when (mode) {
+                    ListeningMode.CLOUD_ASR -> "声音由千问在线听写，识别出的文字交给你选择的服务翻译。"
+                    ListeningMode.LOCAL -> "声音在本机识别，识别出的文字交给你选择的服务翻译。"
+                    ListeningMode.ONLINE -> "千问语音直译已包含翻译，无需另配翻译服务。这里的文字翻译设置保留，供本地识别或在线听写使用。"
+                })
                 OptionPicker("服务预设", api.presetId,
                     listOf(UiOption("custom", "自定义 / 手动填写", "保留当前表单，所有字段自行填写。")) + TranslationPresets.entries.map { UiOption(it.id, it.title, it.detail) },
                     enabled = editable, onSelect = actions.onApplyApiPreset)
                 SupportingText("预设只帮助填写。地址和模型都可继续修改，保存后才生效。")
-                if (sessionBusy) SupportingText("同传运行期间可保存配置，从后续句子使用；测试连接需先停止同传。")
+                if (locked) SupportingText("同传进行中，请先停止，再修改或测试翻译配置。")
                 api.message?.let { MessagePanel(it) }
             }
         }
@@ -134,11 +172,15 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
                     TextField(
                         shape = TextFieldDefaults.shape,
                         colors = TextFieldDefaults.colors(),value = api.url, onValueChange = { actions.onApiDraftChange(api.copy(url = it, presetId = TranslationPresets.match(it))) }, label = { Text("服务地址") }, supportingText = { Text("HTTP 或 HTTPS 基础地址，也可填写完整聊天接口地址。") }, enabled = editable, modifier = Modifier.fillMaxWidth())
-                    TextField(
-                        shape = TextFieldDefaults.shape,
-                        colors = TextFieldDefaults.colors(),value = api.model, onValueChange = { actions.onApiDraftChange(api.copy(model = it)) }, label = { Text("模型 ID") }, enabled = editable, modifier = Modifier.fillMaxWidth())
+                    EditableModelPicker(
+                        value = api.model,
+                        options = TranslationPresets.modelsFor(api.url, api.model),
+                        enabled = editable,
+                        onValueChange = { actions.onApiDraftChange(api.copy(model = it)) },
+                    )
                     io.github.korenkrita.simulsub.ByokTranslator.cleartextWarning(api.url)?.let { SupportingText(it) }
-                    TranslationKeyEditor(api, editable) { actions.onApiDraftChange(api.copy(key = it)) }
+                    ServiceCredentialPicker(api.platformId, "translation:${api.profileId}",
+                        api.credentialOptions, api.credentialId, api.credentialLabel, editable, actions)
                     if (api.testing || api.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
                     Text(when {
                         api.hasUnsavedChanges -> "保存状态：有未保存的修改"
@@ -197,39 +239,6 @@ internal fun TranslationApiSettings(api: TranslationApiUiState, sessionBusy: Boo
             }
         }
     })
-}
-
-/** 输入框留空保留旧密钥，显式清空按钮才派发空串；已保存值由控制器回填。 */
-@Composable
-private fun TranslationKeyEditor(api: TranslationApiUiState, enabled: Boolean, onChange: (String?) -> Unit) {
-    var visible by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextField(
-            value = api.key.orEmpty(), onValueChange = { value ->
-                onChange(if (value.isBlank()) { if (api.hasSavedKey) null else "" } else value)
-            },
-            label = { Text("API 密钥") },
-            enabled = enabled, singleLine = true,
-            visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
-                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { visible = !visible }, enabled = enabled) {
-                    Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                        contentDescription = if (visible) "隐藏密钥" else "显示密钥")
-                }
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            shape = TextFieldDefaults.shape,
-            colors = TextFieldDefaults.colors(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        ActionRow {
-            if (api.hasSavedKey && api.key != null) TextButton(onClick = { onChange(null) }, enabled = enabled,
-                modifier = Modifier.heightIn(min = 48.dp)) { Text("保留已存密钥") }
-            if (api.hasSavedKey || !api.key.isNullOrEmpty()) TextButton(onClick = { onChange("") }, enabled = enabled,
-                modifier = Modifier.heightIn(min = 48.dp)) { Text("清空密钥") }
-        }
-    }
 }
 
 /** 展示真实使用记录，删除必须先确认，正在写入的记录不允许分享或删除。 */

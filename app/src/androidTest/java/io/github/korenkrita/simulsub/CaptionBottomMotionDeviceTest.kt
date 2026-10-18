@@ -68,8 +68,10 @@ class CaptionBottomMotionDeviceTest {
                 automation.serviceInfo = automation.serviceInfo.apply {
                     flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
                 }
-                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                val rootDeadline = System.currentTimeMillis() + 5_000
+                // 每轮都从设置首页开始，避免上一轮留下的独立搜索Activity被任务恢复，误判点击透传失效。
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                val rootDeadline = System.currentTimeMillis() + 15_000
                 var settingsRoot: android.view.accessibility.AccessibilityNodeInfo? = null
                 while (settingsRoot == null && System.currentTimeMillis() < rootDeadline) {
                     settingsRoot = (listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root })
@@ -78,12 +80,16 @@ class CaptionBottomMotionDeviceTest {
                 }
                 val root = checkNotNull(settingsRoot) { "系统设置页应在期限内就绪" }
                 assertEquals("com.android.settings", root.packageName.toString())
+                // 平板设置首页有展开过渡，等可访问窗口稳定后刷新节点，避免点击过渡前的旧坐标。
+                automation.waitForIdle(300, 5_000)
+                root.refresh()
                 val search = root.findAccessibilityNodeInfosByText("Search settings").firstOrNull()
                     ?: root.findAccessibilityNodeInfosByText("搜索设置").firstOrNull()
                     ?: throw AssertionError("测试设备设置页应有搜索入口")
                 val bounds = android.graphics.Rect(); search.getBoundsInScreen(bounds)
                 injectGesture(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                val deadline = System.currentTimeMillis() + 3_000
+                // 系统设置搜索是另一个进程，冷启动可能超过三秒；仍要求真实输入焦点出现。
+                val deadline = System.currentTimeMillis() + 15_000
                 var searching = false
                 while (!searching && System.currentTimeMillis() < deadline) {
                     searching = (listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root })

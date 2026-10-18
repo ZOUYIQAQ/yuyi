@@ -1,5 +1,6 @@
 package io.github.korenkrita.simulsub.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -22,9 +23,13 @@ internal fun ScenesScreen(state: ScenesUiState, actions: SimulSubActions, wide: 
     val pageStateHolder = rememberSaveableStateHolder()
     // 手机列表与编辑器结构不同，必须分开保存；平板编辑时左侧列表继续使用原状态。
     val pageKey = if (wide) "scene-columns" else if (editor == null) "scene-list" else "scene-editor"
-    pageStateHolder.SaveableStateProvider(pageKey) {
-        PageScrollStateProvider {
-            ScenePageColumns(state, actions, wide)
+    // 手机列表与表单采用统一转场，平板保持左栏不动并单独切换右侧编辑目标。
+    val routeKey = if (wide) "scene-columns" else editor?.id?.let { "scene-editor/$it" } ?: "scene-list"
+    AnimatedContent(targetState = routeKey,
+        transitionSpec = { routeTransition(forward = targetState != "scene-list") }, label = "场景页面切换") { route ->
+        val rendered = rememberRouteSnapshot(route == routeKey, state)
+        pageStateHolder.SaveableStateProvider(if (wide) pageKey else route) {
+            PageScrollStateProvider { ScenePageColumns(rendered, actions, wide) }
         }
     }
 }
@@ -67,18 +72,38 @@ private fun ScenePageColumns(state: ScenesUiState, actions: SimulSubActions, wid
         }
         if (!wide && editor != null) sceneEditorItems(editor, actions, existing)
     }, second = {
-        if (wide) {
-            if (editor != null) sceneEditorItems(editor, actions, existing)
-            else item("scene-editor-empty") {
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SectionHeading("场景编辑区", "选择左侧场景的「编辑场景」，或新建场景。")
-                        SupportingText("背景与术语会显示在这里，保存后用于同传。")
-                    }
-                }
+        if (wide) item("scene-editor-pane") {
+            Box(Modifier.fillParentMaxHeight().fillMaxWidth()) {
+                SceneEditorPane(state, actions)
             }
         }
     })
+}
+
+/** 平板只切换右侧编辑内容，左侧列表和滚动保持原位；每个目标保存自己的表单位置。 */
+@Composable
+private fun SceneEditorPane(state: ScenesUiState, actions: SimulSubActions) {
+    val editorId = state.editor?.id
+    AnimatedContent(targetState = editorId, modifier = Modifier.fillMaxSize(),
+        transitionSpec = { routeTransition(forward = targetState != null) }, label = "场景编辑区切换") { targetId ->
+        val rendered = rememberRouteSnapshot(targetId == editorId, state)
+        if (targetId == null) {
+            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionHeading("场景编辑区", "选择左侧场景的「编辑场景」，或新建场景。")
+                    SupportingText("背景与术语会显示在这里，保存后用于同传。")
+                }
+            }
+        } else rendered.editor?.let { editor ->
+            RouteScrollStateProvider("scenes/wide-editor/$targetId") {
+                val scroll = requireNotNull(LocalPageScrollStates.current).single
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = scroll,
+                    contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    sceneEditorItems(editor, actions, rendered.items.any { it.id == editor.id })
+                }
+            }
+        }
+    }
 }
 
 /** 编辑器按稳定标识构造惰性表单，增删术语时不重建其余输入框。 */

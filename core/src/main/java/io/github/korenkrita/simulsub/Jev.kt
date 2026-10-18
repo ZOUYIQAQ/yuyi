@@ -95,6 +95,7 @@ class Jev(
     private val clock: () -> Long = ::monoMs,
     private val wall: () -> Long = System::currentTimeMillis,
     dns: okhttp3.Dns = okhttp3.Dns.SYSTEM,
+    private val onUsage: (MeteredUsage) -> Unit = {},
 ) : Judge {
     private val calls = Calls(deadlineMs, dns)
     private val unfinishedQ = unfinishedQuestion(source)
@@ -161,11 +162,24 @@ class Jev(
             synchronized(svc) { svc.watchers.toList() }.forEach { it() }
         }
         // a deadline that came while the 429 was being installed (its status not yet published): still that 429
-        val r = calls.post(url, body, auth, beforeSend, on429 = on429, admit = admit).let {
+        val sent = java.util.concurrent.atomic.AtomicBoolean(false)
+        val completedUsage = java.util.concurrent.atomic.AtomicReference<MeteredUsage?>()
+        val reported = java.util.concurrent.atomic.AtomicBoolean(false)
+        /** 超时返回与底层写入并发时仍只通知一次。 */
+        fun reportUsage() {
+            val usage = completedUsage.get() ?: return
+            if (sent.get() && reported.compareAndSet(false, true)) runCatching { onUsage(usage) }
+        }
+        val r = calls.post(url, body, auth, beforeSend, on429 = on429, admit = admit,
+            onSent = { sent.set(true); reportUsage() }).let {
             if (it.status == 0 && it.error?.startsWith("deadline") == true && myGen.get() >= 0)
                 HttpResult(429, null, it.ms, it.error, it.firstContentMs) else it
         }
         if (r.error == "paused") return JevCall(body, 0, null, r.ms, "paused", null, paused())
+        // 从未清理的服务端正文读取计量，失败与超时也以未知用量上报。
+        completedUsage.set(runCatching { parseMeteredUsage(r.body?.let { JSONObject(it).opt("usage") }) }
+            .getOrDefault(MeteredUsage()))
+        reportUsage()
         val answer = if (r.status == 200 && r.body != null)
             runCatching { ((Json.parse(r.body) as? Map<*, *>)?.get("answers") as? Map<*, *>)?.get("x") as? Map<*, *> }.getOrNull()
         else null
@@ -370,7 +384,8 @@ class Calls(private val deadlineMs: Long, dns: Dns = Dns.SYSTEM, /** tests: bypa
              /** a 429's headers arrived (its Retry-After, as sent): called at once, before its body is read */
              on429: (String?) -> Unit = {},
              /** asked right before the request goes out (after any wait in OkHttp's queue): false = not sent, "paused" */
-             admit: () -> Boolean = { true }): HttpResult {
+             admit: () -> Boolean = { true },
+             onSent: () -> Unit = {}): HttpResult {
         val t0 = monoMs()
         if (cancelled) return HttpResult(0, null, 0, "cancelled")
         // one-shot: OkHttp may try the next route (a proxy, then a direct connection) when connecting or the TLS
@@ -380,7 +395,7 @@ class Calls(private val deadlineMs: Long, dns: Dns = Dns.SYSTEM, /** tests: bypa
             override fun contentType() = JSON
             override fun contentLength() = bytes.size.toLong()
             override fun isOneShot() = true
-            override fun writeTo(sink: okio.BufferedSink) { sink.write(bytes) }
+            override fun writeTo(sink: okio.BufferedSink) { onSent(); sink.write(bytes) }
         }
         val req = Request.Builder().url(url).post(body)
             .apply { headers.forEach { (k, v) -> header(k, v) } }.tag(Admit::class.java, Admit(admit)).build()

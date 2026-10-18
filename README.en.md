@@ -1,10 +1,12 @@
 # 羽译 · Yuyi
 
-Yuyi provides **floating translated subtitles for live streams and videos on Android**. It recognizes playback audio locally on your device, sends the recognized text to your own translation API, and displays subtitles over other apps.
+Yuyi provides **floating translated subtitles for live streams and videos on Android**. Choose local recognition with your text translation API, direct cloud speech translation with Qwen LiveTranslate, or Qwen cloud transcription followed by your text translation API.
+
+The current development version is **1.9.0**; the features below include new models and cloud listening. The first published stable release is **1.8.4**.
 
 [Download release](https://github.com/ZOUYIQAQ/yuyi/releases/latest) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
 
-**Android only**: supports **Android 10+ phones and tablets with arm64-v8a**. Recognition models are downloaded and activated after installation; they are not bundled in the APK.
+**Android only**: supports **Android 10+ phones and tablets with arm64-v8a**. Local recognition models are downloaded after installation and are not bundled in the APK. Cloud listening requires no local model.
 
 ## Download
 
@@ -14,9 +16,9 @@ Actions builds and earlier local test builds use a different signing certificate
 
 ## Screens
 
-| Live | Model library | Subtitle style preview |
+| Live | Listening services | Subtitle style preview |
 |---|---|---|
-| ![Live](docs/images/screens/home.png) | ![Model library](docs/images/screens/models.png) | ![Subtitle style preview](docs/images/screens/subtitle.png) |
+| ![Live](docs/images/screens/home.png) | ![Listening services](docs/images/screens/models.png) | ![Subtitle style preview](docs/images/screens/subtitle.png) |
 
 <details>
 <summary>Tablet live view</summary>
@@ -28,7 +30,7 @@ Actions builds and earlier local test builds use a different signing certificate
 ## Core experience
 
 - **Read subtitles while watching**: show translations over a live stream or video, with optional source text. Tap subtitles to reveal controls, then move, resize or lock the overlay.
-- **Local recognition, your choice of translation service**: choose from two recognition models and configure an OpenAI-compatible translation API. Save multiple profiles and switch as needed.
+- **Three listening modes**: choose from five local recognition models with your OpenAI-compatible translation API, or send playback audio directly to Qwen LiveTranslate. Alternatively, combine Qwen 3.1 Streaming transcription with DeepSeek or another text translation API. Saved configurations remain independent and all settings stay visible.
 - **Adjust subtitles to suit your viewing**: translations only by default, keeping the latest 3 finalized sentences. Change font size, colors, opacity and subtitle window size, compare color schemes directly in the menu, and fine-tune them with a draggable floating preview.
 - **Phone and tablet layouts**: a warm Camellia theme by default, with light/dark modes, custom colors and Android 12+ dynamic colors.
 
@@ -36,12 +38,17 @@ Add stream background and preferred translations under **设置 → 场景与术
 
 ## Quick start
 
-First launch guides you through permissions, the translation API and recognition models. You can also complete these steps later in Settings.
+First launch guides you through permissions and service selection. Built-in entries already contain their provider endpoint and model. Choose them directly from the two home menus after entering provider keys or downloading a local model. Every guide step can be skipped.
 
-1. **Grant permissions**: allow audio recording and display over other apps as prompted. Confirm the system screen-sharing/audio-capture authorization each time you start a session.
-2. **Configure translation**: open **设置 → 翻译 API (Settings → Translation API)**. Choose a preset or enter a compatible endpoint, model ID and API key, test the connection, then save. Testing alone does not save the configuration.
-3. **Download and activate a model**: open **设置 → 模型库 (Settings → Model library)**, download a model, then tap **启用模型 (Activate model)**.
-4. **Start listening and translating**: on **同传 (Live)**, select source and target languages and a scene, tap **开始同传 (Start)**, then switch to the playing stream or video.
+1. **Prepare a listening service**: local ReazonSpeech, SenseVoice, Whisper and Moonshine models are listed by default. Download and activate the chosen model in **Settings → Listening services**. For Qwen transcription or direct speech translation, enter the shared Qwen key in **Settings → Platform keys**.
+2. **Prepare text translation**: DeepSeek and Qwen text models are preset. Enter the corresponding provider key, then choose the model in the home translation menu. Direct speech translation already includes translation and needs no second service.
+3. **Start**: choose source and target languages and an optional scene, tap Start, and confirm the system playback-capture permission.
+
+The existing service lists remain available under Settings for editing endpoints and models, testing connectivity, or adding a custom compatible interface. Normal use does not require creating or naming a service. Scenes and terminology remain separate. See [cloud setup](docs/online-listening.md).
+
+Credentials are managed under **Settings → Platform keys**. Each provider can store multiple named keys. Choose a key for each listening, translation, or auxiliary service; the home menus show the selected key name. Configure **transcription first, then text translation**; Qwen voice translation already returns translated captions and needs no separate text translation setup. DeepSeek presets use the tested full endpoint `https://api.deepseek.com/v1/chat/completions`.
+
+Built-in provider and model connections appear under **设置 → 听写服务 (Listening services)** and **设置 → 翻译服务 (Translation services)** and appear in the home menus when ready to use. Downloads and model deletion belong to **设置 → 听写服务 (Listening services)**. Subtitle style and appearance are grouped under Personalization. Built-in cloud services offer a key-selection dialog; translation services retain connection settings and testing. Add a custom OpenAI-compatible connection or use one of 24 provider templates. Translation models can be selected from platform presets or entered manually; existing custom IDs remain editable. See [provider templates](docs/provider-templates.md).
 
 ### Which recognition model?
 
@@ -49,12 +56,19 @@ First launch guides you through permissions, the translation API and recognition
 |---|---|---|---|
 | ReazonSpeech | Japanese, English | About 74.1 MiB | Smaller download for viewers mainly watching Japanese or English content who want to save storage |
 | SenseVoice Small | Chinese, English, Japanese, Korean, Cantonese | About 229.1 MiB | Broader language coverage, with punctuation and normalized numbers in recognition results |
+| Whisper Tiny multilingual | Chinese, English, Japanese, Korean | About 99.4 MiB | General multilingual recognition; speed depends on the device |
+| Moonshine Tiny English | English | About 118.8 MiB | English-only recognition for short speech |
+| Moonshine Tiny Japanese | Japanese | About 69.4 MiB | Smaller Japanese-only model |
 
-Both packages include the required voice activity detection model. Stop the session before switching recognition models.
+All packages include the required voice activity detection model. Stop the session before switching recognition models.
+
+## Usage and estimated cost
+
+Choose a listening service first, then a saved text translation service. Qwen direct voice translation includes the second step. The home screen shows today and the previous session; Settings → Usage and cost shows the breakdown. Timestamped numerical usage and rate snapshots are retained locally for future hourly or custom-range statistics, independently of subtitle logging. No audio, subtitle text or credentials are stored in the cost ledger. Unknown usage or rates are marked as unpriced rather than free. Figures are estimates, not supplier bills.
 
 ## FAQ and links
 
-**Is translation fully offline?** Speech recognition runs locally, while translation requires your configured text API. Online services require a network connection and receive recognized text; raw audio is not uploaded. You can also connect to a compatible translation endpoint hosted on your device or local network. See [Translation configuration](docs/translation.md).
+**Is audio uploaded?** Local mode sends recognized text to your configured translation API, while cloud mode sends playback audio to the selected speech translation service. Neither mode saves raw audio. You can also connect to a compatible translation endpoint hosted on your device or local network. See [Translation configuration](docs/translation.md).
 
 **Why do some videos produce no subtitles?** The source app, protected content and system playback-capture restrictions can prevent capture. Other apps playing capturable audio at the same time may also be recognized; pause unrelated audio during use.
 

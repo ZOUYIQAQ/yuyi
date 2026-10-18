@@ -15,6 +15,49 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class JevTest {
+    /** BYOK 真实请求含尾帧用量时回调一次，明确的零不能变成未知。 */
+    @Test fun byokReportsEachSentRequest() {
+        reply = { 200 to sse("""{"choices":[{"delta":{"content":"译文"},"finish_reason":"stop"}]}""",
+            """{"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":0}}}""") }
+        val usages = mutableListOf<MtResult>()
+        val translator = ByokTranslator(ByokService("http://127.0.0.1:$port/v1/chat/completions", "m-1", "sk-test"),
+            "SYS", null, onUsage = { usages += it })
+        assertTrue(translator.translate("测试")!!.usable)
+        assertEquals(1, usages.size)
+        assertEquals(12, usages.single().promptTokens)
+        assertEquals(0, usages.single().outputTokens)
+        assertEquals(0, usages.single().cachedTokens)
+    }
+
+    /** Jev 从原始响应读取用量，失败正文无 usage 时保留未知；无效密钥不计请求。 */
+    @Test fun jevReportsOnlySentRequests() {
+        reply = { n -> if (n == 1) 200 to """{"answers":{"x":{"noul":0.5}},"usage":{"input_tokens":8,"output_tokens":0,"input_tokens_details":{"cached_tokens":2}}}"""
+            else 500 to "{}" }
+        val usages = mutableListOf<MeteredUsage>()
+        val url = "http://127.0.0.1:$port/v1/systemone"
+        val client = Jev(JevProvider.OFFICIAL, "sk-secret", url = url, onUsage = { usages += it })
+        client.unfinished("第一句")
+        client.unfinished("第二句")
+        Jev(JevProvider.OFFICIAL, "bad\nkey", url = url, onUsage = { usages += it }).unfinished("不发送")
+        assertEquals(2, usages.size)
+        assertEquals(8L, usages[0].inputTokens)
+        assertEquals(0L, usages[0].outputTokens)
+        assertEquals(2L, usages[0].cachedInputTokens)
+        assertEquals(MeteredUsage(), usages[1])
+        assertEquals(2, hits.get())
+    }
+
+    /** 生成术语的思考开关探测与正式生成各自回报一次，不漏计探测请求。 */
+    @Test fun generateTermsReportsProbeAndGeneration() {
+        reply = { n -> 200 to sse("""{"choices":[{"delta":{"content":${if (n == 1) "\"已就绪\"" else "\"甲→乙\""}},"finish_reason":"stop"}]}""") }
+        val usages = mutableListOf<MtResult>()
+        val service = ByokService("http://127.0.0.1:$port/v1/chat/completions", "m-1", "sk-test")
+        val result = generateTerms(service, null, {}, "术语", "", emptySet(), 1, Lang.JA, Target.ZH,
+            onUsage = { usages += it })
+        assertEquals(listOf("甲" to "乙"), result.first)
+        assertEquals(2, usages.size)
+        assertEquals(2, hits.get())
+    }
     // A one-request-at-a-time HTTP/1.1 server (com.sun.net.httpserver is not on the Android unit-test classpath).
     private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
     private val port = server.localPort

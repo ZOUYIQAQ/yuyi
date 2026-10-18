@@ -71,12 +71,14 @@ class OnboardingControllerDeviceTest {
     /** 释放所有控制器监听和协程，不删除文件或改变共享模型仓库。 */
     @After fun finish() { onMain { store.clear() } }
 
-    /** 首次出现三步引导，逐步跳过不保存接口或模型，最后回首页且重建不再自动出现。 */
-    @Test fun firstLaunchThreeSkipsPersistCompletionAndReturnLive() = onMain {
+    /** 首次出现四步本地引导，逐步跳过不保存接口或模型，最后回首页且重建不再自动出现。 */
+    @Test fun firstLaunchFourSkipsPersistCompletionAndReturnLive() = onMain {
         assertStep(OnboardingStep.PERMISSIONS)
         assertFalse(completed())
         actions.onNavigate(UiDestination.SETTINGS)
         actions.onOnboardingSkip()
+        assertStep(OnboardingStep.MODE)
+        actions.onOnboardingNext()
         assertStep(OnboardingStep.API)
         assertFalse(completed())
         actions.onOnboardingSkip()
@@ -98,6 +100,8 @@ class OnboardingControllerDeviceTest {
     /** 未完成引导不能提前写完成标记；控制器重建后仍需走完或跳过剩余配置。 */
     @Test fun incompleteOnboardingDoesNotPersistCompletion() = onMain {
         actions.onOnboardingSkip()
+        assertStep(OnboardingStep.MODE)
+        actions.onOnboardingNext()
         assertStep(OnboardingStep.API)
         assertFalse(completed())
         createController()
@@ -107,14 +111,14 @@ class OnboardingControllerDeviceTest {
 
     /** 已完成用户可以主动重开，保留已有接口；再次跳过完成仍回同传且不会自动复开。 */
     @Test fun restartExplicitlyReopensCompletedOnboarding() = onMain {
-        repeat(3) { actions.onOnboardingSkip() }
+        repeat(4) { actions.onOnboardingSkip() }
         prefs.saveByok("https://example.com/v1", "已存模型", "", "", emptyList())
         actions.onNavigate(UiDestination.SETTINGS)
         actions.onRestartOnboarding()
         assertStep(OnboardingStep.PERMISSIONS)
         assertEquals("https://example.com/v1", prefs.byokUrl)
         assertTrue(completed())
-        repeat(3) { actions.onOnboardingSkip() }
+        repeat(4) { actions.onOnboardingSkip() }
         assertNull(controller.state.value.onboarding)
         assertEquals(UiDestination.LIVE, controller.state.value.destination)
         createController()
@@ -130,13 +134,13 @@ class OnboardingControllerDeviceTest {
         assertStep(OnboardingStep.PERMISSIONS)
         controller.setPermissions(missingPermissions.map { if (it.required) it.copy(granted = true) else it })
         actions.onOnboardingNext()
-        assertStep(OnboardingStep.API)
+        assertStep(OnboardingStep.MODE)
         assertFalse(completed())
     }
 
     /** 空列表或仅可选通知都不能冒充必需授权，也不能因为已有接口而跳过首步。 */
     @Test fun emptyAndPartialPermissionSnapshotsCannotSkipFirstStep() = onMain {
-        prefs.saveByok("https://example.com/v1", "已存模型", "测试密钥", "", emptyList())
+        prefs.saveByok("https://example.com/v1", "已存模型", null, "", emptyList())
         createController()
         for (snapshot in listOf(emptyList(), missingPermissions.filter { !it.required },
             missingPermissions.filter { it.id == "audio" }.map { it.copy(granted = true) })) {
@@ -150,6 +154,8 @@ class OnboardingControllerDeviceTest {
             assertFalse(completed())
         }
         actions.onOnboardingSkip()
+        assertStep(OnboardingStep.MODE)
+        actions.onOnboardingNext()
         assertStep(OnboardingStep.API)
     }
 
@@ -168,6 +174,7 @@ class OnboardingControllerDeviceTest {
     /** 合法草稿不能冒充已存接口；显式保存后继续编辑仍受阻，放弃恢复后才允许前进。 */
     @Test fun apiNextRequiresSavedConfigurationWithoutDirtyDraft() = onMain {
         actions.onOnboardingSkip()
+        actions.onOnboardingNext()
         actions.onApiDraftChange(controller.state.value.settings.api.copy(url = "https://example.com/v1", model = "待保存模型"))
         assertEquals("", prefs.byokUrl)
         assertFalse(controller.state.value.onboarding!!.apiReady)
@@ -188,6 +195,7 @@ class OnboardingControllerDeviceTest {
     @Test fun modelNextRejectsPendingAndUnselectedModels() = onMain {
         actions.onOnboardingSkip()
         actions.onOnboardingSkip()
+        actions.onOnboardingSkip()
         for (status in listOf(ModelStatus.NOT_INSTALLED, ModelStatus.QUEUED, ModelStatus.DOWNLOADING,
             ModelStatus.VERIFYING, ModelStatus.READY)) {
             publishModel(status)
@@ -204,6 +212,86 @@ class OnboardingControllerDeviceTest {
         assertTrue(completed())
         assertNull(controller.state.value.onboarding)
         assertEquals(UiDestination.LIVE, controller.state.value.destination)
+    }
+
+    /** 在线引导省略本地模型及文字翻译接口，显式跳过后正常完成。 */
+    @Test fun onlineBranchSkipsLocalSetupAndKeepsLocalConfiguration() = onMain {
+        prefs.saveByok("https://example.com/v1", "旧文字模型", null)
+        createController()
+        val platform = controller.state.value.settings.platformKeys.single { it.id == "origin:https://example.com" }
+        actions.onPlatformKeyChange(platform.id, "原密钥")
+        actions.onSavePlatformKey(platform.id)
+        actions.onOnboardingSkip()
+        assertStep(OnboardingStep.MODE)
+        actions.onListeningModeChange(ListeningMode.ONLINE)
+        actions.onOnboardingNext()
+        assertStep(OnboardingStep.ONLINE)
+        actions.onOnboardingNext()
+        assertStep(OnboardingStep.ONLINE)
+        actions.onOnboardingSkip()
+        assertTrue(completed())
+        assertNull(controller.state.value.onboarding)
+        assertEquals("旧文字模型", prefs.byokModel)
+        assertEquals("原密钥", prefs.byokKey)
+        assertNull(repository.selectedPaths())
+        createController()
+        assertEquals(ListeningMode.ONLINE, controller.state.value.live.listeningMode)
+    }
+
+    /** 平台密钥与在线连接分别保存；重建后共享密钥完整回填且磁盘不存明文。 */
+    @Test fun savedOnlineConfigurationIsReadyWithoutLocalModelAndRefillsKey() = onMain {
+        assertEquals(ListeningMode.LOCAL, prefs.listeningMode)
+        actions.onListeningModeChange(ListeningMode.ONLINE)
+        assertFalse(prefs.onlineReady)
+        actions.onPlatformKeyChange("qwen", "test-yuyi-private-key")
+        assertTrue(controller.state.value.settings.platformKeys.single { it.id == "qwen" }.hasUnsavedChanges)
+        actions.onSavePlatformKey("qwen")
+        actions.onOnlineDraftChange(controller.state.value.settings.online.copy(
+            endpoint = "wss://llm-test.cn-beijing.maas.aliyuncs.com/realtime"))
+        assertTrue(controller.state.value.settings.online.hasUnsavedChanges)
+        assertTrue(prefs.onlineReady)
+        assertNotEquals("wss://llm-test.cn-beijing.maas.aliyuncs.com/realtime", prefs.onlineEndpoint)
+        actions.onSaveOnline()
+        assertTrue(prefs.onlineReady)
+        assertEquals("wss://llm-test.cn-beijing.maas.aliyuncs.com/realtime", prefs.onlineEndpoint)
+        assertEquals("test-yuyi-private-key", controller.state.value.settings.online.key)
+        assertFalse(controller.state.value.settings.online.hasUnsavedChanges)
+        assertEquals("test-yuyi-private-key", controller.state.value.settings.cloudAsr.key)
+        val stored = application.getSharedPreferences("jpsub", 0).getString("platformKey:qwen", "")
+        assertNotEquals("test-yuyi-private-key", stored)
+        controller.setPermissions(missingPermissions.map { it.copy(granted = true) })
+        assertTrue(controller.state.value.live.canStart)
+        assertNull(repository.selectedPaths())
+        createController()
+        assertEquals("test-yuyi-private-key", controller.state.value.settings.online.key)
+        assertEquals("test-yuyi-private-key", controller.state.value.settings.platformKeys.single { it.id == "qwen" }.key)
+        assertTrue(controller.state.value.settings.online.hasSavedConfiguration)
+    }
+
+    /** 无效连接不得覆盖已保存地址或共享密钥；控制器切模式仍保留草稿供界面确认。 */
+    @Test fun invalidOnlineDraftCannotOverwriteSavedConfigurationOrLoseDraft() = onMain {
+        actions.onListeningModeChange(ListeningMode.ONLINE)
+        actions.onPlatformKeyChange("qwen", "saved-test-key")
+        actions.onSavePlatformKey("qwen")
+        actions.onOnlineDraftChange(controller.state.value.settings.online.copy(endpoint = "wss://llm-test.cn-beijing.maas.aliyuncs.com/realtime"))
+        actions.onSaveOnline()
+        val savedEndpoint = prefs.onlineEndpoint
+        actions.onOnlineDraftChange(controller.state.value.settings.online.copy(endpoint = "http://example.com", key = "changed-key"))
+        assertEquals("saved-test-key", controller.state.value.settings.online.key)
+        actions.onSaveOnline()
+        assertEquals(savedEndpoint, prefs.onlineEndpoint)
+        assertEquals("saved-test-key", prefs.onlineKey)
+        assertTrue(controller.state.value.settings.online.message!!.isError)
+        actions.onListeningModeChange(ListeningMode.LOCAL)
+        assertEquals(ListeningMode.LOCAL, prefs.listeningMode)
+        assertEquals("http://example.com", controller.state.value.settings.online.endpoint)
+        assertTrue(controller.state.value.settings.online.hasUnsavedChanges)
+        actions.onDiscardOnlineDraft()
+        assertEquals("saved-test-key", controller.state.value.settings.online.key)
+        assertEquals(savedEndpoint, controller.state.value.settings.online.endpoint)
+        assertFalse(controller.state.value.settings.online.hasUnsavedChanges)
+        assertEquals(ListeningMode.LOCAL, prefs.listeningMode)
+        assertEquals("saved-test-key", prefs.onlineKey)
     }
 
     /** 每次先销毁旧控制器再重建并注入隔离仓库，不调用下载、启用或其他外部动作。 */

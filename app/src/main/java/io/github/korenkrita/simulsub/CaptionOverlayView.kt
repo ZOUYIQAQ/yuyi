@@ -530,37 +530,44 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         val jaPx = (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSp * 0.62f, resources.displayMetrics)).toInt()
         for (l in lines) {
             if (draftSlotEnabled && !l.isFinal) continue
+            val shownJa = l.ja?.let(::captionDisplayText).orEmpty()
+            val shownZh = captionDisplayText(l.zh)
+            if (shownJa.isEmpty() && shownZh.isEmpty()) continue
             if (sb.isNotEmpty()) sb.append('\n')
             if (added && l === newTail) enteringOffset = sb.length
-            if (!l.ja.isNullOrEmpty()) {
+            if (shownJa.isNotEmpty()) {
                 val s = sb.length
-                sb.append(l.ja).append('\n')
+                sb.append(shownJa)
+                if (shownZh.isNotEmpty()) sb.append('\n')
                 sb.setSpan(AbsoluteSizeSpan(jaPx), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(ForegroundColorSpan(colors.ja), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             val s = sb.length
-            // the draft line is visibly separate from the finished sentences above: dimmer, smaller, marked "…"
-            if (!l.isFinal) sb.append("… ")
-            sb.append(l.zh)
-            if (!l.isFinal) {
+            // 草稿前缀只在有可见译文时显示，不能留下单独的省略号。
+            if (!l.isFinal && shownZh.isNotEmpty()) sb.append("… ")
+            sb.append(shownZh)
+            if (!l.isFinal && shownZh.isNotEmpty()) {
                 sb.setSpan(ForegroundColorSpan(colors.draft), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(android.text.style.RelativeSizeSpan(0.85f), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
         text.setCaption(sb, enteringOffset)
         val draft = if (draftSlotEnabled) lines.lastOrNull { !it.isFinal } else null
-        draftSource.text = draft?.ja ?: ""
+        val shownDraftJa = draft?.ja?.let(::captionDisplayText).orEmpty()
+        val shownDraftZh = draft?.zh?.let(::captionDisplayText).orEmpty()
+        draftSource.text = shownDraftJa
         val draftCaption = SpannableStringBuilder()
         if (draft != null) {
-            if (draftOriginalShown && !draft.ja.isNullOrEmpty()) {
-                draftCaption.append(draft.ja.replace('\n', ' ')).append(" · ")
+            if (draftOriginalShown && shownDraftJa.isNotEmpty()) {
+                draftCaption.append(shownDraftJa.replace('\n', ' '))
+                if (shownDraftZh.isNotEmpty()) draftCaption.append(" · ")
                 draftCaption.setSpan(ForegroundColorSpan(colors.ja), 0, draftCaption.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            draftCaption.append("… ").append(draft.zh.replace('\n', ' '))
+            if (shownDraftZh.isNotEmpty()) draftCaption.append("… ").append(shownDraftZh.replace('\n', ' '))
         }
         draftText.setCaption(draftCaption)
         // 空槽仍参与测量，只隐藏字形；不能用 GONE 折叠整个草稿区。
-        draftText.visibility = if (draft == null) INVISIBLE else VISIBLE
+        draftText.visibility = if (draftCaption.isEmpty()) INVISIBLE else VISIBLE
         updateDraftBackground()
         stats.text = statsLine ?: ""
         stats.visibility = if (statsLine.isNullOrEmpty()) GONE else VISIBLE

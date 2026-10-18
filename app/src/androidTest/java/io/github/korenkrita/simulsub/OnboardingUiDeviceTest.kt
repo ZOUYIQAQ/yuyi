@@ -38,15 +38,42 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         }
     }
 
-    /** 首步仅列必需权限；授权全部必需项后可继续，非必需项不构成门槛。 */
-    @Test fun permissionsOnlyShowRequiredItemsAndGateNext() {
+    /** 在线引导完成后的设置保留全部入口；首次引导自身仍只展示当前步骤。 */
+    @Test fun completedOnlineOnboardingKeepsAllSettingsEntries() {
+        val appState = mutableStateOf(SimulSubUiState(
+            onboarding = OnboardingUiState(step = OnboardingStep.ONLINE, listeningMode = ListeningMode.ONLINE),
+            settings = SettingsUiState(listeningMode = ListeningMode.ONLINE),
+            live = LiveUiState(listeningMode = ListeningMode.ONLINE),
+        ))
+        val actions = SimulSubActions(
+            onOnboardingSkip = { appState.value = appState.value.copy(onboarding = null) },
+            onNavigate = { appState.value = appState.value.copy(destination = it) },
+        )
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(renderDensity, fontScale)) {
+                Box(Modifier.requiredSize(if (tablet) 1040.dp else 320.dp, 640.dp)) { SimulSubApp(appState.value, actions) }
+            }
+        }
+        compose.onNodeWithText("跳过这步").performClick()
+        compose.onNodeWithTag("onboarding-footer").assertDoesNotExist()
+        compose.onNode(isSelectable() and hasText("设置")).performClick()
+        listOf("听写服务", "翻译服务", "平台密钥", "场景术语", "高级设置").forEach { label ->
+            scrollBodyTo(label)
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        }
+        compose.runOnIdle { assertNull(appState.value.onboarding) }
+    }
+
+    /** 必需权限和可选通知均可授权，只有必需项控制是否能继续。 */
+    @Test fun permissionsIncludeOptionalNotificationsWithoutGatingNext() {
         show(OnboardingStep.PERMISSIONS)
-        compose.onNodeWithText("第 1/3 步").assertIsDisplayed()
-        compose.onNodeWithText("可选通知权限").assertDoesNotExist()
+        compose.onNodeWithText("第 1/4 步").assertIsDisplayed()
+        scrollBodyTo("可选通知权限（可选）")
+        compose.onNodeWithText("可选通知权限（可选）").assertIsDisplayed()
         compose.onNodeWithText("上一步").assertDoesNotExist()
         compose.onNodeWithText("下一步").assertIsNotEnabled()
-        scrollBodyTo("允许")
-        compose.onNodeWithText("允许").performScrollTo().performClick()
+        scrollBodyTo("录制播放音频")
+        compose.onNode(hasText("允许") and hasAnySibling(hasText("录制播放音频"))).performScrollTo().performClick()
         compose.onNodeWithText("下一步").assertIsEnabled()
         scrollBodyTo("系统屏幕共享会在每次开始同传时询问，这里无需提前授权。")
         compose.onNodeWithText("系统屏幕共享会在每次开始同传时询问，这里无需提前授权。").assertIsDisplayed()
@@ -54,18 +81,20 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         assertNoLaterSettings()
     }
 
-    /** 跳过按权限、接口、模型顺序前进，最后完成；不额外创建任何配置入口。 */
-    @Test fun skippingAllThreeStepsFinishesInOrder() {
+    /** 本地引导按权限、模式、接口、模型顺序跳过，最后才完成。 */
+    @Test fun skippingAllFourLocalStepsFinishesInOrder() {
         show(OnboardingStep.PERMISSIONS)
         compose.onNodeWithText("跳过这步").performClick()
-        compose.onNodeWithText("第 2/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 2/4 步").assertIsDisplayed()
         compose.onNodeWithText("跳过这步").performClick()
-        compose.onNodeWithText("第 3/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 3/4 步").assertIsDisplayed()
+        compose.onNodeWithText("跳过这步").performClick()
+        compose.onNodeWithText("第 4/4 步").assertIsDisplayed()
         compose.onNodeWithText("进入羽译").assertIsNotEnabled()
         compose.onNodeWithText("跳过这步").performClick()
         compose.runOnIdle {
             assertNull(state.onboarding)
-            assertEquals(listOf("跳过:PERMISSIONS", "跳过:API", "跳过:MODEL"), events)
+            assertEquals(listOf("跳过:PERMISSIONS", "跳过:MODE", "跳过:API", "跳过:MODEL"), events)
         }
         compose.onNodeWithTag("onboarding-footer").assertDoesNotExist()
     }
@@ -73,12 +102,15 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
     /** 接口页保留基础配置、保存和测试，隐藏所有附加参数与后续设置。 */
     @Test fun apiOnlyShowsEssentialConfigurationAndUsesSavedReadiness() {
         show(OnboardingStep.API)
-        compose.onNodeWithText("第 2/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 3/4 步").assertIsDisplayed()
         compose.onNodeWithText("下一步").assertIsNotEnabled()
         scrollBodyTo("服务预设")
         compose.onNodeWithText("服务预设").assertExists()
         scrollBodyTo("模型 ID")
         compose.onNode(hasSetTextAction() and hasText("模型 ID", substring = true)).assertExists()
+        scrollBodyTo("管理平台密钥")
+        compose.onNodeWithText("管理平台密钥").assertExists()
+        compose.onNode(hasSetTextAction() and hasText("DeepSeek密钥", substring = true)).assertDoesNotExist()
         scrollBodyTo("保存翻译配置")
         compose.onNodeWithText("保存翻译配置").assertExists()
         compose.onNodeWithText("测试连接").assertExists()
@@ -89,7 +121,7 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         assertNoLaterSettings()
         compose.runOnIdle { state = state.copy(onboarding = state.onboarding!!.copy(apiReady = true)) }
         compose.onNodeWithText("下一步").assertIsEnabled().performClick()
-        compose.onNodeWithText("第 3/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 4/4 步").assertIsDisplayed()
     }
 
     /** 模型只提供实际卡片和必要动作，启用完成后才允许进入应用。 */
@@ -103,8 +135,10 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         scrollBodyTo("已下载 25%")
         compose.onNodeWithText("已下载 25%").assertExists()
         compose.onNodeWithText("取消下载").performScrollTo().performClick()
-        scrollBodyTo("识别模型乙")
-        compose.onNodeWithText("识别模型乙").assertExists()
+        compose.onNodeWithText("识别模型乙").assertDoesNotExist()
+        compose.runOnIdle { state = state.copy(models = state.models.copy(items = state.models.items.map {
+            if (it.id == "甲") it.copy(status = ModelUiStatus.READY, canDownload = false, canActivate = true) else it
+        })) }
         scrollBodyTo("启用模型")
         compose.onNodeWithText("启用模型").performScrollTo().performClick()
         compose.onNodeWithText("进入羽译").assertIsEnabled()
@@ -116,7 +150,7 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         compose.onNodeWithText("进入羽译").performClick()
         compose.runOnIdle {
             assertNull(state.onboarding)
-            assertEquals(listOf("下载:甲", "取消:甲", "启用:乙", "继续:MODEL"), events)
+            assertEquals(listOf("下载:甲", "取消:甲", "启用:甲", "继续:MODEL"), events)
         }
     }
 
@@ -157,12 +191,12 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         compose.onNodeWithText("配置尚未保存").assertIsDisplayed()
         compose.onNodeWithText("继续编辑").performClick()
         compose.runOnIdle { assertEquals(draft, state.settings.api); assertTrue(events.isEmpty()) }
-        compose.onNodeWithText("第 2/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 3/4 步").assertIsDisplayed()
         compose.onNodeWithText("跳过这步").performClick()
         val confirm = compose.onNodeWithText("放弃修改").fetchSemanticsNode()
             .config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!
         compose.runOnIdle { confirm(); confirm() }
-        compose.onNodeWithText("第 3/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 4/4 步").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(savedApi, state.settings.api)
             assertEquals(listOf("放弃", "跳过:API"), events)
@@ -175,11 +209,11 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         compose.onNodeWithText("上一步").performClick()
         compose.onNodeWithText("配置尚未保存").assertIsDisplayed()
         compose.onNodeWithText("放弃修改").performClick()
-        compose.onNodeWithText("第 1/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 2/4 步").assertIsDisplayed()
         compose.runOnIdle { assertEquals(listOf("放弃", "返回:API"), events) }
     }
 
-    /** 系统返回先确认，弹窗返回等同继续编辑，再次确认才允许退到权限页。 */
+    /** 系统返回先确认，弹窗返回等同继续编辑，再次确认才允许退到模式页。 */
     @Test fun dirtySystemBackAndDialogBackKeepDraftUntilConfirmed() {
         show(OnboardingStep.API, dirty = true)
         val draft = state.settings.api
@@ -213,11 +247,11 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         show(OnboardingStep.API)
         compose.onNodeWithText("上一步").performClick()
         compose.onNodeWithText("配置尚未保存").assertDoesNotExist()
-        compose.onNodeWithText("第 1/3 步").assertIsDisplayed()
+        compose.onNodeWithText("第 2/4 步").assertIsDisplayed()
         compose.onNodeWithText("跳过这步").performClick()
         compose.onNodeWithText("跳过这步").performClick()
-        compose.onNodeWithText("第 3/3 步").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(listOf("返回:API", "跳过:PERMISSIONS", "跳过:API"), events) }
+        compose.onNodeWithText("第 4/4 步").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("返回:API", "跳过:MODE", "跳过:API"), events) }
     }
 
     /** 精简接口表单仍保留测试建议的显式确认，不收到建议就自动替换或保存。 */
@@ -241,10 +275,20 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
     /** 所有步骤的按钮始终位于首屏，正文滚动和大字号不会改变页脚位置。 */
     @Test fun fixedFooterRemainsReachableWhileBodyScrolls() {
         show(OnboardingStep.PERMISSIONS)
+        compose.runOnIdle {
+            state = state.copy(settings = state.settings.copy(listeningProfiles =
+                listOf(ServiceProfileUiState("local:reazonspeech", "ReazonSpeech", kind = "local"),
+                    ServiceProfileUiState("local:sensevoice", "SenseVoice", kind = "local")) +
+                    ListeningServiceRepository.BUILT_INS.map { ServiceProfileUiState(it.id, it.name, kind = if (it.mode == ListeningMode.CLOUD_ASR) "asr" else "direct") }))
+        }
+        compose.runOnIdle { state = state.copy(models = state.models.copy(items = state.models.items.map {
+            if (it.id == "甲") it.copy(canDownload = false, canActivate = true) else it
+        })) }
         for (step in OnboardingStep.entries) {
-            compose.runOnIdle { state = state.copy(onboarding = OnboardingUiState(step = step)) }
+            compose.runOnIdle { state = state.copy(onboarding = OnboardingUiState(step = step,
+                listeningMode = if (step == OnboardingStep.ONLINE) ListeningMode.ONLINE else ListeningMode.LOCAL)) }
             val footer = compose.onNodeWithTag("onboarding-footer").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            val nextLabel = if (step == OnboardingStep.MODEL) "进入羽译" else "下一步"
+            val nextLabel = if (step == OnboardingStep.MODEL || step == OnboardingStep.ONLINE) "进入羽译" else "下一步"
             val buttons = listOf("跳过这步", nextLabel) + if (step != OnboardingStep.PERMISSIONS) listOf("上一步") else emptyList()
             buttons.forEach { label ->
                 val bounds = compose.onNodeWithText(label).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
@@ -252,6 +296,8 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
             }
             scrollBodyTo(when (step) {
                 OnboardingStep.PERMISSIONS -> "系统屏幕共享会在每次开始同传时询问，这里无需提前授权。"
+                OnboardingStep.MODE -> "千问分段听译"
+                OnboardingStep.ONLINE -> "保存在线配置"
                 OnboardingStep.API -> "保存翻译配置"
                 OnboardingStep.MODEL -> "启用模型"
             })
@@ -264,12 +310,15 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
 
     /** 构造无外部依赖的完整状态，所有权限、存储与下载回调只更新当前夹具。 */
     private fun show(step: OnboardingStep, dirty: Boolean = false) {
-        state = SimulSubUiState(onboarding = OnboardingUiState(step = step),
-            live = LiveUiState(permissions = listOf(
+        val mode = if (step == OnboardingStep.ONLINE) ListeningMode.ONLINE else ListeningMode.LOCAL
+        state = SimulSubUiState(onboarding = OnboardingUiState(step = step, listeningMode = mode),
+            live = LiveUiState(listeningServiceId = "local:甲", permissions = listOf(
                 PermissionUiState("audio", "录制播放音频", "仅识别应用播放声音。", false),
                 PermissionUiState("overlay", "显示悬浮字幕", "仅用于在其他应用上显示字幕。", true),
-                PermissionUiState("可选权限", "可选通知权限", "不应该出现在引导。", false, required = false))),
-            settings = SettingsUiState(api = if (dirty) savedApi.copy(model = "未保存模型", hasUnsavedChanges = true) else savedApi),
+                PermissionUiState("可选权限", "可选通知权限", "可选通知不阻止进入下一步。", false, required = false))),
+            settings = SettingsUiState(api = if (dirty) savedApi.copy(model = "未保存模型", hasUnsavedChanges = true) else savedApi,
+                platformKeys = listOf(PlatformKeyUiState("qwen", "千问", "", false),
+                    PlatformKeyUiState("deepseek", "DeepSeek", "", false))),
             models = ModelsUiState(items = listOf(
                 model("甲", canDownload = true), model("乙", canActivate = true))))
         val actions = SimulSubActions(
@@ -278,7 +327,13 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
                 val current = state.onboarding!!.step
                 events += "返回:${current.name}"
                 assertFalse("返回前必须恢复未保存草稿", state.settings.api.hasUnsavedChanges)
-                state = state.copy(onboarding = state.onboarding!!.copy(step = OnboardingStep.entries[current.ordinal - 1]))
+                val steps = onboardingSteps(state.onboarding!!.listeningMode)
+                state = state.copy(onboarding = state.onboarding!!.copy(step = steps[steps.indexOf(current) - 1]))
+            },
+            onListeningModeChange = { mode ->
+                events += "模式:${mode.name}"
+                state = state.copy(onboarding = state.onboarding!!.copy(listeningMode = mode),
+                    settings = state.settings.copy(listeningMode = mode))
             },
             onDiscardApiDraft = { events += "放弃"; state = state.copy(settings = state.settings.copy(api = savedApi)) },
             onPermission = { id ->
@@ -319,8 +374,9 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         val current = state.onboarding!!
         events += "$label:${current.step.name}"
         assertFalse("离开接口步骤前必须保存或恢复草稿", state.settings.api.hasUnsavedChanges)
-        state = state.copy(onboarding = if (current.step == OnboardingStep.MODEL) null
-            else current.copy(step = OnboardingStep.entries[current.step.ordinal + 1]))
+        val steps = onboardingSteps(current.listeningMode)
+        state = state.copy(onboarding = if (current.step == steps.last()) null
+            else current.copy(step = steps[steps.indexOf(current.step) + 1]))
     }
 
     /** 模型夹具包含容易被误带入引导的简介和删除能力，以检查精简界面。 */
@@ -337,11 +393,19 @@ class OnboardingUiDeviceTest(private val tablet: Boolean, private val fontScale:
         }))
     }
 
-    /** 选择含目标内容的最后一列，兼容接口表单的宽屏双列布局。 */
+    /** 遍历实际可滚动列，兼容服务列表、资源分组和接口表单，不假设目标固定在某一栏。 */
     private fun scrollBodyTo(text: String) {
+        compose.waitForIdle()
         val lists = compose.onAllNodes(hasScrollToIndexAction())
-        val target = if (state.onboarding?.step == OnboardingStep.API && text != "服务预设") lists.onLast() else lists.onFirst()
-        target.performScrollToNode(hasText(text))
+        var failure: AssertionError? = null
+        for (index in lists.fetchSemanticsNodes().indices) {
+            try {
+                lists[index].performScrollToNode(hasText(text))
+                compose.onNodeWithText(text).assertIsDisplayed()
+                return
+            } catch (error: AssertionError) { failure = error }
+        }
+        throw AssertionError("找不到引导或设置中的可见内容：$text", failure)
     }
 
     /** 主题、字幕与场景不属于首次引导中的任何一步。 */

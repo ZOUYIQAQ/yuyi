@@ -20,14 +20,15 @@ class PrefsProfilesDeviceTest {
                 base.getSharedPreferences("$namespace-$name", mode)
         }
     }
-    /** 旧默认地址、密钥和附加参数无需迁移，也不能写出明文凭据。 */
+    /** 默认配置地址和附加参数保持原样，密钥写入来源对应的加密中央槽位。 */
     @Test fun defaultKeepsLegacyStorageAndEncryptedCredentials() {
         val context = context()
         val prefs = Prefs(context)
         prefs.saveByok("https://first.example/v1", "旧模型", "旧测试密钥", "Test-Agent", listOf("X-Key" to "test-header"))
         val saved = context.getSharedPreferences("jpsub", 0)
         assertEquals("旧模型", saved.getString("byokModel", null))
-        assertNotEquals("旧测试密钥", saved.getString("byokKey", null))
+        assertNotEquals("旧测试密钥", saved.getString("platformKey:origin:https://first.example", null))
+        assertFalse(saved.contains("byokKey"))
         assertFalse(saved.getString("byokHeaders", "")!!.contains("test-header"))
         assertFalse(saved.contains("byokProfiles"))
         val recreated = Prefs(context)

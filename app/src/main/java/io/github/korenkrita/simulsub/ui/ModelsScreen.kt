@@ -70,22 +70,23 @@ private fun ModelItem(model: ModelUiState, actions: SimulSubActions) {
 }
 
 /**
- * 每段先以实际列宽测量，再使用两卡中的最大段高共同排版。
+ * 每段先以实际列宽测量，再使用两卡中的最大段高共同排版；听写服务可替换选择按钮。
  * 标题、状态、简介、属性、参考数据、进度、操作和详情均不依赖固定高度或省略号；
  * 背景最后按总高度测量，确保下载失败、长文本和大字号下卡片仍等高。
  */
 @Composable
-private fun ModelCardRow(models: List<ModelUiState>, actions: SimulSubActions) {
+internal fun ModelCardRow(models: List<ModelUiState>, actions: SimulSubActions,
+    selected: Boolean? = null, selectionAction: (@Composable () -> Unit)? = null) {
     Layout(
         modifier = Modifier.fillMaxWidth().semantics { isTraversalGroup = true },
         content = {
             models.forEachIndexed { column, model ->
                 key(model.id) {
                     Surface(
-                        shape = MaterialTheme.shapes.medium,
+                        shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.surfaceContainer,
                     ) {}
-                    ModelSections(model, actions, column)
+                    ModelSections(model, actions, column, selected, selectionAction)
                 }
             }
         },
@@ -117,13 +118,14 @@ private fun ModelCardRow(models: List<ModelUiState>, actions: SimulSubActions) {
 
 /** 每张卡固定输出相同数量的内容段，读屏按模型逐个阅读而不是跨列交错。 */
 @Composable
-private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column: Int) {
+private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column: Int,
+    selected: Boolean?, selectionAction: (@Composable () -> Unit)?) {
     var details by rememberSaveable(model.id) { mutableStateOf(false) }
     val comparison = ModelComparisons[model.id]
     ModelSection(column, 0) {
         Text(model.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth().semantics { heading() })
     }
-    ModelSection(column, 1) { ModelStatus(model) }
+    ModelSection(column, 1) { ModelStatus(model, selected) }
     ModelSection(column, 2) {
         Text(comparison?.introduction ?: model.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
     }
@@ -147,11 +149,12 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
                     onClick = { actions.onCancelDownload(model.id) }, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("取消下载") }
-                if (model.canActivate) Button(
+                if (selectionAction != null) selectionAction()
+                else if (model.canActivate) Button(
                     onClick = { actions.onActivateModel(model.id) }, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("启用模型") }
-                if (!model.canDownload && !model.canCancel && !model.canActivate) {
+                if (selectionAction == null && !model.canDownload && !model.canCancel && !model.canActivate) {
                     Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
                         SupportingText(if (model.status == ModelUiStatus.ACTIVE) "当前选中模型" else model.status.title)
                     }
@@ -174,10 +177,7 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
             if (details) {
                 SupportingText("来源：${model.sourceLabel}\n许可：${model.license}")
                 if (model.verificationDetail.isNotEmpty()) SupportingText(model.verificationDetail)
-                if (comparison != null) {
-                    SupportingText("评测条件：FLEURS（日语650句、英语647句），Mac M4 Pro，2线程，int8，sherpa-onnx 1.13.8。整句离线解码，音频首尾各补0.3秒静音。")
-                    SupportingText("日语为字错误率，英语为词错误率；参考耗时为单句解码中位数。")
-                }
+                if (comparison != null) SupportingText("测试说明：${comparison.evaluationNote}")
                 ActionRow {
                     if (model.sourceUrl.isNotEmpty()) TextButton(onClick = { actions.onModelSource(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看下载来源") }
                     if (model.license.isNotBlank() || model.licenseUrl.isNotEmpty()) TextButton(onClick = { actions.onModelLicense(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看许可") }
@@ -188,23 +188,31 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
     }
 }
 
-/** 主卡仅保留易懂的错误率和参考耗时，参考设备紧跟耗时以避免误认为手机延迟。 */
+/** 主卡按日语、英语和速度展示结果；未测试和不支持均使用文字说明。 */
 @Composable
 private fun ModelBenchmark(comparison: ModelComparison) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ModelMetadata("日语识别错误率", comparison.japaneseErrorRate)
         ModelMetadata("英语识别错误率", comparison.englishErrorRate)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ModelMetadata("参考识别耗时（日/英）", "${comparison.japaneseDecodeMs} / ${comparison.englishDecodeMs} ms")
-            Text("参考设备：Mac M4 Pro", style = MaterialTheme.typography.bodySmall,
+            val japaneseMs = comparison.japaneseDecodeMs
+            val englishMs = comparison.englishDecodeMs
+            val japaneseLabel = japaneseMs?.let { "$it ms" }
+                ?: if (comparison.japaneseErrorRate.startsWith("不支持")) "不支持" else "待复核"
+            val englishLabel = englishMs?.let { "$it ms" }
+                ?: if (comparison.englishErrorRate.startsWith("不支持")) "不支持" else "待复核"
+            ModelMetadata("识别耗时（日/英）", "$japaneseLabel / $englishLabel")
+            Text("单句中位数，不含翻译等待", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text("日/英各20段标准录音 · 数值越低越好",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 /** 页面内的正式确认必须展示模型、固定文件范围和停用后果，取消不派发删除。 */
 @Composable
-private fun ModelDeleteConfirmation(model: ModelUiState, deleting: Boolean, actions: SimulSubActions) {
+internal fun ModelDeleteConfirmation(model: ModelUiState, deleting: Boolean, actions: SimulSubActions) {
     AlertDialog(
         onDismissRequest = { if (!deleting) actions.onDismissDeleteModel() },
         title = { Text("删除${model.name}？") },
@@ -239,7 +247,16 @@ private fun ModelMetadata(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(0.58f))
-        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.42f))
+        if (label == "识别语言") {
+            // 每种语言作为完整排版单元换行，避免窄屏把「韩语」拆成上下两个字。
+            FlowRow(Modifier.weight(0.42f)) {
+                val languages = value.split("、")
+                languages.forEachIndexed { index, language ->
+                    Text(language + if (index == languages.lastIndex) "" else "、",
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.42f))
     }
 }
 
@@ -249,11 +266,11 @@ private fun ModelSection(column: Int, section: Int, content: @Composable () -> U
     Box(Modifier.fillMaxWidth().semantics { isTraversalGroup = true; traversalIndex = (column * 9 + section).toFloat() }) { content() }
 }
 
-/** 状态使用文字和主题色共同表达，下载状态变化以礼貌方式播报。 */
+/** 状态使用文字和主题色共同表达；云端服务选中时，本地已启用模型只显示已安装。 */
 @Composable
-private fun ModelStatus(model: ModelUiState) {
+private fun ModelStatus(model: ModelUiState, selected: Boolean?) {
     val failed = model.status == ModelUiStatus.FAILED
-    val active = model.status == ModelUiStatus.ACTIVE
+    val active = model.status == ModelUiStatus.ACTIVE && selected != false
     Surface(
         shape = MaterialTheme.shapes.small,
         color = when {
@@ -267,7 +284,8 @@ private fun ModelStatus(model: ModelUiState) {
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
     ) {
-        Text(model.status.title, style = MaterialTheme.typography.labelLarge,
+        Text(if (model.status == ModelUiStatus.ACTIVE && !active) ModelUiStatus.READY.title else model.status.title,
+            style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp).semantics { liveRegion = LiveRegionMode.Polite })
     }
 }

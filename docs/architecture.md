@@ -34,8 +34,8 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
     • Jev 断句（可选）：满 5 s 或停顿 0.4 s 时先问 Jev 是否说完；未说完则继续蓄音，最长 10 s 强制切分
         │
         ▼
-  ASR 工作线程：模型库中已下载并启用的识别模型（ReazonSpeech transducer 或 SenseVoice，sherpa-onnx int8 离线）
-       识别模型与 Silero VAD 都不随 APK 分发，需在安装后由用户在模型库下载并校验
+  ASR 工作线程：听写服务中已下载并启用的识别模型（ReazonSpeech transducer 或 SenseVoice，sherpa-onnx int8 离线）
+       识别模型与 Silero VAD 都不随 APK 分发，需在安装后由用户在听写服务下载并校验
         │
         ▼
   MT 工作线程：用户自备的 OpenAI 兼容翻译接口（BYOK，流式请求）
@@ -72,13 +72,13 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 |---|---|
 | `CaptionService.kt` | 前台服务：采集 `AudioPlaybackCapture` 音频、从应用私有模型目录加载会话固定的所选模型、驱动 `Pipeline`、管理悬浮窗生命周期 |
 | `Engines.kt` | `sherpa-onnx` 离线识别与 Silero VAD 的 Android 封装（按模型类型映射 `asr/` 与 `vad/` 下的文件路径） |
-| `models/` | 模型库：固定清单与 SHA-256（`ModelCatalog.kt`）、私有存储根 `files/models`（`ModelRepository.storageRoot`）、下载与落盘校验（`ModelDownloader.kt`、`ModelInstaller.kt`）及系统前台任务（`ModelDownloadWorker.kt`） |
-| `ui/` | Jetpack Compose Material 3 界面：同传、模型库、场景、设置与记录，按窗口宽度在底部导航与侧边导航之间切换 |
+| `models/` | 听写服务：固定清单与 SHA-256（`ModelCatalog.kt`）、私有存储根 `files/models`（`ModelRepository.storageRoot`）、下载与落盘校验（`ModelDownloader.kt`、`ModelInstaller.kt`）及系统前台任务（`ModelDownloadWorker.kt`） |
+| `ui/` | Jetpack Compose Material 3 界面：同传、听写服务、场景、设置与记录，按窗口宽度在底部导航与侧边导航之间切换 |
 | `CaptionOverlayView.kt` | 悬浮字幕视图、统一圆角背景与临时背景过渡、四角拖拽缩放及独立工具栏交互 |
 | `CaptionTextView.kt` | 原生富文本排版、正式末行贴底、正文高度过渡与新增正式句内部滚动 |
 | `ui/LiveScreen.kt`、`ui/LivePrimaryAction.kt` | 手机会话控制卡、宽屏右侧控制卡及紧凑主按钮，沿用原业务动作 |
 | `MainActivity.kt` | Compose 宿主、系统权限与采集授权、日志分享和外部链接 |
-| `AppController.kt` | 页面状态与业务动作、翻译草稿保存与测试、模型库协调、场景编辑、日志索引与清理、启动／手动检查发行版 |
+| `AppController.kt` | 页面状态与业务动作、翻译草稿保存与测试、听写服务协调、场景编辑、日志索引与清理、启动／手动检查发行版 |
 | `Prefs.kt` | 设置持久化与 Android Keystore 密钥加密 |
 | `updates/` | 本Fork正式发行元数据解析、数字版本比较与浏览器更新Intent；提醒偏好由AppController管理 |
 | `AppUpdater.kt` | 保留的旧更新实现，当前客户端不接入其自动检查、下载或安装流程 |
@@ -109,15 +109,15 @@ Android 应用与共享核心 `:core` 共用同一套分句、识别与翻译流
 
 ## 页面、设置与显示边界
 
-`ui/UiContract.kt` 定义同传、字幕、设置三个主导航及模型库、场景术语两个设置内详情入口。Compose UI 交还业务动作给 `AppController`，不在页面中下载模型、操作文件或请求翻译。翻译 API 的草稿、保存与测试相互分开；`TranslationPresets.kt` 仅填写草稿，跨端点应用预设清空草稿凭据、请求头与 User-Agent。
+`ui/UiContract.kt` 定义同传、字幕、设置三个主导航及听写服务、场景术语两个设置内详情入口。Compose UI 交还业务动作给 `AppController`，不在页面中下载模型、操作文件或请求翻译。翻译 API 的草稿、保存与测试相互分开；`TranslationPresets.kt` 仅填写草稿，跨端点应用预设清空草稿凭据、请求头与 User-Agent。
 
-各主路由、设置首页与各详情页、模型库和场景列表分别保存列表位置；手机单列、双列布局分别记忆，切换布局时恢复各自位置。表单密钥不纳入 SavedState。API 保存后保留当前输入并显示「已保存」。
+各主路由、设置首页与各详情页、听写服务和场景列表分别保存列表位置；手机单列、双列布局分别记忆，切换布局时恢复各自位置。表单密钥不纳入 SavedState。API 保存后保留当前输入并显示「已保存」。
 
-`ui/TranslationProfiles.kt`在 API 设置页顶部管理命名配置，提供新增、重命名、切换和确认删除；至少保留一套，未保存草稿先确认放弃。`Prefs`按配置独立保存地址、模型、密钥、User-Agent 与请求头，从同一偏好快照解析服务，默认项沿用旧键；密钥和请求头值加密存储。`CaptionService.Snap`通过`byokForSession()`在所选配置不完整时沿用当前服务，完整配置在后续句子生效，已入队任务使用各自设置。
+`ui/TranslationProfiles.kt`在 API 设置页顶部管理命名配置，提供新增、重命名、切换和确认删除；至少保留一套，未保存草稿先确认放弃。`Prefs`按配置分别保存地址、模型、User-Agent 与请求头；密钥按平台来源统一存储，在「平台密钥」管理，从同一偏好快照解析服务。旧配置密钥迁移到中央槽位，旧密文保留；密钥和请求头值采用可逆加密。`CaptionService.Snap`通过`byokForSession()`在所选配置不完整时沿用当前服务，完整配置在后续句子生效，已入队任务使用各自设置。
 
 `ByokTranslator.chatUrl()`接受 HTTP／HTTPS 并保留协议，只有 HTTP 显示明文提示。主网络安全配置允许明文服务，release HTTPS 仅信任系统 CA，不信任用户 CA；翻译客户端不跟随重定向。
 
-高级设置（上下文与在线辅助）归入「字幕与翻译」卡片，系统权限、引导、记录、更新与关于归入「应用」。设置首页按字幕与翻译、个性化、应用分组，详情通过顶栏或系统返回回到来源；包括翻译API、字幕样式、外观、系统权限、高级设置、使用记录、关于，并提供模型库、场景管理和重新运行首次引导入口。关于页首屏声明 Android Fork 与原作者 KorenKrita，MIT 全文随 APK 提供，离线可读。所有仓库外链交给 MainActivity 的异常保护路径。上下文由 `Pipeline.PREVIOUS_SENTENCES = 2` 与 `MAX_PREVIOUS_SENTENCES = 5` 控制，窗口内容是非空定稿原文；不由字幕可见行数决定。
+高级设置（上下文与在线辅助）归入「字幕与翻译」卡片，系统权限、引导、记录、更新与关于归入「应用」。设置首页按字幕与翻译、个性化、应用分组，详情通过顶栏或系统返回回到来源；包括翻译API、字幕样式、外观、系统权限、高级设置、使用记录、关于，并提供听写服务、场景管理和重新运行首次引导入口。关于页首屏声明 Android Fork 与原作者 KorenKrita，MIT 全文随 APK 提供，离线可读。所有仓库外链交给 MainActivity 的异常保护路径。上下文由 `Pipeline.PREVIOUS_SENTENCES = 2` 与 `MAX_PREVIOUS_SENTENCES = 5` 控制，窗口内容是非空定稿原文；不由字幕可见行数决定。
 
 `CaptionBoard.setRetention()`是新版服务的唯一显示策略入口。`CaptionLimitMode`互斥选择句数或译文字数，默认句数，新安装默认保留3句定稿。句数只统计正式N句，并额外保留最新1条草稿；字数按译文Unicode码点计算，超长单句的快照仅保留最新尾部。只裁剪显示快照，不改原始定稿、日志或翻译上下文。旧区间接口保留作历史兼容与迁移，新句数从旧区间上限迁移；captionLimitMode、captionSentenceCount和keepChars在同一次偏好编辑中保存。
 
@@ -163,7 +163,7 @@ LauncherIconChoice表示矢量彩色/纯色、背景、飘落装饰和纯色配�
 - 窗口高度较小时统一核算正式正文、诊断、内部边距与固定草稿预算；低横屏或大字号仍受物理高度约束，草稿不扩展为多行，全部文本都在统一背景内。
 - API测试使用临时草稿，不写入Prefs；建议绑定草稿及原存配置快照，只有显式「替换并保存」才提交。未保存退出确认由统一根导航处理。
 
-首次引导状态由AppController持有，依次为PERMISSIONS、API、MODEL；冷启动时读取系统真实授权状态，必要权限缺失时首页顶部显示强调卡，全部授予后隐藏。最后继续或跳过写入appearance.onboarding_completed。导航层复用API未保存确认，模型步骤仅提供下载、取消和启用；不提前申请一次性的MediaProjection授权。模型库和场景列表保存进入来源，顶栏和系统返回使用同一动作。首页移除内存字幕预览。
+首次引导状态由AppController持有，依次为PERMISSIONS、API、MODEL；冷启动时读取系统真实授权状态，必要权限缺失时首页顶部显示强调卡，全部授予后隐藏。最后继续或跳过写入appearance.onboarding_completed。导航层复用API未保存确认，模型步骤仅提供下载、取消和启用；不提前申请一次性的MediaProjection授权。听写服务和场景列表保存进入来源，顶栏和系统返回使用同一动作。首页移除内存字幕预览。
 
 系统启动页独立使用透明人物与飘落装饰，SplashTheme在Activity首帧前同步应用背景，并在Android12+用官方setSplashScreenTheme登记下次冷启动主题。六预设的浅深背景与应用完全一致；任意自定义种子的系统启动底色取最近的预设，Activity首帧为精确颜色。Android12/13动态色使用相近系统中性色，Android14+与Material3同用system_background。Android10/11最早启动底色仍使用默认山茶并跟随系统明暗。参考[官方SplashScreen API](https://developer.android.com/reference/android/window/SplashScreen#setSplashScreenTheme(int))。
 
@@ -179,3 +179,41 @@ LauncherIconChoice表示矢量彩色/纯色、背景、飘落装饰和纯色配�
 - 普通草稿增量不足时省去下一次普通草稿识别；句尾候选与定稿仍始终识别。沿用正式版四线程配置，具体性能取决于设备。
 - 开启智能断句时，在224毫秒静音提前询问，仍须达到400毫秒停顿才能切句。提前候选在短停顿后续说时作废，有其他判断或强制切句临近时不抢占；等待超时从真实停顿成立后计算。
 - 固定显示Surface、透明触摸窗口、正式末行锚点、草稿空间和滚动／高度动画未改动。
+
+
+## 1.9.0 的三种听译路径
+
+- `ListeningMode.LOCAL`：系统播放捕获 → Silero VAD / Segmenter → sherpa-onnx（Reazon、SenseVoice、Whisper、Moonshine）→ 已配置文字翻译 → 字幕板。
+- `ListeningMode.ONLINE` 实时版：系统播放捕获 → 16 kHz PCM16 → 千问 LiveTranslate WebSocket → 原文/译文归并 → `OnlineCaptionAdapter` → 同一字幕板。
+- `ListeningMode.ONLINE` 省钱分段版：同一系统播放捕获 → `PcmTranslationSegments`（停顿或最多八秒）→ 两段有界待发队列 → `QwenFileTranslateClient`（WAV + HTTPS SSE，仅译文）→ 同一字幕板。无声前滚保持二百毫秒，近乎静音不发请求；不能把基于音量的上传边界当作语义断句。每段独立翻译。
+
+在线模式不获取本地模型租约，不加载 VAD/ASR，不使用本地场景、文字翻译或 Jev。会话创建时固定模式及连接配置；用户停止后停止录音、禁止迟到字幕，实时版发送结束事件，分段版取消 HTTP 并清空待发片段，两者都释放网络资源。实时连接测试仅握手，分段连接测试仅 GET 模型目录，不采集音频、不自动保存、不重连。`LiveTranslateModels` 是协议与 UI 下拉选项的共同目录，切换模型同步标准接口路径并保留业务空间域名。
+
+模型目录新增固定 revision、大小和 SHA256；模型语言、介绍、许可作为目录元数据提供给界面，不能继续按 SenseVoice/Reazon 二分硬编码。多语 ASR 保持自动识别，首页源语言用于翻译上下文；单语模型只展示其支持语言。
+
+### 在线听写与独立文字翻译
+
+`ListeningMode.CLOUD_ASR`：`PlaybackPcmCapture` 系统内录 → 千问 3.1 Streaming（WSS 二进制 PCM）→ `CloudAsrTranslationPipeline` → 已保存的 OpenAI 兼容文字翻译 → `OnlineCaptionAdapter` → 同一字幕板。只处理听写定稿，使用十二项有界队列及三十秒等待上限，按顺序翻译，不重试计费。保留完整句意（极长句在120字内切分），译文按现有字幕分句器拆开后逐条显示。
+
+千问听写与语音直译的地址和模型分别持久化，官方域名共享平台凭据目录并按服务选择密钥，自定义服务器按来源隔离；密钥使用 Keystore 可逆加密，原样回填；首次引导按模式选择必要步骤，听写路径为权限、模式、听写配置、文字翻译。设置内所有入口始终可见，当前模式只决定实际采音路径。`PlaybackPcmCapture` 供两条云端路径共用，停止标志与网络取消互相独立，录音对象仍由会话线程释放。
+
+`captionDisplayText` 仅规范显示副本，原始字幕板、记录和分句标点不变；正式字幕、临时字幕与预览共用末尾标点处理。
+
+## 用量账本
+
+`UsageCostRepository` 使用独立私有 SQLite 账本保存会话、逐次增量观测、累计流快照和费率。`CaptionService` 捕获稳定会话 ID，所有实际翻译、听写、直译、辅助与探测请求分别归类，结束后的用量仍归原会话。`CostAccounting` 使用十进制估算已知部分；`totalsBetween` 提供左闭右开时间范围查询。明细长期保留，不依赖字幕记录开关，不设历史自动清理。首页与引导通过听写、翻译服务 ID 选择具体模型和配置，旧三路径保留为内部运行兼容。
+
+## 基础服务目录
+
+服务条目表示实际调用的平台和模型，与内容场景独立。首页保留听写、翻译两个下拉：只列已安装本地模型和已配置所选密钥的内置云服务；DeepSeek 与千问文字接口预先填入地址和模型，用户填写平台密钥或下载模型即可使用。已有自定义连接保留，常规服务无需起名称。
+
+`ListeningServiceRepository` 保留连接 ID、协议、地址和模型，迁移旧连接后补齐缺失的预制项，不保存密钥。文字服务默认配置只补齐空项或新增缺项，不切换已有活动连接。界面标题从实际平台和模型生成，旧目录名称作为兼容字段保留。同平台密钥继续使用中央来源存储。
+
+翻译编辑目标与活动翻译连接分开，保存备用接口不会改变首页选择。进程重建后若编辑目标已丢失，则退回列表。首页仅展示已就绪的内置服务；本地模型简介、评测指标、下载与删除统一位于听写服务。引导选择不受就绪过滤限制，先选择、再配置。字幕样式与主题放在个性化分组。
+
+
+### 多凭据与路由状态
+
+平台默认密钥沿用旧版加密槽位，备用凭据使用稳定 UUID 和独立密文，服务只保存所选凭据引用。音频按协议、端点和模型组成绑定标识，翻译按配置标识绑定，辅助服务按供应商绑定。运行配置、就绪检查、连接测试均读取同一绑定；空值或失效的显式绑定不得静默改用另一把密钥。首页内置服务按实时就绪过滤，完整目录仍可在设置中配置；旧自定义连接不因过滤消失。
+
+页面滚动使用独立路由标识保存单栏和双栏位置，列表、每个编辑器与密钥页相互隔离。业务草稿继续只在控制器内存中保存，密钥和输入内容不进入 Android 保存状态包。前进与返回使用短距离水平过渡，不对页面高度做动画。

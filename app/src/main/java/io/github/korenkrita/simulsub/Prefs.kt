@@ -1,12 +1,267 @@
 package io.github.korenkrita.simulsub
 
 import android.content.Context
+import io.github.korenkrita.simulsub.online.LiveTranslateConfig
+import io.github.korenkrita.simulsub.online.CloudAsrConfig
 
 /** Subtitle look, shared by the settings screen (live preview) and the overlay. */
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jpsub", Context.MODE_PRIVATE)
+    private val platformKeys = PlatformKeyStore(sp, KeyBox::seal, KeyBox::open)
+    private val migrationKey = "platformCredentialsMigratedV1"
+    private val qwenHostMigrationKey = "platformQwenHostsMigratedV1"
+    private val jevMigrationKey = "platformJevCredentialsMigratedV1"
+
+    /** 从单次快照解密平台当前默认；空串明确清空，错误默认指针不回退。 */
+    private fun keyFrom(snapshot: Map<String, *>, id: String): String? =
+        platformKeys.defaultCredential(snapshot, id)?.key
+
+    /** 平台标识需来自已知平台或有效来源，旧业务空间来源保留可编辑性。 */
+    private fun checkedPlatformId(id: String): String {
+        require(id == PlatformCredentials.QWEN.id || id == PlatformCredentials.DEEPSEEK.id ||
+            (id.startsWith("origin:") && PlatformCredentials.forUrl(id.removePrefix("origin:"))?.let {
+                it.id == id || sp.contains("platformKey:$id")
+            } == true)) { "平台标识无效" }
+        return id
+    }
+
+    /** 同一快照解析服务专用密钥，显式绑定缺失时不借用默认项。 */
+    private fun boundKey(snapshot: Map<String, *>, endpoint: String, slot: String): String =
+        PlatformCredentials.forUrl(endpoint)?.let { platformKeys.selected(snapshot, it.id, slot)?.key }.orEmpty()
+
+    /** 兼容旧可空读取：默认槽位尚未保存时返回空值，已保存空串仍是明确选择。 */
+    private fun boundKeyOrNull(snapshot: Map<String, *>, platformId: String, slot: String): String? {
+        val selected = platformKeys.selected(snapshot, platformId, slot) ?: return null
+        if (selected.id == PlatformKeyStore.DEFAULT_ID && !snapshot.containsKey("platformKey:$platformId")) return null
+        return selected.key
+    }
+
+    /** 旧音频密钥按各自端点迁移；官方千问冲突按当前模式选择，旧密文保留。 */
+    private fun migratePlatformKeys() = synchronized(sp) {
+        val snapshot = sp.all
+        if (snapshot[migrationKey] == true) return@synchronized
+        val profiles = LlmProfile.all(snapshot["byokProfiles"] as? String)
+        val active = profiles.firstOrNull { it.id == snapshot["byokActive"] } ?: profiles.first()
+        val ordered = listOf(active) + profiles.filterNot { it.id == active.id }
+        val legacy = linkedMapOf<String, String>()
+        for (profile in ordered) {
+            val url = (snapshot["byokUrl${profile.suffix}"] as? String).orEmpty()
+            val platform = PlatformCredentials.forUrl(url) ?: continue
+            val sealed = snapshot["byokKey${profile.suffix}"] as? String ?: continue
+            val raw = runCatching { KeyBox.open(sealed) }.getOrNull() ?: continue
+            legacy.putIfAbsent(platform.id, raw)
+        }
+        val mode = snapshot["listeningMode"] as? String
+        val qwenOrder = if (mode == ListeningMode.CLOUD_ASR.name) listOf("cloudAsrKey", "onlineKey")
+            else listOf("onlineKey", "cloudAsrKey")
+        var oldQwen: String? = null
+        for (field in qwenOrder) {
+            val endpointField = if (field == "onlineKey") "onlineEndpoint" else "cloudAsrEndpoint"
+            val defaultEndpoint = if (field == "onlineKey") LiveTranslateConfig.DEFAULT_ENDPOINT else CloudAsrConfig.DEFAULT_ENDPOINT
+            val endpoint = snapshot[endpointField] as? String ?: defaultEndpoint
+            val platform = PlatformCredentials.forUrl(endpoint) ?: continue
+            val sealed = snapshot[field] as? String ?: continue
+            val raw = runCatching { KeyBox.open(sealed) }.getOrNull() ?: continue
+            if (platform == PlatformCredentials.QWEN) {
+                if (oldQwen == null) oldQwen = raw
+            } else legacy.putIfAbsent(platform.id, raw)
+        }
+        val activePlatform = PlatformCredentials.forUrl((snapshot["byokUrl${active.suffix}"] as? String).orEmpty())
+        val activeQwen = if (activePlatform == PlatformCredentials.QWEN)
+            (snapshot["byokKey${active.suffix}"] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
+            else null
+        val chosenQwen = if (mode == ListeningMode.LOCAL.name || mode == null) activeQwen ?: oldQwen
+            else oldQwen ?: activeQwen
+        if (chosenQwen != null) legacy[PlatformCredentials.QWEN.id] = chosenQwen
+        val editor = sp.edit()
+        for ((id, raw) in legacy) {
+            if (!snapshot.containsKey("platformKey:$id")) editor.putString("platformKey:$id", KeyBox.seal(raw))
+        }
+        check(editor.putBoolean(migrationKey, true).commit()) { "平台密钥迁移失败，请重试" }
+    }
+
+    /** 旧版按来源保存的官方业务空间密钥，只在千问中央槽位缺失时补入。 */
+    private fun migrateQwenHostKeys() = synchronized(sp) {
+        val snapshot = sp.all
+        if (snapshot[qwenHostMigrationKey] == true) return@synchronized
+        val editor = sp.edit()
+        if (!snapshot.containsKey("platformKey:${PlatformCredentials.QWEN.id}")) {
+            val profiles = LlmProfile.all(snapshot["byokProfiles"] as? String)
+            val active = profiles.firstOrNull { it.id == snapshot["byokActive"] } ?: profiles.first()
+            val ordered = listOf(active) + profiles.filterNot { it.id == active.id }
+            for (profile in ordered) {
+                val url = (snapshot["byokUrl${profile.suffix}"] as? String).orEmpty()
+                if (PlatformCredentials.forUrl(url) != PlatformCredentials.QWEN) continue
+                val host = runCatching { java.net.URI(url).host?.lowercase()?.removeSuffix(".") }.getOrNull() ?: continue
+                val oldId = "origin:https://$host"
+                val sealed = snapshot["platformKey:$oldId"] as? String ?: continue
+                val raw = runCatching { KeyBox.open(sealed) }.getOrNull() ?: continue
+                editor.putString("platformKey:${PlatformCredentials.QWEN.id}", KeyBox.seal(raw))
+                break
+            }
+        }
+        check(editor.putBoolean(qwenHostMigrationKey, true).commit()) { "千问业务空间密钥迁移失败，请重试" }
+    }
+
+    /** 已有中央密钥优先；仅把加密的旧 Jev 凭据补入尚未使用的官方来源槽位。 */
+    private fun migrateJevKeys() = synchronized(sp) {
+        val snapshot = sp.all
+        if (snapshot[jevMigrationKey] == true) return@synchronized
+        val editor = sp.edit()
+        for (provider in JevProvider.entries.filter { it.needsKey }) {
+            val platform = PlatformCredentials.forUrl(provider.url) ?: continue
+            if (snapshot.containsKey("platformKey:${platform.id}")) continue
+            val sealed = snapshot["jevKey:${provider.name}"] as? String ?: continue
+            val raw = runCatching { KeyBox.open(sealed) }.getOrNull() ?: continue
+            editor.putString("platformKey:${platform.id}", KeyBox.seal(raw))
+        }
+        check(editor.putBoolean(jevMigrationKey, true).commit()) { "辅助服务密钥迁移失败，请重试" }
+    }
+
+    /** 返回平台当前默认密钥原文；空串和损坏指针都不借用其他项。 */
+    fun platformKey(id: String): String = keyFrom(sp.all, id).orEmpty()
+
+    /** 列出中央项和命名凭据，顺序及标识不随平台默认切换改变。 */
+    fun platformCredentials(platformId: String): List<PlatformCredential> =
+        platformKeys.credentials(sp.all, checkedPlatformId(platformId))
+
+    /** 读取平台当前默认标识；缺少元数据时为中央标识，损坏标识直接报错。 */
+    fun defaultPlatformCredentialId(platformId: String): String =
+        platformKeys.defaultId(sp.all, checkedPlatformId(platformId))
+
+    /** 只切换平台默认指针，不移动密钥、不修改绑定或已取得的会话快照。 */
+    fun setDefaultPlatformCredential(platformId: String, credentialId: String) =
+        platformKeys.setDefault(checkedPlatformId(platformId), credentialId)
+
+    /** 保存命名凭据，密钥原文不裁剪；旧默认密文和其他项均保留。 */
+    fun savePlatformCredential(platformId: String, credentialId: String, label: String, key: String) =
+        platformKeys.save(checkedPlatformId(platformId), credentialId, label, key)
+
+    /** 获取服务显式绑定标识；空值表示跟随默认，损坏标识直接报错。 */
+    fun selectedCredentialId(platformId: String, serviceSlot: String): String? =
+        platformKeys.selectedId(sp.all, checkedPlatformId(platformId), serviceSlot)
+
+    /** 绑定命名凭据或恢复默认，其他服务的绑定不改变。 */
+    fun selectCredential(platformId: String, serviceSlot: String, credentialId: String?) =
+        platformKeys.select(checkedPlatformId(platformId), serviceSlot, credentialId)
+
+    /** 读取某服务实际绑定的凭据；损坏的绑定不回退其他密钥。 */
+    fun credentialFor(platformId: String, serviceSlot: String): PlatformCredential? =
+        platformKeys.selected(sp.all, checkedPlatformId(platformId), serviceSlot)
+
+    /** 根据连接来源和服务槽位取运行密钥，不跨来源共享。 */
+    fun keyForService(endpoint: String, serviceSlot: String): String = boundKey(sp.all, endpoint, serviceSlot)
+
+    /** 原样加密写入平台当前默认，空串仅清空当前目标，不改写其他凭据。 */
+    fun savePlatformKey(id: String, key: String) = synchronized(sp) {
+        platformKeys.saveDefault(checkedPlatformId(id), key)
+    }
+
+    /** 官方平台、两路音频地址、文字配置和已保存的来源密钥都列入凭据页。 */
+    val credentialPlatforms: List<CredentialPlatform>
+        get() {
+            val snapshot = sp.all
+            val storedOrigins = snapshot.keys.mapNotNull { storageKey ->
+                if (!storageKey.startsWith("platformKey:origin:")) return@mapNotNull null
+                val id = storageKey.removePrefix("platformKey:")
+                val origin = id.removePrefix("origin:")
+                val platform = PlatformCredentials.forUrl(origin) ?: return@mapNotNull null
+                if (platform.id == id) platform else CredentialPlatform(id, origin)
+            }
+            return (listOf(PlatformCredentials.QWEN, PlatformCredentials.DEEPSEEK, PlatformCredentials.SILICONFLOW,
+                PlatformCredentials.OPENROUTER, PlatformCredentials.TYPESAFE) + JevProvider.entries.filter { it.needsKey }.mapNotNull {
+                PlatformCredentials.forUrl(it.url)
+            } + listOfNotNull(
+                PlatformCredentials.forUrl(snapshot["onlineEndpoint"] as? String ?: LiveTranslateConfig.DEFAULT_ENDPOINT),
+                PlatformCredentials.forUrl(snapshot["cloudAsrEndpoint"] as? String ?: CloudAsrConfig.DEFAULT_ENDPOINT),
+            ) + LlmProfile.all(snapshot["byokProfiles"] as? String).mapNotNull {
+                PlatformCredentials.forUrl((snapshot["byokUrl${it.suffix}"] as? String).orEmpty())
+            } + storedOrigins + platformKeys.storedPlatforms(snapshot)).distinctBy { it.id }
+        }
+
+    /** 旧用户和跳过选择的新用户继续使用原有本地识别路径。 */
+    var listeningMode: ListeningMode
+        get() = runCatching { ListeningMode.valueOf(sp.getString("listeningMode", "LOCAL").orEmpty()) }.getOrDefault(ListeningMode.LOCAL)
+        set(value) = sp.edit().putString("listeningMode", value.name).apply()
+
+    /** 云端听译地址与文字翻译配置分开保存，切换模式不会覆盖另一套设置。 */
+    val onlineEndpoint: String get() = sp.getString("onlineEndpoint", LiveTranslateConfig.DEFAULT_ENDPOINT).orEmpty()
+    val onlineModel: String get() = sp.getString("onlineModel", LiveTranslateConfig.DEFAULT_MODEL).orEmpty()
+    val onlineKey: String get() {
+        val snapshot = sp.all
+        val endpoint = snapshot["onlineEndpoint"] as? String ?: LiveTranslateConfig.DEFAULT_ENDPOINT
+        val model = snapshot["onlineModel"] as? String ?: LiveTranslateConfig.DEFAULT_MODEL
+        return boundKey(snapshot, endpoint, listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model))
+    }
+
+    /** 先完成可逆加密，再原子写入云端配置；失败时不保存半套连接信息。 */
+    fun saveOnline(endpoint: String, model: String, key: String) = synchronized(sp) {
+        val platform = requireNotNull(PlatformCredentials.forUrl(endpoint)) { "在线听译地址无效" }
+        val editor = sp.edit().putString("onlineEndpoint", endpoint.trim()).putString("onlineModel", model.trim())
+        platformKeys.putBoundKey(editor, sp.all, platform.id,
+            listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model), key)
+        check(editor.commit()) { "在线听译配置保存失败，请重试" }
+    }
+
+    /** 会话与连接测试从同一个偏好快照读取，避免地址与密钥跨保存混用。 */
+    fun onlineConfig(): LiveTranslateConfig {
+        val snapshot = sp.all
+        val endpoint = snapshot["onlineEndpoint"] as? String ?: LiveTranslateConfig.DEFAULT_ENDPOINT
+        val model = snapshot["onlineModel"] as? String ?: LiveTranslateConfig.DEFAULT_MODEL
+        val key = boundKey(snapshot, endpoint, listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model))
+        return LiveTranslateConfig(
+            endpoint = endpoint,
+            model = model,
+            apiKey = key,
+            sourceLang = (snapshot["sourceLang"] as? String ?: "ja").takeUnless { it == "auto" },
+            targetLang = Target.parse(snapshot["targetLang"] as? String)?.lang?.code ?: "zh",
+        )
+    }
+
+    /** 已保存的配置才参与就绪判断，任意自定义语言不能冒充云端支持语种。 */
+    val onlineReady: Boolean get() = onlineConfig().validationError() == null && targetLang.lang != null
+    /** 在线听写单独保存连接字段，复用现有 Android Keystore 加密盒。 */
+    val cloudAsrEndpoint: String get() = sp.getString("cloudAsrEndpoint", CloudAsrConfig.DEFAULT_ENDPOINT).orEmpty()
+    val cloudAsrModel: String get() = sp.getString("cloudAsrModel", CloudAsrConfig.DEFAULT_MODEL).orEmpty()
+    val cloudAsrKey: String get() {
+        val snapshot = sp.all
+        val endpoint = snapshot["cloudAsrEndpoint"] as? String ?: CloudAsrConfig.DEFAULT_ENDPOINT
+        val model = snapshot["cloudAsrModel"] as? String ?: CloudAsrConfig.DEFAULT_MODEL
+        return boundKey(snapshot, endpoint, listeningCredentialSlot(ListeningMode.CLOUD_ASR, endpoint, model))
+    }
+
+    /** 先加密再整套保存听写字段与当前地址所属平台的密钥。 */
+    fun saveCloudAsr(endpoint: String, model: String, key: String) = synchronized(sp) {
+        val platform = requireNotNull(PlatformCredentials.forUrl(endpoint)) { "在线听写地址无效" }
+        val editor = sp.edit().putString("cloudAsrEndpoint", endpoint.trim()).putString("cloudAsrModel", model.trim())
+        platformKeys.putBoundKey(editor, sp.all, platform.id,
+            listeningCredentialSlot(ListeningMode.CLOUD_ASR, endpoint, model), key)
+        check(editor.commit()) { "在线听写配置保存失败，请重试" }
+    }
+
+    /** 听写连接取同一偏好快照，场景背景随会话作为识别上下文使用。 */
+    fun cloudAsrConfig(): CloudAsrConfig {
+        val snapshot = sp.all
+        val endpoint = snapshot["cloudAsrEndpoint"] as? String ?: CloudAsrConfig.DEFAULT_ENDPOINT
+        val model = snapshot["cloudAsrModel"] as? String ?: CloudAsrConfig.DEFAULT_MODEL
+        val key = boundKey(snapshot, endpoint, listeningCredentialSlot(ListeningMode.CLOUD_ASR, endpoint, model))
+        return CloudAsrConfig(
+            endpoint = endpoint,
+            model = model,
+            apiKey = key,
+            sourceLanguage = snapshot["sourceLang"] as? String ?: "ja",
+            context = scene.background.orEmpty().take(400),
+        )
+    }
+
+    /** 仅判断已保存听写配置；文字翻译是否就绪由调用方分别检查。 */
+    val cloudAsrReady: Boolean get() = cloudAsrConfig().validationErrors().isEmpty()
+
     // 会话、测试连接和生成术语均先读取偏好，再发送模型请求。
     init {
+        migratePlatformKeys()
+        migrateQwenHostKeys()
+        migrateJevKeys()
         ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
         // 停用旧固定高度默认迁移；保留已存高度、预留选择及旧迁移标记，不反向推断用户意图。
         val range = sentenceRange()
@@ -167,11 +422,26 @@ class Prefs(ctx: Context) {
     /** Spoken language (null = auto: Japanese or English) and caption language; read when a session starts. */
     var sourceLang: Lang?
         get() = sp.getString("sourceLang", "ja").let { if (it == "auto") null else Lang.of(it) ?: Lang.JA }
-        set(v) = sp.edit().putString("sourceLang", v?.code ?: "auto").apply()
+        set(v) = sp.edit().putString("sourceLang", v?.code ?: "auto")
+            .putString("modeSource:${listeningMode.name}", v?.code ?: "auto").apply()
     /** a preset language, or one the user typed ("custom:<name>") */
     var targetLang: Target
         get() = Target.parse(sp.getString("targetLang", null)) ?: Target.ZH
-        set(v) = sp.edit().putString("targetLang", v.stored).apply()
+        set(v) = sp.edit().putString("targetLang", v.stored)
+            .putString("modeTarget:${listeningMode.name}", v.stored).apply()
+
+    /** 返回指定模式已记录的源语种；空值表示首次进入，可沿用合法的当前选择。 */
+    fun modeSource(mode: ListeningMode): String? = sp.getString("modeSource:${mode.name}", null)
+        ?.takeIf { it == "auto" || Lang.of(it) != null }
+
+    /** 返回指定模式已记录的目标语言，包括文字翻译的自定义语言。 */
+    fun modeTarget(mode: ListeningMode): Target? = Target.parse(sp.getString("modeTarget:${mode.name}", null))
+
+    /** 切换前记住当前模式语言，保留旧全局字段供服务兼容读取。 */
+    fun saveModeLanguages() {
+        sp.edit().putString("modeSource:${listeningMode.name}", sourceLang?.code ?: "auto")
+            .putString("modeTarget:${listeningMode.name}", targetLang.stored).apply()
+    }
 
     /** The built-in scenes (as edited) and the user's own, see [Scene.all]. */
     var scenes: List<Scene>
@@ -212,16 +482,81 @@ class Prefs(ctx: Context) {
         get() = runCatching { JevProvider.valueOf(sp.getString("jevProvider", null) ?: "") }.getOrDefault(JevProvider.ZEN)
         set(v) = sp.edit().putString("jevProvider", v.name).apply()
 
-    /** API key per provider, encrypted with an Android Keystore key (the stored value is useless off this device). */
-    fun jevKey(p: JevProvider): String? = sp.getString("jevKey:${p.name}", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
-    fun setJevKey(p: JevProvider, key: String?) =
-        sp.edit().apply { if (key.isNullOrBlank()) remove("jevKey:${p.name}") else putString("jevKey:${p.name}", KeyBox.seal(key.trim())) }.apply()
+    /** 需要密钥的 Jev 端点读取本服务绑定；无密钥 Zen 保留独立旧槽位。 */
+    fun jevKey(p: JevProvider): String? {
+        val platform = if (p.needsKey) PlatformCredentials.forUrl(p.url) else null
+        return if (platform != null) boundKeyOrNull(sp.all, platform.id, jevCredentialSlot(p))
+            else sp.getString("jevKey:${p.name}", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
+    }
+
+    /** 官方 Jev 服务原样保存所绑定密钥，Zen 沿用独立加密存储。 */
+    fun setJevKey(p: JevProvider, key: String?) {
+        val platform = if (p.needsKey) PlatformCredentials.forUrl(p.url) else null
+        if (platform != null) synchronized(sp) {
+            val editor = sp.edit()
+            platformKeys.putBoundKey(editor, sp.all, platform.id, jevCredentialSlot(p), key.orEmpty())
+            check(editor.commit()) { "辅助服务密钥保存失败，请重试" }
+        }
+        else sp.edit().apply {
+            if (key.isNullOrEmpty()) remove("jevKey:${p.name}") else putString("jevKey:${p.name}", KeyBox.seal(key))
+        }.apply()
+    }
+
+    /** 首次补齐常用基础翻译接口；保留旧连接、平台密钥及当前选择，不发起网络。 */
+    fun ensureDefaultTranslationServices() = synchronized(sp) {
+        if (sp.getBoolean("translationServiceDefaultsV1", false)) return@synchronized
+        val previous = byokProfile
+        val defaults = listOf(
+            Triple("DeepSeek", "https://api.deepseek.com/v1/chat/completions", "deepseek-flash"),
+            Triple("千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+        )
+        defaults.forEach { (name, url, model) ->
+            val exists = byokProfiles.any { ByokTranslator.chatUrl(byokUrl(it)).second == ByokTranslator.chatUrl(url).second && byokModel(it) == model }
+            if (!exists && byokProfiles.size < LlmProfile.MAX_PROFILES) {
+                val empty = byokProfiles.firstOrNull { it.id == previous.id && byokUrl(it).isBlank() && byokModel(it).isBlank() }
+                val profile = empty ?: addByokProfile(uniqueDefaultTranslationName(name), select = false)
+                saveByok(url, model, null, profile = profile)
+            }
+        }
+        check(sp.edit().putBoolean("translationServiceDefaultsV1", true).commit()) { "默认翻译服务保存失败" }
+    }
+
+    /** 自动内部名称只用于旧目录兼容，界面始终显示实际平台和模型。 */
+    private fun uniqueDefaultTranslationName(base: String): String {
+        val names = byokProfiles.map { it.name }.toSet()
+        var result = base
+        var number = 2
+        while (result in names) { result = "$base $number"; number++ }
+        return result
+    }
 
     /** 翻译配置目录与当前配置；未保存目录时直接读取旧版默认配置。 */
     val byokProfiles: List<LlmProfile> get() = LlmProfile.all(sp.getString("byokProfiles", null))
     val byokProfile: LlmProfile get() = byokProfiles.let { profiles ->
         profiles.firstOrNull { it.id == sp.getString("byokActive", "") } ?: profiles.first()
     }
+    /** 按目标配置读取地址，不改变当前运行配置。 */
+    fun byokUrl(profile: LlmProfile): String = sp.getString("byokUrl${checkedByokProfile(profile).suffix}", "").orEmpty()
+    /** 按目标配置读取模型，不改变当前运行配置。 */
+    fun byokModel(profile: LlmProfile): String = sp.getString("byokModel${checkedByokProfile(profile).suffix}", "").orEmpty()
+    /** 按目标地址来源读取中央密钥，不继承其他来源的凭据。 */
+    fun byokKey(profile: LlmProfile): String? {
+        val snapshot = sp.all
+        val checked = checkedByokProfile(profile)
+        val url = (snapshot["byokUrl${checked.suffix}"] as? String).orEmpty()
+        return PlatformCredentials.forUrl(url)?.let {
+            boundKeyOrNull(snapshot, it.id, translationCredentialSlot(checked.id))
+        }
+    }
+    /** 按目标配置读取请求代理名称。 */
+    fun byokUserAgent(profile: LlmProfile): String = sp.getString("byokUserAgent${checkedByokProfile(profile).suffix}", null).orEmpty()
+    /** 按目标配置解密请求头，不切换活动翻译服务。 */
+    fun byokHeaders(profile: LlmProfile): List<Pair<String, String>> =
+        ByokService.parseHeaders(sp.getString("byokHeaders${checkedByokProfile(profile).suffix}", null)
+            ?.let { runCatching { KeyBox.open(it) }.getOrNull() })
+    /** 拒绝目录之外的标识，避免将编辑内容写入其他存储键。 */
+    private fun checkedByokProfile(profile: LlmProfile): LlmProfile =
+        byokProfiles.firstOrNull { it.id == profile.id } ?: error("翻译配置不存在")
     private val byokSuffix: String get() = byokProfile.suffix
     var byokUrl: String
         get() = sp.getString("byokUrl$byokSuffix", "").orEmpty()
@@ -230,29 +565,51 @@ class Prefs(ctx: Context) {
         get() = sp.getString("byokModel$byokSuffix", "").orEmpty()
         set(value) = sp.edit().putString("byokModel$byokSuffix", value.trim()).apply()
     var byokKey: String?
-        get() = sp.getString("byokKey$byokSuffix", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
-        set(value) = sp.edit().apply {
-            val key = "byokKey$byokSuffix"
-            if (value.isNullOrBlank()) remove(key) else putString(key, KeyBox.seal(value.trim()))
-        }.apply()
+        get() = byokKey(byokProfile)
+        set(value) {
+            val platform = PlatformCredentials.forUrl(byokUrl) ?: error("请先填写有效的服务地址")
+            synchronized(sp) {
+                val editor = sp.edit()
+                platformKeys.putBoundKey(editor, sp.all, platform.id,
+                    translationCredentialSlot(byokProfile.id), value.orEmpty())
+                check(editor.commit()) { "翻译密钥保存失败，请重试" }
+            }
+        }
 
-    /** 一次保存当前配置全部字段；空密钥表示清空，null保留当前配置自己的密钥。 */
+    /** 一次保存当前配置全部字段；空密钥清空目标平台，null保留目标平台密钥。 */
     fun saveByok(url: String, model: String, key: String?, userAgent: String? = null,
-                 headers: List<Pair<String, String>>? = null) {
-        val suffix = byokSuffix
-        sp.edit().apply {
+                 headers: List<Pair<String, String>>? = null, profile: LlmProfile = byokProfile) = synchronized(sp) {
+        val suffix = checkedByokProfile(profile).suffix
+        val platform = PlatformCredentials.forUrl(url)
+        require(key == null || platform != null) { "请先填写有效的服务地址" }
+        val snapshot = sp.all
+        check(sp.edit().apply {
             putString("byokUrl$suffix", url.trim()); putString("byokModel$suffix", model.trim())
-            if (key != null) { if (key.isBlank()) remove("byokKey$suffix") else putString("byokKey$suffix", KeyBox.seal(key.trim())) }
+            if (key != null) platformKeys.putBoundKey(this, snapshot, platform!!.id,
+                translationCredentialSlot(profile.id), key)
             if (userAgent != null) { if (userAgent.isBlank()) remove("byokUserAgent$suffix") else putString("byokUserAgent$suffix", userAgent.trim()) }
             if (headers != null) { if (headers.isEmpty()) remove("byokHeaders$suffix") else putString("byokHeaders$suffix", KeyBox.seal(ByokService.storeHeaders(headers))) }
-            putLong("byokSaved", System.nanoTime())
-        }.apply()
+            if (byokProfile.id == profile.id) putLong("byokSaved", System.nanoTime())
+        }.commit()) { "翻译配置保存失败，请重试" }
     }
 
-    /** 只在配置完整时通知正在运行的服务切换，空配置不会打断现有翻译。 */
-    private fun byokProfileReady(profile: LlmProfile): Boolean =
-        ByokTranslator.chatUrl(sp.getString("byokUrl${profile.suffix}", "").orEmpty()).second != null &&
-            !sp.getString("byokModel${profile.suffix}", "").isNullOrBlank()
+    /** 已知官方文字平台必须有中央密钥，自定义来源仍可免密使用。 */
+    private fun byokConfigurationReady(url: String, model: String, key: String): Boolean {
+        if (ByokTranslator.chatUrl(url).second == null || model.isBlank()) return false
+        val platformId = PlatformCredentials.forUrl(url)?.id
+        val needsKey = TextServiceProviders.requiresKey(platformId)
+        return !needsKey || key.isNotEmpty()
+    }
+
+    /** 从同一偏好快照判断配置是否完整，避免切换时混用另一平台的密钥。 */
+    private fun byokProfileReady(profile: LlmProfile): Boolean {
+        val snapshot = sp.all
+        val url = (snapshot["byokUrl${profile.suffix}"] as? String).orEmpty()
+        val model = (snapshot["byokModel${profile.suffix}"] as? String).orEmpty()
+        val id = PlatformCredentials.forUrl(url)?.id
+        val selected = id?.let { platformKeys.selected(snapshot, it, translationCredentialSlot(profile.id)) }
+        return selected != null && byokConfigurationReady(url, model, selected.key)
+    }
 
     /** 选择一个已有配置，已保存的有效配置从下一句起应用。 */
     fun useByokProfile(profile: LlmProfile) {
@@ -263,16 +620,22 @@ class Prefs(ctx: Context) {
         }.apply()
     }
 
-    /** 新增独立空配置并选中，不复制其他配置的地址、密钥或请求头。 */
-    fun addByokProfile(name: String): LlmProfile {
+    /** 新增独立空配置；旧入口默认选中，服务编辑可只创建目录项。 */
+    fun addByokProfile(name: String, select: Boolean = true, userCreated: Boolean = false): LlmProfile {
         val profiles = byokProfiles
         require(profiles.size < LlmProfile.MAX_PROFILES) { "最多保存 ${LlmProfile.MAX_PROFILES} 套配置" }
         val (checked, error) = LlmProfile.name(name, profiles)
         require(checked != null) { error.orEmpty() }
         val profile = LlmProfile(LlmProfile.newId(profiles), checked)
-        sp.edit().putString("byokProfiles", LlmProfile.store(profiles + profile)).putString("byokActive", profile.id).apply()
+        sp.edit().putString("byokProfiles", LlmProfile.store(profiles + profile)).apply {
+            if (select) putString("byokActive", profile.id)
+            if (userCreated) putBoolean("byokCustom:${profile.id}", true)
+        }.apply()
         return profile
     }
+
+    /** 用户主动添加的服务保留独立来源标记，即使连接恰好与默认模板相同。 */
+    fun isCustomTranslation(profileId: String): Boolean = sp.getBoolean("byokCustom:$profileId", false)
 
     /** 重命名只改变目录，不移动凭据或触发运行中切换。 */
     fun renameByokProfile(profile: LlmProfile, name: String) {
@@ -285,7 +648,7 @@ class Prefs(ctx: Context) {
         })).apply()
     }
 
-    /** 由界面确认后删除指定配置；至少保留一套，删除当前项后选中剩余第一套。 */
+    /** 由界面确认后删除指定配置；旧密钥密文留作恢复，其余配置至少保留一套。 */
     fun deleteByokProfile(profile: LlmProfile) {
         val profiles = byokProfiles
         require(profiles.size > 1) { "至少保留一套翻译配置" }
@@ -293,7 +656,7 @@ class Prefs(ctx: Context) {
         val remaining = profiles.filterNot { it.id == profile.id }
         val active = byokProfile.id == profile.id
         sp.edit().apply {
-            for (key in listOf("byokUrl", "byokModel", "byokKey", "byokUserAgent", "byokHeaders")) remove(key + profile.suffix)
+            for (key in listOf("byokUrl", "byokModel", "byokUserAgent", "byokHeaders")) remove(key + profile.suffix)
             putString("byokProfiles", LlmProfile.store(remaining))
             if (active) {
                 putString("byokActive", remaining.first().id)
@@ -307,19 +670,24 @@ class Prefs(ctx: Context) {
         get() = ByokService.parseHeaders(sp.getString("byokHeaders$byokSuffix", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() })
 
     /** 会话从同一偏好快照解析配置及其所有凭据，避免跨配置混用地址与密钥。 */
-    fun byokService(): ByokService? {
+    fun byokService(profile: LlmProfile = byokProfile): ByokService? {
         val all = sp.all
-        val profiles = LlmProfile.all(all["byokProfiles"] as? String)
-        val suffix = (profiles.firstOrNull { it.id == all["byokActive"] } ?: profiles.first()).suffix
-        val url = ByokTranslator.chatUrl((all["byokUrl$suffix"] as? String).orEmpty()).second ?: return null
-        /** 只解密所选配置的凭据，不能回退到其他配置。 */
-        fun open(key: String) = (all[key + suffix] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
-        return ByokService(url, (all["byokModel$suffix"] as? String).orEmpty(), open("byokKey").orEmpty(),
-            (all["byokUserAgent$suffix"] as? String).orEmpty(), ByokService.parseHeaders(open("byokHeaders")))
+        val suffix = LlmProfile.all(all["byokProfiles"] as? String)
+            .firstOrNull { it.id == profile.id }?.suffix ?: error("翻译配置不存在")
+        val storedUrl = (all["byokUrl$suffix"] as? String).orEmpty()
+        val url = ByokTranslator.chatUrl(storedUrl).second ?: return null
+        val platform = PlatformCredentials.forUrl(storedUrl) ?: return null
+        val selected = platformKeys.selected(all, platform.id, translationCredentialSlot(profile.id)) ?: return null
+        val headers = (all["byokHeaders$suffix"] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
+        return ByokService(url, (all["byokModel$suffix"] as? String).orEmpty(),
+            selected.key,
+            (all["byokUserAgent$suffix"] as? String).orEmpty(), ByokService.parseHeaders(headers))
     }
+    /** 按目标配置判断运行所需字段和中央密钥是否完整。 */
+    fun byokReady(profile: LlmProfile): Boolean = byokProfileReady(checkedByokProfile(profile))
     /** 会话遇到尚未填好的新配置时保留正在使用的服务，完整保存后才切换。 */
     fun byokForSession(fallback: ByokService?): ByokService? =
-        byokService()?.takeIf { it.model.isNotBlank() } ?: fallback
+        byokService()?.takeIf { byokConfigurationReady(it.url, it.model, it.key) } ?: fallback
 
     /**
      * The [ByokTranslator.THINKING_OFF] variant (by name) that answered without reasoning for this exact service URL and
@@ -328,8 +696,18 @@ class Prefs(ctx: Context) {
     fun byokVariant(url: String, model: String): String? = sp.getString("byokVariant:$url|$model", null)
     fun setByokVariant(url: String, model: String, name: String?) =
         sp.edit().apply { if (name == null) remove("byokVariant:$url|$model") else putString("byokVariant:$url|$model", name) }.apply()
-    /** URL and model are there and valid: BYOK can start (the key may be left empty, for a free service). */
-    val byokReady: Boolean get() = ByokTranslator.chatUrl(byokUrl).second != null && byokModel.isNotEmpty()
+    /** 官方平台还需已存密钥；自定义来源保持免密服务的就绪语义。 */
+    val byokReady: Boolean get() {
+        val snapshot = sp.all
+        val profiles = LlmProfile.all(snapshot["byokProfiles"] as? String)
+        val active = profiles.firstOrNull { it.id == snapshot["byokActive"] } ?: profiles.first()
+        val suffix = active.suffix
+        val url = (snapshot["byokUrl$suffix"] as? String).orEmpty()
+        val model = (snapshot["byokModel$suffix"] as? String).orEmpty()
+        val id = PlatformCredentials.forUrl(url)?.id
+        val selected = id?.let { platformKeys.selected(snapshot, it, translationCredentialSlot(active.id)) }
+        return selected != null && byokConfigurationReady(url, model, selected.key)
+    }
 
 
     fun listen(l: android.content.SharedPreferences.OnSharedPreferenceChangeListener) = sp.registerOnSharedPreferenceChangeListener(l)

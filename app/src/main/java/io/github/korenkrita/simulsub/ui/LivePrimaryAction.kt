@@ -10,22 +10,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
+import io.github.korenkrita.simulsub.ListeningMode
 
 /** 横向主按钮与状态卡共享对齐，保持大触控区而不再形成突兀的方形色块。 */
 @Composable
 internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     val missingPermission = state.permissions.firstOrNull { it.required && !it.granted }
+    val online = state.listeningMode == ListeningMode.ONLINE
+    val asr = state.listeningMode == ListeningMode.CLOUD_ASR
     val label = when {
         state.running -> "停止同传"
-        state.modelLabel == "未启用模型" -> "选择识别模型"
-        state.translationLabel == "未配置" -> "配置翻译服务"
+        asr && !state.cloudReady -> "填写千问密钥"
+        asr && !state.translationReady -> "填写翻译平台密钥"
+        online && !state.cloudReady -> "填写千问密钥"
+        state.listeningMode == ListeningMode.LOCAL && state.modelLabel == "未启用模型" -> "下载并启用模型"
+        state.listeningMode == ListeningMode.LOCAL && !state.translationReady -> "配置翻译服务"
         missingPermission != null -> "开启${missingPermission.title}"
         else -> "开始同传"
     }
     val action: () -> Unit = when {
         state.running -> actions.onStop
-        state.modelLabel == "未启用模型" -> ({ actions.onNavigate(UiDestination.MODELS) })
-        state.translationLabel == "未配置" -> ({ actions.onNavigate(UiDestination.SETTINGS) })
+        asr && !state.cloudReady -> actions.onOpenPlatformKeys
+        asr && !state.translationReady -> actions.onOpenPlatformKeys
+        online && !state.cloudReady -> actions.onOpenPlatformKeys
+        state.listeningMode == ListeningMode.LOCAL && state.modelLabel == "未启用模型" -> ({ actions.onNavigate(UiDestination.MODELS) })
+        state.listeningMode == ListeningMode.LOCAL && !state.translationReady -> actions.onOpenPlatformKeys
         missingPermission != null -> ({ actions.onPermission(missingPermission.id) })
         else -> actions.onStart
     }
@@ -38,7 +48,8 @@ internal fun LivePrimaryAction(state: LiveUiState, actions: SimulSubActions) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (state.running) Icons.Outlined.Stop else Icons.Outlined.PlayArrow, null, Modifier.size(28.dp))
-            Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleMedium)
+            Text(if (state.busy) "正在处理…" else label, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f, fill = false), textAlign = TextAlign.Center)
         }
     }
 }
