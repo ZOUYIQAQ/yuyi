@@ -179,7 +179,10 @@ class PlatformCredentialsDeviceTest {
         prefs.saveByok("https://first.example/v1", "模型四", "")
         assertEquals("", prefs.byokKey)
         assertEquals("", prefs.platformKey("origin:https://first.example"))
-        assertTrue(prefs.credentialPlatforms.containsAll(PlatformCredentials.defaults))
+        // 模板全集不是已配置平台列表；固定基础平台和两个真实来源都必须保留。
+        assertTrue(prefs.credentialPlatforms.containsAll(listOf(PlatformCredentials.QWEN, PlatformCredentials.DEEPSEEK,
+            PlatformCredentials.SILICONFLOW, PlatformCredentials.OPENROUTER, PlatformCredentials.TYPESAFE)))
+        assertTrue(prefs.credentialPlatforms.any { it.id == "origin:https://second.example" })
         assertTrue(prefs.credentialPlatforms.any { it.id == "origin:https://first.example" })
     }
 
@@ -260,7 +263,7 @@ class PlatformCredentialsDeviceTest {
         assertEquals("有效密钥", prefs.byokForSession(running)!!.key)
     }
 
-    /** 一次迁移全部旧槽位，当前文字千问优先；重复初始化不覆盖中央空串。 */
+    /** 迁移保留平台默认和每个服务原密钥；重复初始化不覆盖中央清空与独立绑定。 */
     @Test fun migrationKeepsLegacyCiphertextAndCentralValue() {
         val context = context()
         val prefs = Prefs(context)
@@ -279,12 +282,13 @@ class PlatformCredentialsDeviceTest {
             .putString("byokUrl:p2", "https://other.example/v1").putString("byokKey:p2", otherCipher)
             .putString("listeningMode", ListeningMode.LOCAL.name).commit()
         val migrated = Prefs(context)
-        assertEquals("旧文字千问", migrated.onlineKey)
+        assertEquals("旧文字千问", migrated.platformKey("qwen"))
+        assertEquals("旧云端千问", migrated.onlineKey)
         assertEquals("旧其他平台", migrated.platformKey("origin:https://other.example"))
         assertEquals(textCipher, stored.getString("byokKey", null))
         assertEquals(onlineCipher, stored.getString("onlineKey", null))
         migrated.savePlatformKey("qwen", "")
-        assertEquals("", Prefs(context).onlineKey)
+        assertEquals("旧云端千问", Prefs(context).onlineKey)
         assertEquals("", Prefs(context).byokKey)
     }
 

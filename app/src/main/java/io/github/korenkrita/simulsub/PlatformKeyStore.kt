@@ -9,6 +9,9 @@ import java.util.UUID
 /** 一个平台下的命名凭据；密钥保持输入原文。 */
 data class PlatformCredential(val id: String, val label: String, val key: String)
 
+/** 首次升级时的旧服务凭据，迁移后由稳定槽位引用，旧密文不删除。 */
+internal data class LegacyPlatformCredential(val platformId: String, val label: String, val slot: String, val key: String)
+
 /** 音频连接使用协议、端点和模型共同组成稳定的凭据绑定槽位。 */
 fun listeningCredentialSlot(mode: ListeningMode, endpoint: String, model: String): String =
     "listening:${mode.name}:${endpoint.trim()}:${model.trim()}"
@@ -171,6 +174,34 @@ internal class PlatformKeyStore(
         if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "平台凭据保存失败，请重试" }
+    }
+
+    /** 首次迁移将不同的旧密钥拆为命名凭据，与默认及迁移标志同次提交，避免服务串用账号。 */
+    fun putLegacyBindings(editor: SharedPreferences.Editor, snapshot: Map<String, *>,
+        defaults: Map<String, String>, bindings: List<LegacyPlatformCredential>) {
+        bindings.groupBy { it.platformId }.forEach { (platformId, services) ->
+            // 这些元数据来自新版显式操作；不能用更早的旧字段覆盖用户的新选择或清空意图。
+            if (snapshot.containsKey(keyKey(platformId, DEFAULT_ID)) || snapshot.containsKey(listKey(platformId)) ||
+                snapshot.containsKey(defaultKey(platformId)) || snapshot.containsKey(deletedKey(platformId))) return@forEach
+            val known = mutableMapOf(defaults[platformId].orEmpty() to DEFAULT_ID)
+            val entries = labels(snapshot, platformId).toMutableList()
+            var added = false
+            services.forEach serviceLoop@ { service ->
+                val storageKey = bindingKey(platformId, service.slot)
+                if (snapshot.containsKey(storageKey)) return@serviceLoop
+                val id = known[service.key] ?: UUID.randomUUID().toString().also { fresh ->
+                    known[service.key] = fresh
+                    entries += fresh to service.label.take(MAX_LABEL).ifBlank { "升级保留密钥" }
+                    editor.putString(keyKey(platformId, fresh), seal(service.key))
+                    added = true
+                }
+                // 与旧默认相同的服务继续跟随默认，其余服务保留各自的独立引用，包括原本空密钥的服务。
+                if (id != DEFAULT_ID) editor.putString(storageKey, id)
+            }
+            if (added) editor.putString(listKey(platformId), JSONArray().apply {
+                entries.forEach { (id, label) -> put(JSONObject().put("id", id).put("label", label)) }
+            }.toString())
+        }
     }
 
     /** 保存服务绑定；空值恢复跟随默认，所有密文保持原样。 */

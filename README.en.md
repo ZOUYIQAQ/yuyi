@@ -2,7 +2,7 @@
 
 Yuyi provides **floating translated subtitles for live streams and videos on Android**. Choose local recognition with your text translation API, direct cloud speech translation with Qwen LiveTranslate, or Qwen cloud transcription followed by your text translation API.
 
-The current development version is **2.4.1**; the features below include new models and cloud listening. The first published stable release is **1.8.4**.
+The current development version is **2.4.2**; the features below include new models and cloud listening. The first published stable release is **1.8.4**.
 
 [Download release](https://github.com/ZOUYIQAQ/yuyi/releases/latest) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
 

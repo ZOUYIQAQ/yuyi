@@ -38,7 +38,7 @@ class Prefs(ctx: Context) {
         return selected.key
     }
 
-    /** 旧音频密钥按各自端点迁移；官方千问冲突按当前模式选择，旧密文保留。 */
+    /** 首次升级按平台保留默认，按服务保留不同密钥；默认、命名目录和绑定原子迁移。 */
     private fun migratePlatformKeys() = synchronized(sp) {
         val snapshot = sp.all
         if (snapshot[migrationKey] == true) return@synchronized
@@ -75,7 +75,37 @@ class Prefs(ctx: Context) {
         val chosenQwen = if (mode == ListeningMode.LOCAL.name || mode == null) activeQwen ?: oldQwen
             else oldQwen ?: activeQwen
         if (chosenQwen != null) legacy[PlatformCredentials.QWEN.id] = chosenQwen
+        val bindings = mutableListOf<LegacyPlatformCredential>()
+        for (profile in ordered) {
+            val url = (snapshot["byokUrl${profile.suffix}"] as? String).orEmpty()
+            val platform = PlatformCredentials.forUrl(url) ?: continue
+            val ciphertext = snapshot["byokKey${profile.suffix}"] as? String
+            val raw = ciphertext?.let { runCatching { KeyBox.open(it) }.getOrNull() }.orEmpty()
+            bindings += LegacyPlatformCredential(platform.id, "${profile.name} · 升级保留", translationCredentialSlot(profile.id), raw)
+        }
+        for ((field, audioMode) in listOf("onlineKey" to ListeningMode.ONLINE, "cloudAsrKey" to ListeningMode.CLOUD_ASR)) {
+            val endpointField = if (audioMode == ListeningMode.ONLINE) "onlineEndpoint" else "cloudAsrEndpoint"
+            if (!snapshot.containsKey(field) && !snapshot.containsKey(endpointField)) continue
+            val endpoint = snapshot[endpointField] as? String ?: if (audioMode == ListeningMode.ONLINE)
+                LiveTranslateConfig.DEFAULT_ENDPOINT else CloudAsrConfig.DEFAULT_ENDPOINT
+            val platform = PlatformCredentials.forUrl(endpoint) ?: continue
+            val model = snapshot[if (audioMode == ListeningMode.ONLINE) "onlineModel" else "cloudAsrModel"] as? String
+                ?: if (audioMode == ListeningMode.ONLINE) LiveTranslateConfig.DEFAULT_MODEL else CloudAsrConfig.DEFAULT_MODEL
+            val raw = (snapshot[field] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }.orEmpty()
+            bindings += LegacyPlatformCredential(platform.id, if (audioMode == ListeningMode.ONLINE) "听译 · 升级保留" else "听写 · 升级保留",
+                listeningCredentialSlot(audioMode, endpoint, model), raw)
+        }
+        for (provider in JevProvider.entries.filter { it.needsKey }) {
+            val field = "jevKey:${provider.name}"
+            val active = snapshot["jevProvider"] == provider.name && (snapshot["jevOn"] == true || snapshot["jevCheck"] == true)
+            if (!snapshot.containsKey(field) && !active) continue
+            val platform = PlatformCredentials.forUrl(provider.url) ?: continue
+            val raw = (snapshot[field] as? String)?.let { runCatching { KeyBox.open(it) }.getOrNull() }.orEmpty()
+            if (raw.isNotEmpty()) legacy.putIfAbsent(platform.id, raw)
+            bindings += LegacyPlatformCredential(platform.id, "Jev · 升级保留", jevCredentialSlot(provider), raw)
+        }
         val editor = sp.edit()
+        platformKeys.putLegacyBindings(editor, snapshot, legacy, bindings)
         for ((id, raw) in legacy) {
             if (!snapshot.containsKey("platformKey:$id")) editor.putString("platformKey:$id", KeyBox.seal(raw))
         }
