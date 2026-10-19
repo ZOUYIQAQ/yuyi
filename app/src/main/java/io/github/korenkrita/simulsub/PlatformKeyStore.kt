@@ -45,11 +45,22 @@ internal class PlatformKeyStore(
         if (credentialId == DEFAULT_ID) "platformKey:$platformId"
         else "platformCredentialKey:${component(platformId)}:$credentialId"
 
+    /** 删除标记避免旧中央占位和被删除标识在重新读取时复活。 */
+    private fun deletedKey(platformId: String): String = "platformCredentialDeleted:${component(platformId)}"
+
+    /** 仅认可由删除操作写入的集合，不将异常元数据当成有效凭据。 */
+    private fun deleted(snapshot: Map<String, *>, platformId: String): Set<String> =
+        (snapshot[deletedKey(platformId)] as? Set<*>)?.filterIsInstance<String>()?.toSet().orEmpty()
+
+    /** 区分真实存储条目与为兼容旧入口保留的空中央槽。 */
+    fun isStored(snapshot: Map<String, *>, platformId: String, credentialId: String): Boolean =
+        credentialId !in deleted(snapshot, platformId) && snapshot.containsKey(keyKey(platformId, credentialId))
+
     /** 绑定键同时限定平台和具体服务。 */
     private fun bindingKey(platformId: String, serviceSlot: String): String =
         "platformCredentialBinding:${component(platformId)}:${component(serviceSlot)}"
 
-    /** 损坏的目录项不进入可选凭据，中央旧项始终排在第一位。 */
+    /** 损坏与已删除的目录项不进入可选凭据，兼容旧中央项排序。 */
     private fun labels(snapshot: Map<String, *>, platformId: String): List<Pair<String, String>> {
         val array = runCatching { JSONArray(snapshot[listKey(platformId)] as? String ?: "[]") }.getOrNull()
         val extra = (0 until (array?.length() ?: 0)).mapNotNull { index ->
@@ -58,8 +69,8 @@ internal class PlatformKeyStore(
             val label = item.optString("label").trim()
             if (!validId(id) || label.isEmpty() || label.length > MAX_LABEL) null else id to label
         }.distinctBy { it.first }
-        return listOf(DEFAULT_ID to (extra.firstOrNull { it.first == DEFAULT_ID }?.second ?: DEFAULT_LABEL)) +
-            extra.filterNot { it.first == DEFAULT_ID }
+        return (listOf(DEFAULT_ID to (extra.firstOrNull { it.first == DEFAULT_ID }?.second ?: DEFAULT_LABEL)) +
+            extra.filterNot { it.first == DEFAULT_ID }).filterNot { it.first in deleted(snapshot, platformId) }
     }
 
     /** 中央项读取原有密文且不改写；备用项仅解密自己的存储键。 */
@@ -69,7 +80,7 @@ internal class PlatformKeyStore(
         return PlatformCredential(entry.first, entry.second, key)
     }
 
-    /** 获取平台全部凭据，旧中央槽位始终作为第一项保留。 */
+    /** 获取未删除凭据，未配置的旧中央槽由界面识别为占位。 */
     fun credentials(snapshot: Map<String, *>, platformId: String): List<PlatformCredential> =
         labels(snapshot, platformId).map { credential(snapshot, platformId, it) }
 
@@ -80,12 +91,13 @@ internal class PlatformKeyStore(
         return id
     }
 
-    /** 无元数据时兼容中央项；元数据损坏、类型错误或目标缺失均拒绝回退。 */
+    /** 无元数据时兼容中央项；删除标记表示无默认，损坏指针拒绝回退。 */
     fun defaultId(snapshot: Map<String, *>, platformId: String): String {
         val storageKey = defaultKey(platformId)
         if (!snapshot.containsKey(storageKey)) return DEFAULT_ID
         val id = snapshot[storageKey]
         require(id is String) { "平台默认凭据标识无效" }
+        if (id == NO_DEFAULT_ID && deleted(snapshot, platformId).isNotEmpty()) return ""
         return checkedId(snapshot, platformId, id)
     }
 
@@ -140,6 +152,7 @@ internal class PlatformKeyStore(
     /** 写入凭据及其名称；中央项沿用旧密文键，不清理任何旧字段。 */
     fun save(platformId: String, credentialId: String, label: String, key: String) = synchronized(sp) {
         require(validId(credentialId)) { "凭据标识无效" }
+        require(credentialId !in deleted(sp.all, platformId)) { "凭据已删除，请重新添加" }
         val checkedLabel = label.trim()
         require(checkedLabel.isNotEmpty() && checkedLabel.length <= MAX_LABEL) { "凭据名称长度需为 1 到 40 字" }
         val snapshot = sp.all
@@ -151,6 +164,10 @@ internal class PlatformKeyStore(
         val array = JSONArray().apply { updated.forEach { (id, name) -> put(JSONObject().put("id", id).put("label", name)) } }
         val editor = sp.edit().putString(listKey(platformId), array.toString())
             .putString(keyKey(platformId, credentialId), sealed)
+        // 新平台的第一把密钥自动成为默认；已有其他密钥时不擅自改变默认引用。
+        if (entries.none { isStored(snapshot, platformId, it.first) } &&
+            runCatching { defaultId(snapshot, platformId) }.getOrNull() in listOf("", DEFAULT_ID))
+            editor.putString(defaultKey(platformId), credentialId)
         if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "平台凭据保存失败，请重试" }
@@ -169,6 +186,12 @@ internal class PlatformKeyStore(
     /** 旧入口写入平台当前默认，保留中央旧项、命名目录和全部服务绑定。 */
     fun saveDefault(platformId: String, key: String) = synchronized(sp) {
         val id = defaultId(sp.all, platformId)
+        if (id.isEmpty()) {
+            val fresh = UUID.randomUUID().toString()
+            save(platformId, fresh, DEFAULT_LABEL, key)
+            setDefault(platformId, fresh)
+            return@synchronized
+        }
         val editor = sp.edit().putString(keyKey(platformId, id), seal(key))
         if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
             editor.putLong("jevKey:changed", System.nanoTime())
@@ -178,11 +201,38 @@ internal class PlatformKeyStore(
     /** 连同连接字段原子写入所绑定凭据；未知绑定直接失败。 */
     fun putBoundKey(editor: SharedPreferences.Editor, snapshot: Map<String, *>, platformId: String,
         serviceSlot: String, key: String): SharedPreferences.Editor {
-        val id = selectedId(snapshot, platformId, serviceSlot) ?: defaultId(snapshot, platformId)
+        var id = selectedId(snapshot, platformId, serviceSlot) ?: defaultId(snapshot, platformId)
+        if (id.isEmpty()) {
+            id = UUID.randomUUID().toString()
+            val entries = labels(snapshot, platformId) + (id to DEFAULT_LABEL)
+            val array = JSONArray().apply { entries.forEach { (entryId, name) ->
+                put(JSONObject().put("id", entryId).put("label", name))
+            } }
+            editor.putString(listKey(platformId), array.toString()).putString(defaultKey(platformId), id)
+        }
         editor.putString(keyKey(platformId, id), seal(key))
         if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
             editor.putLong("jevKey:changed", System.nanoTime())
         return editor
+    }
+
+    /** 原子删除目录与密文；原服务绑定保留失效引用，不静默借用其他账号。 */
+    fun delete(platformId: String, credentialId: String) = synchronized(sp) {
+        val snapshot = sp.all
+        checkedId(snapshot, platformId, credentialId)
+        require(isStored(snapshot, platformId, credentialId)) { "凭据不存在" }
+        val remaining = labels(snapshot, platformId).filterNot { it.first == credentialId }
+        val array = JSONArray().apply { remaining.forEach { (id, name) ->
+            put(JSONObject().put("id", id).put("label", name))
+        } }
+        val editor = sp.edit().remove(keyKey(platformId, credentialId))
+            .putString(listKey(platformId), array.toString())
+            .putStringSet(deletedKey(platformId), deleted(snapshot, platformId) + credentialId)
+        if (runCatching { defaultId(snapshot, platformId) }.getOrNull() == credentialId)
+            editor.putString(defaultKey(platformId), NO_DEFAULT_ID)
+        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+            editor.putLong("jevKey:changed", System.nanoTime())
+        check(editor.commit()) { "密钥删除失败，请重试" }
     }
 
     /** 仅默认标识或规范 UUID 可写入目录。 */
@@ -190,6 +240,7 @@ internal class PlatformKeyStore(
         runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
 
     companion object {
+        private const val NO_DEFAULT_ID = "deleted-default"
         const val DEFAULT_ID = "default"
         const val DEFAULT_LABEL = "默认密钥"
         const val MAX_LABEL = 40

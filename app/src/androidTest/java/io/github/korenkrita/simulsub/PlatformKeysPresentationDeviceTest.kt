@@ -1,7 +1,6 @@
 package io.github.korenkrita.simulsub
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -61,7 +60,7 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         }
         compose.runOnIdle { keys = listOf(saved); busy = true }
         listOf("platform-key-default-qwen:b", "platform-key-save-qwen:b", "platform-key-qwen:b",
-            "platform-key-label-qwen:b", "platform-key-add-qwen").forEach { reveal(it).assertIsNotEnabled() }
+            "platform-key-label-qwen:b").forEach { reveal(it).assertIsNotEnabled() }
         compose.runOnIdle { assertTrue(defaults.isEmpty()) }
     }
 
@@ -86,7 +85,9 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
             assertEquals("测试密钥A", keys[0].key)
         }
         reveal("platform-key-default-qwen:b").assertIsEnabled()
-        reveal("platform-key-add-qwen").performClick()
+        compose.onNodeWithText("完成").performClick()
+        reveal("platform-key-add").performClick()
+        compose.onNodeWithTag("platform-key-add-qwen").performClick()
         compose.runOnIdle { assertEquals(listOf("qwen"), additions) }
     }
 
@@ -95,8 +96,7 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         compose.runOnIdle { keys = emptyList() }
         show()
         compose.onNodeWithText("同一平台可保存多把密钥").assertIsDisplayed()
-        compose.onNodeWithText("0 个平台").assertIsDisplayed()
-        compose.onNodeWithText("暂无平台密钥信息，请返回后重新进入。").assertIsDisplayed()
+        compose.onNodeWithText("尚未添加密钥，点击右上角添加。").assertIsDisplayed()
     }
 
     /** 平台分组在平板分居两栏，长平台中的末条密钥仍可精准滚动。 */
@@ -115,7 +115,9 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         reveal("platform-key-label-qwen:long-17").performTextReplacement("最后一条")
         reveal("platform-key-qwen:long-17").performTextReplacement("末条原文")
         reveal("platform-key-save-qwen:long-17").performClick()
-        reveal("platform-key-add-qwen").performClick()
+        compose.onNodeWithText("完成").performClick()
+        reveal("platform-key-add").performClick()
+        compose.onNodeWithTag("platform-key-add-qwen").performClick()
         reveal("platform-key-deepseek:c").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals("最后一条", keys[17].credentialLabel)
@@ -129,9 +131,10 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
     private fun show() {
         compose.setContent {
             val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+            CompositionLocalProvider(LocalDensity provides Density(if (tablet) 0.6f else 1f, fontScale)) {
                 SimulSubTheme(SettingsUiState(dynamicColors = false)) {
-                    Box(Modifier.requiredSize(if (tablet) 1100.dp else 412.dp, if (tablet) 760.dp else 880.dp)) {
+                    Box(Modifier.requiredSize(if (tablet) 1040.dp else 360.dp, 720.dp)
+                        .consumeWindowInsets(WindowInsets.systemBars.union(WindowInsets.displayCutout)).padding(top = 24.dp, bottom = 24.dp)) {
                         PlatformKeysSettings(keys, busy, SimulSubActions(
                             onSetDefaultPlatformKey = { id, credentialId ->
                                 defaults += id to credentialId
@@ -150,7 +153,7 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
                                 keys = keys.map { if (it.id == id && it.credentialId == credentialId)
                                     it.copy(hasSavedKey = true, hasUnsavedChanges = false, isNew = false) else it }
                             },
-                            onAddPlatformKey = { additions += it },
+                            onOpenQuickPlatformKey = { id, _ -> additions += id },
                         ), tablet)
                     }
                 }
@@ -160,6 +163,14 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
 
     /** 在真实懒加载列表内按稳定标识定位，兼容两栏各自滚动。 */
     private fun reveal(tag: String): SemanticsNodeInteraction {
+        val itemId = listOf("platform-key-default-", "platform-key-save-", "platform-key-status-", "platform-key-label-", "platform-key-")
+            .firstOrNull { tag.startsWith(it) }?.let { tag.removePrefix(it) }
+        if (!tag.startsWith("platform-key-ring-") && itemId != null && ":" in itemId && compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty()) {
+            if (compose.onAllNodesWithText("完成").fetchSemanticsNodes().isNotEmpty()) compose.onNodeWithText("完成").performClick()
+            reveal("platform-key-ring-$itemId").performClick()
+        }
+        if (compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty())
+            return compose.onNodeWithTag(tag).also { runCatching { it.performScrollTo() } }.assertIsDisplayed()
         val matcher = hasTestTag(tag)
         compose.waitForIdle()
         val lists = compose.onAllNodes(hasScrollToIndexAction()).fetchSemanticsNodes().size
@@ -167,7 +178,7 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         for (index in 0 until lists) {
             try {
                 compose.onAllNodes(hasScrollToIndexAction())[index].performScrollToNode(matcher)
-                return compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
+                return compose.onNodeWithTag(tag).also { runCatching { it.performScrollTo() } }.assertIsDisplayed()
             } catch (error: AssertionError) { failure = error }
         }
         throw failure ?: AssertionError("未找到密钥页面滚动列表")

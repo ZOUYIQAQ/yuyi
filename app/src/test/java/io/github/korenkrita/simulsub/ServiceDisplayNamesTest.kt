@@ -7,14 +7,14 @@ import org.junit.Test
 
 /** 服务标题只由实际调用配置决定，重复连接以稳定序号区分。 */
 class ServiceDisplayNamesTest {
-    /** 本地、在线听写和两种直译模型按真实协议显示。 */
+    /** 本地、在线听写和实时直译按真实协议显示，旧模式明确标注停用。 */
     @Test fun listeningTitlesFollowModeAndModel() {
         assertEquals("本地 · whisper-small", listeningServiceTitle(ListeningMode.LOCAL, "whisper-small"))
         assertEquals("千问 3.1 Streaming · 听写",
             listeningServiceTitle(ListeningMode.CLOUD_ASR, "qwen-audio-3.1-asr-flash-streaming"))
         assertEquals(LiveTranslateModels.realtime.label,
             listeningServiceTitle(ListeningMode.ONLINE, LiveTranslateModels.REALTIME_ID))
-        assertEquals(LiveTranslateModels.economy.label,
+        assertEquals("已停用的分段听译",
             listeningServiceTitle(ListeningMode.ONLINE, LiveTranslateModels.ECONOMY_ID))
         assertEquals("千问语音直译 · qwen-future", listeningServiceTitle(ListeningMode.ONLINE, "qwen-future"))
     }

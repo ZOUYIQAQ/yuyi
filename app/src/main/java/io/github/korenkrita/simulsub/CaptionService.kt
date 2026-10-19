@@ -45,6 +45,12 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class CaptionService : Service() {
     private val main = Handler(Looper.getMainLooper())
+    private val renderQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 一帧最多消费一次最新快照，网络突发和后台状态通知不排成长队。 */
+    private val renderFrame = Runnable {
+        renderQueued.set(false)
+        if (!stopping) render()
+    }
     private var projection: MediaProjection? = null
     /** 启动尚未交给会话线程时由服务保管，启动失败在销毁时释放。 */
     private var pendingModelLease: ModelSessionLease? = null
@@ -59,6 +65,7 @@ class CaptionService : Service() {
      * and unblocks the read, so nothing is ever freed while another thread is still inside it.
      */
     @Volatile private var stopping = false
+    @Volatile private var stoppedAtMs: Long? = null
     /** Guards [pipeline] so onDestroy's stop never races the session thread's release. */
     private val cancelLock = Any()
     private var pipeline: Pipeline? = null
@@ -161,25 +168,31 @@ class CaptionService : Service() {
             override fun onStop() { stopSelf() } // user revoked sharing
         }, main)
         projection = p
-        val ledgerSession = costs.beginSession(when (sessionMode) {
-            ListeningMode.LOCAL -> "本地听写与文字翻译"
-            ListeningMode.CLOUD_ASR -> "在线听写与文字翻译"
-            ListeningMode.ONLINE -> "千问语音直译"
-        })
-        costSessionId = ledgerSession
         running = true
         sessionState.value = SessionSnapshot(true, if (sessionMode != ListeningMode.LOCAL) "正在连接在线服务…" else "正在加载识别模型…")
         showOverlay()
         // fixed at the start: switching it while models load affects the next session, as the switch says
         val keepLogs = prefs.keepLogs
         Thread({
+            if (stopping) { lease?.close(); return@Thread }
+            var ledgerSession: String? = null
             try {
+                ledgerSession = costs.beginSession(when (sessionMode) {
+                    ListeningMode.LOCAL -> "本地听写与文字翻译"
+                    ListeningMode.CLOUD_ASR -> "在线听写与文字翻译"
+                    ListeningMode.ONLINE -> "千问语音直译"
+                })
+                costSessionId = ledgerSession
                 when (sessionMode) {
                     ListeningMode.ONLINE -> runOnlineSession(p, keepLogs, onlineConfig)
                     ListeningMode.CLOUD_ASR -> runCloudAsrSession(p, keepLogs)
                     ListeningMode.LOCAL -> session(p, keepLogs, requireNotNull(lease))
                 }
-            } finally { costs.endSession(ledgerSession) }
+            } catch (error: Exception) {
+                lease?.close()
+                Log.e(TAG, "无法启动听译会话", error)
+                if (!stopping) { setStatus("⚠ 无法启动同传，请重试"); main.post { stopSelf() } }
+            } finally { ledgerSession?.let { costs.endSession(it, stoppedAtMs ?: System.currentTimeMillis()) } }
         }, "jpsub-session").start()
         pendingModelLease = null
         return START_NOT_STICKY
@@ -666,6 +679,7 @@ class CaptionService : Service() {
     }
 
     private fun onCaption(c: Caption, log: SessionLog?) {
+        if (stopping) return
         val t = c.timing
         // timings only: the text of what was said stays out of logcat (it goes to the session log when that is on)
         Log.i(TAG, "seg=${c.segmentId}.${c.revision}${if (c.isFinal) "F" else "d"} audio=${t.audioMs} wait=${t.segmentWaitMs} " +
@@ -682,12 +696,17 @@ class CaptionService : Service() {
     /** A warning that stays for the whole session (the status line is cleared once capture starts). */
     @Volatile private var notice = ""
 
-    /** 将字幕状态发布到界面，悬浮窗不存在时仍保留错误提示。 */
-    private fun refresh() = main.post {
+    /** 合并同一帧内的绘制请求；字幕板仍逐条接收内容，不能以丢句来减少绘制次数。 */
+    private fun refresh() {
+        if (!stopping && renderQueued.compareAndSet(false, true)) main.postDelayed(renderFrame, 16)
+    }
+
+    /** 将最新字幕状态发布到界面，悬浮窗不存在时仍保留错误提示。 */
+    private fun render() {
         // 仅定稿模式先排除草稿再限句，隐藏的草稿不能挤占定稿额度。
         val shown = board.snapshot(includeDraft = !prefs.finalOnly)
         sessionState.value = SessionSnapshot(running, status, shown)
-        val v = overlay ?: return@post
+        val v = overlay ?: return
         val showJa = prefs.showJa
         val lines = shown.map { CaptionOverlayView.Line(it.zh, if (showJa) it.ja else null, it.isFinal, it.segmentId) }
         // status messages (loading, errors, overload) always show; timings only when enabled in settings
@@ -736,6 +755,7 @@ class CaptionService : Service() {
         if (lastUpdateMs.size > 64) lastUpdateMs.keys.removeAll { k -> shown.none { it.segmentId to it.revision == k } }
     }
 
+    /** 建立生产悬浮窗；拖动和点击复用几何，尺寸配置变化才重新测量。 */
     private fun showOverlay() {
         val wm = getSystemService(WindowManager::class.java)
         val dm = resources.displayMetrics
@@ -743,49 +763,55 @@ class CaptionService : Service() {
         v.setColors(CaptionOverlayView.palette(prefs.palette))
         v.setMaxCaptionLines(0)
         v.applyStyle(prefs.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), prefs.bgAlpha)
-        // usable area: current window bounds (follows rotation) minus status / navigation bars. Only its size is
-        // used: the overlay's x/y are already relative to that area (its parent frame excludes the bars).
-        fun area(): android.graphics.Rect {
+        /** 系统窗口区域只在建窗、配置或系统栏变化时读取，不能阻塞每次触控。 */
+        fun readArea(): android.graphics.Rect {
             if (android.os.Build.VERSION.SDK_INT < 30) return android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
             return captionWindowArea(wm.currentWindowMetrics)
         }
+        var bounds = readArea()
+        /** 坐标和尺寸共用同一份区域快照，避免同一回调多次往返系统窗口服务。 */
+        fun area(): android.graphics.Rect = bounds
         var cardW = (area().width() * prefs.widthFrac).toInt()
         var toolbarShown = false
-        val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow())
+        val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow()) { v.toolbarContentVersion }
         overlayToolbarWindow = toolbarWindow
-        var cardX = prefs.overlayX.takeIf { it >= 0 } ?: ((area().width() - cardW) / 2)
+        var cardX = prefs.overlayX
         var cardY = prefs.overlayY.takeIf { it >= 0 } ?: (area().height() * 2 / 3)
         var shownX = cardX; var shownY = cardY
+        var captionH = 0 // 缩放手势期间使用像素高度，并暂时退出自动宽度。
         val baselineAnchor = CaptionBaselineAnchor(prefs.overlayBaselineForArea(area().width(), area().height()))
         val host = CaptionWindowHost(this, wm, v, baselineAnchor) { x, y, width, height ->
-            shownX = x; shownY = y
-            val bounds = area()
-            toolbarWindow.update(toolbarShown, x, y, width, height, bounds.width(), bounds.height())
+            shownX = x; shownY = y; cardW = width
+            if (toolbarShown) toolbarWindow.update(true, x, y, width, height, bounds.width(), bounds.height())
         }
         overlayWindowHost = host
+        /** 尺寸或显示配置改变时才建立排版预算，字幕块高度复用一次卡片测量。 */
         fun layout() {
             val a = area(); val sw = a.width(); val sh = a.height()
-            cardW = cardW.coerceIn((sw * Prefs.MIN_WIDTH).toInt(), sw)
-            v.setCardWidth(cardW)
+            val autoWidth = prefs.widthFrac <= 0f && captionH == 0
+            cardW = if (autoWidth) v.contentWidthPx(sw) else cardW.coerceIn(1, sw)
+            v.setCardWidth(if (autoWidth) 0 else cardW)
             v.setWindowHeightLimit(sh)
             // captions ≤ 40 %, status ≤ 20 % of the usable height: card + toolbar always fit on screen
             v.setMaxContentHeight((a.height() * MAX_CAPTION_FRAC).toInt(), (a.height() * 0.2f).toInt())
             // measured now at this width (a resize just changed width or caption height; the last layout is stale)
             val cardH = v.measureCardHeight(cardW).coerceAtLeast(1)
-            val blockH = v.measureCaptionBlockHeight(cardW).coerceAtLeast(cardH)
+            val blockH = cardH + v.draftSlotHeightPx()
             // cardX / cardY stay what the user chose; only the shown position is clamped (a rotation or a taller card
             // must not overwrite the placement, so rotating back puts the card where it was)
+            if (cardX < 0) cardX = (sw - cardW) / 2
             shownX = cardX.coerceIn(0, sw - cardW)
             val baselineOffset = v.finalLineBaselinePx()
             shownY = baselineAnchor.position(cardY, baselineOffset, sh, blockH)
             v.placeCard(0, 0, false, 0)
-            host.place(cardX, cardY, cardW, sw, sh)
+            host.place(cardX, cardY, if (autoWidth) 0 else cardW, sw, sh)
         }
         // rotation / resize: the caption height may not change, so re-fit explicitly from the saved width fraction
         // caption height from the saved fraction (0 = fit the text); kept within the 40 % cap by the view
+        /** 配置变化时恢复用户选择的高度，普通位置拖动不改变排版预算。 */
         fun applyHeight() = v.setCaptionHeight((area().height() * prefs.heightFrac).toInt())
-        var captionH = 0 // px while a resize drag runs
         onDisplayChanged = {
+            bounds = readArea()
             baselineAnchor.reset()
             cardW = (area().width() * prefs.widthFrac).toInt()
             applyHeight(); layout()
@@ -795,7 +821,7 @@ class CaptionService : Service() {
         v.onMove = { dx, dy ->
             cardX = shownX + dx; cardY = shownY + dy
             baselineAnchor.reset()
-            layout()
+            host.moveTo(cardX, cardY)
         }
         // a corner drag moves that corner; the opposite edges stay where they are. The whole card rectangle is
         // derived from the fixed edges: the caption height is frozen at what is shown, and a width change that
@@ -823,15 +849,20 @@ class CaptionService : Service() {
         }
         v.onMoveEnd = {
             cardX = shownX; cardY = shownY
-            prefs.overlayX = cardX; prefs.overlayY = cardY; prefs.widthFrac = cardW.toFloat() / area().width()
+            prefs.overlayX = cardX; prefs.overlayY = cardY
             baselineAnchor.baseline?.let { prefs.saveOverlayBaseline(it, area().width(), area().height()) }
-            if (captionH > 0) { prefs.heightFrac = captionH.toFloat() / area().height(); captionH = 0 }
+            // 仅缩放保存尺寸，避免纯拖动因浮点宽度回算触发一次意外重测。
+            if (captionH > 0) {
+                prefs.widthFrac = cardW.toFloat() / area().width()
+                prefs.heightFrac = captionH.toFloat() / area().height()
+                captionH = 0
+            }
         }
         v.onStyleChanged = { prefs.setStyle(v.textSp, v.bgAlpha) }
         v.onToolbarShown = {
             toolbarShown = it
-            val bounds = area()
-            toolbarWindow.update(it, shownX, shownY, cardW, v.measureCaptionBlockHeight(cardW), bounds.width(), bounds.height())
+            // 已排版的字幕块就是触摸窗的真实矩形，点击不能同步重测字幕。
+            toolbarWindow.update(it, shownX, shownY, cardW, v.height, bounds.width(), bounds.height())
         }
         v.onStop = { stopSelf() }
         v.setFinalOnly(prefs.finalOnly)
@@ -850,7 +881,7 @@ class CaptionService : Service() {
                 }
                 "textSp", "bgAlpha" -> if (prefs.textSp != v.textSp || prefs.bgAlpha != v.bgAlpha)
                     v.applyStyle(prefs.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), prefs.bgAlpha)
-                "widthFrac" -> (area().width() * prefs.widthFrac).toInt().let { if (it != cardW) { cardW = it; layout() } }
+                "widthFrac" -> { cardW = (area().width() * prefs.widthFrac).toInt(); layout() }
                 "heightFrac" -> if (captionH == 0) { applyHeight(); layout() }
                 "showJa", "showStats" -> { v.setShown(prefs.showJa, prefs.showStats); refresh() }
                 "maxCaptionLines" -> { v.setMaxCaptionLines(0); layout() }
@@ -873,6 +904,22 @@ class CaptionService : Service() {
         refresh()
         layout()
         host.show()
+        toolbarWindow.prepare(bounds.width(), bounds.height())
+        // 文字或工具栏内容改变后在绘制前准备，点击热路径只复用缓存。
+        host.viewTreeObserver.addOnPreDrawListener {
+            toolbarWindow.prepare(bounds.width(), bounds.height())
+            if (toolbarShown) toolbarWindow.update(true, shownX, shownY, cardW, v.height, bounds.width(), bounds.height())
+            true
+        }
+        // 系统栏可见性变化不一定触发配置回调，单独刷新区域以保留沉浸模式贴底行为。
+        var appliedInsets: android.view.WindowInsets? = null
+        host.setOnApplyWindowInsetsListener { _, insets ->
+            if (appliedInsets != insets) {
+                appliedInsets = insets
+                if (readArea() != bounds) onDisplayChanged?.invoke()
+            }
+            insets
+        }
     }
 
     private var onDisplayChanged: (() -> Unit)? = null
@@ -890,13 +937,16 @@ class CaptionService : Service() {
     override fun onDestroy() {
         // Never block the main thread and never free native objects here: the session thread
         // notices `stopping`, finishes, waits for the pipeline workers and releases everything itself.
+        stoppedAtMs = System.currentTimeMillis()
         stopping = true
-        costSessionId?.let { costs.endSession(it) }
+        // 会话线程的 finally 持久化结束状态，主线程不能等待账本锁和磁盘事务。
+        main.removeCallbacks(renderFrame)
+        renderQueued.set(false)
         main.removeCallbacks(pauseOver)
         activeJudge = null // stops watching its service
         runCatching { unregisterReceiver(screenOn) }
         running = false
-        val finalStatus = sessionState.value.status.takeIf { it.startsWith("请先") || it.startsWith("出错") || it.startsWith("⚠") } ?: "同传已停止"
+        val finalStatus = stoppedCaptionStatus(status, sessionState.value.status)
         sessionState.value = sessionState.value.copy(running = false, status = finalStatus)
         pendingModelLease?.close()
         pendingModelLease = null
@@ -1001,3 +1051,8 @@ class CaptionService : Service() {
         }
     }
 }
+
+/** 停止前尚未绘制的错误也必须保留，不能被合帧取消替换成普通停止提示。 */
+internal fun stoppedCaptionStatus(latest: String, published: String): String =
+    listOf(latest, published).firstOrNull { it.startsWith("请先") || it.startsWith("出错") || it.startsWith("⚠") }
+        ?: "同传已停止"

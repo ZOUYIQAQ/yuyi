@@ -18,6 +18,21 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class QwenLiveTranslateClientTest {
+    /** 真实3.5不同响应携带同连接累计快照，必须明确告知调用方使用累计语义。 */
+    @Test fun differentResponseIdsReportConnectionCumulativeUsage() = Harness().use { h ->
+        h.start()
+        val audio = listOf(21L, 49L, 70L, 84L, 105L, 126L, 154L)
+        audio.forEachIndexed { index, count ->
+            h.send(JSONObject().put("type", "response.done").put("response", JSONObject()
+                .put("id", "bill-$index").put("status", "completed").put("output", org.json.JSONArray())
+                .put("usage", JSONObject().put("input_tokens", count).put("output_tokens", index + 1)
+                    .put("input_tokens_details", JSONObject().put("audio_tokens", count)))).toString())
+            assertEquals("bill-$index", h.cumulativeUsages.poll(3, TimeUnit.SECONDS))
+            assertEquals(count, h.usages.poll(3, TimeUnit.SECONDS)?.second?.audioInputTokens)
+        }
+        assertTrue(h.cumulativeUsages.isEmpty())
+    }
+
     /** 响应终帧按 response.id 去重，并在字幕解析失败前保存真实用量。 */
     @Test fun responseUsageIsReportedOnceAndKeepsZero() = Harness().use { h ->
         h.start()
@@ -398,6 +413,7 @@ class QwenLiveTranslateClientTest {
         val texts = LinkedBlockingQueue<LiveTranslationText>()
         val errors = LinkedBlockingQueue<LiveTranslateError>()
         val usages = LinkedBlockingQueue<Pair<String, io.github.korenkrita.simulsub.MeteredUsage>>()
+        val cumulativeUsages = LinkedBlockingQueue<String>()
         val states = CopyOnWriteArrayList<LiveTranslateState>()
         @Volatile var transportClosed = false
         val client: QwenLiveTranslateClient
@@ -424,6 +440,11 @@ class QwenLiveTranslateClientTest {
                 }
             }))
             client = QwenLiveTranslateClient(LiveTranslateConfig(apiKey = "test-private-key", sourceLang = source, model = model), object : LiveTranslateListener {
+                /** 收集明确的会话累计语义，再沿用既有原始用量断言。 */
+                override fun onCumulativeUsage(eventId: String, usage: io.github.korenkrita.simulsub.MeteredUsage) {
+                    cumulativeUsages.put(eventId)
+                    onUsage(eventId, usage)
+                }
                 /** 收集真实响应计量。 */
                 override fun onUsage(eventId: String, usage: io.github.korenkrita.simulsub.MeteredUsage) { usages.put(eventId to usage) }
                 /** 记录状态，部分场景在连接前同步取消。 */

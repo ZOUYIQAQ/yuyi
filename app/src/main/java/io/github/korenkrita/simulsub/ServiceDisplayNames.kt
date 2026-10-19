@@ -12,8 +12,9 @@ fun listeningServiceTitle(mode: ListeningMode, model: String): String {
             "qwen-audio-3.1-asr-flash-streaming" -> "千问 3.1 Streaming · 听写"
             else -> "千问在线听写 · $actualModel"
         }
-        ListeningMode.ONLINE -> LiveTranslateModels.find(actualModel)?.label
-            ?: if (actualModel.isEmpty()) "千问语音直译" else "千问语音直译 · $actualModel"
+        ListeningMode.ONLINE -> if (LiveTranslateModels.isRetired(actualModel)) "已停用的分段听译"
+            else LiveTranslateModels.find(actualModel)?.label
+                ?: if (actualModel.isEmpty()) "千问语音直译" else "千问语音直译 · $actualModel"
     }
 }
 

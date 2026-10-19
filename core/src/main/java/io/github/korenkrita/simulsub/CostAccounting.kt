@@ -42,8 +42,8 @@ data class UsageCostSummary(
     val today: UsageCostTotal,
     val lastSession: UsageCostTotal?,
     val currentSession: UsageCostTotal?,
-    val ratesUpdated: String = "2026-10-17",
-    val priceNote: String = "费用按官方标价估算；DeepSeek 峰谷判断未识别中国法定节假日，节假日工作时段可能高估。",
+    val ratesUpdated: String = "2026-10-18",
+    val priceNote: String = "千问实时听译按会话累计用量计差值，旧版重复统计已校正；缺少用量或单价的部分不报价。DeepSeek 峰谷判断未识别中国法定节假日，节假日工作时段可能高估。",
 )
 
 /** 单次用量观测采用的费率和结果；rate 为计价当时的快照。 */
@@ -59,7 +59,8 @@ object CostAccounting {
         if (platformId == PlatformCredentials.QWEN.id && isBeijingQwen(endpoint)) {
             return when (model) {
                 "qwen-audio-3.1-asr-flash-streaming" -> ManualCostRate(input = BigDecimal("6"), output = BigDecimal("4.5"))
-                "qwen3.5-livetranslate-flash-realtime" -> ManualCostRate(output = BigDecimal("100"), audio = BigDecimal("40"))
+                "qwen3.5-livetranslate-flash-realtime",
+                "qwen3.5-livetranslate-flash-realtime-2026-05-19" -> ManualCostRate(output = BigDecimal("100"), audio = BigDecimal("40"))
                 "qwen3-livetranslate-flash" -> ManualCostRate(output = BigDecimal("10"), audio = BigDecimal("10"))
                 else -> null
             }

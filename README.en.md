@@ -2,7 +2,7 @@
 
 Yuyi provides **floating translated subtitles for live streams and videos on Android**. Choose local recognition with your text translation API, direct cloud speech translation with Qwen LiveTranslate, or Qwen cloud transcription followed by your text translation API.
 
-The current development version is **1.9.0**; the features below include new models and cloud listening. The first published stable release is **1.8.4**.
+The current development version is **2.4.1**; the features below include new models and cloud listening. The first published stable release is **1.8.4**.
 
 [Download release](https://github.com/ZOUYIQAQ/yuyi/releases/latest) · [Quick start](#quick-start) · [Documentation (Chinese)](docs/README.md) · [简体中文](README.md)
 
@@ -38,11 +38,12 @@ Add stream background and preferred translations under **设置 → 场景与术
 
 ## Quick start
 
-First launch guides you through permissions and service selection. Built-in entries already contain their provider endpoint and model. Choose them directly from the two home menus after entering provider keys or downloading a local model. Every guide step can be skipped.
+First launch has three short steps: permissions, local or online listening, then setup. Required permissions and optional notifications are shown separately. Every step can be skipped.
 
-1. **Prepare a listening service**: local ReazonSpeech, SenseVoice, Whisper and Moonshine models are listed by default. Download and activate the chosen model in **Settings → Listening services**. For Qwen transcription or direct speech translation, enter the shared Qwen key in **Settings → Platform keys**.
-2. **Prepare text translation**: DeepSeek and Qwen text models are preset. Enter the corresponding provider key, then choose the model in the home translation menu. Direct speech translation already includes translation and needs no second service.
-3. **Start**: choose source and target languages and an optional scene, tap Start, and confirm the system playback-capture permission.
+- **Online**: Qwen 3.5 Realtime speech translation is ready to configure. Enter your Qwen Key; it saves automatically. Testing the connection is optional, and no local download or separate text translation setup is needed.
+- **Local**: open local setup, then start the ReazonSpeech download yourself in the recognition-model card above text translation. Choose a translation provider and model and enter its Key while the download runs. Connection addresses are filled from provider presets, and the downloaded model activates after verification. The optional connection test retrieves the provider model list, checks endpoint paths and a real translation response, then saves the first working setup. You can still choose another model.
+
+A small progress bar stays at the top of the app during model downloads, including when switching pages. The app shows a completion message after verification. On the home screen, choose languages and an optional scene, tap Start, and confirm system playback capture.
 
 The existing service lists remain available under Settings for editing endpoints and models, testing connectivity, or adding a custom compatible interface. Normal use does not require creating or naming a service. Scenes and terminology remain separate. See [cloud setup](docs/online-listening.md).
 

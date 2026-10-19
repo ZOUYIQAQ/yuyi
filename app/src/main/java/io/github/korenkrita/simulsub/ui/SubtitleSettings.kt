@@ -39,9 +39,9 @@ internal fun SubtitleSettings(style: SubtitleStyleUiState, actions: SimulSubActi
             item("subtitle-size") {
                 SettingsCard {
                     SectionHeading("字幕框尺寸")
-                    ValueSlider("字幕宽度", style.widthFraction, style.minWidthFraction.coerceIn(0.1f, 0.99f)..1f, "屏幕的 ${(style.widthFraction * 100).roundToInt()}%") { actions.onSubtitleStyleChange(style.copy(widthFraction = it)) }
+                    ValueSlider("字幕宽度", style.widthFraction, 0f..1f, if (style.widthFraction <= 0f) "自动随内容变化" else "屏幕的 ${(style.widthFraction * 100).roundToInt()}%", steps = 19) { actions.onSubtitleStyleChange(style.copy(widthFraction = it)) }
                     ValueSlider("字幕高度", style.heightFraction, 0f..0.4f, if (style.heightFraction <= 0f) "自动随内容变化" else "屏幕的 ${(style.heightFraction * 100).roundToInt()}%", steps = 7) { actions.onSubtitleStyleChange(style.copy(heightFraction = it)) }
-                    SupportingText("默认自动随内容调整高度；也可向右拖动选择固定高度，内容超出时向上滚动。")
+                    SupportingText("宽度或高度拖到最左端即自动随内容变化；固定高度下，内容超出时向上滚动。")
                 }
             }
             item("subtitle-history") {

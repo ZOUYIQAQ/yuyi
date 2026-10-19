@@ -55,6 +55,9 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
     /** 换色或混合字号变化后重建富文本，不把相同文字误当新句重播。 */
     fun refreshSpanStyle() { spanStyleDirty = true }
 
+    /** 用完整富文本计算自然行宽，避免上次裁剪或换行结果反过来限制自动宽度。 */
+    internal fun desiredCaptionWidthPx(): Float = android.text.Layout.getDesiredWidth(fullCaption, paint)
+
     /** 手指直接缩放时跟随手势，不让补间动画追赶手指；下一次普通配置变化仍可过渡。 */
     fun followResizeGesture() { finishTransitions(); snapHeightChange = true }
 

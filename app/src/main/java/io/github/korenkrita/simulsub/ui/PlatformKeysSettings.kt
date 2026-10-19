@@ -1,7 +1,13 @@
 package io.github.korenkrita.simulsub.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -16,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -25,67 +32,135 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
-/** 中央密钥页按平台汇总多条凭据，手机顺序阅读、平板分栏管理。 */
+/** 列表只显示首尾；短密钥也不完整泄露，编辑与保存始终使用原文。 */
+internal fun keyRingPreview(key: String): String = when {
+    key.isEmpty() -> "未填写"
+    key.length <= 2 -> "*".repeat(key.length)
+    key.length <= 8 -> "${key.take(1)}${"*".repeat(key.length - 2)}${key.takeLast(1)}"
+    else -> "${key.take(4)}******${key.takeLast(4)}"
+}
+
+/** 紧凑钥匙扣按平台分组，名称与原文首尾直接可见，编辑器点击后才打开。 */
 @Composable
 internal fun PlatformKeysSettings(platforms: List<PlatformKeyUiState>, sessionBusy: Boolean,
     actions: SimulSubActions, wide: Boolean) {
-    val groups = platforms.groupBy { it.id }.entries.toList()
-    // 连续分组按条目数尽量均衡；窄屏合并两栏后仍保持平台原始顺序。
-    val split = if (groups.size > 1) {
-        val total = groups.sumOf { it.value.size + 2 }
-        (1 until groups.size).minByOrNull { index ->
-            kotlin.math.abs(groups.take(index).sumOf { it.value.size + 2 } * 2 - total)
-        } ?: groups.size
-    } else groups.size
+    val groups = platforms.filterNot { it.isPlaceholder || it.isNew }.groupBy { it.id }.entries.toList()
+    val split = (groups.size + 1) / 2
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleting by rememberSaveable { mutableStateOf<String?>(null) }
+    var adding by rememberSaveable { mutableStateOf(false) }
+    var discard by remember { mutableStateOf(false) }
+    val selected = platforms.firstOrNull { "${it.id}:${it.credentialId}" == editing }
+    val removal = platforms.firstOrNull { "${it.id}:${it.credentialId}" == deleting }
+    val editable = !sessionBusy
     PageColumns(wide, header = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("平台密钥", style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f).semantics { heading() })
-                Text("${groups.size} 个平台", style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("同一平台可保存多把密钥", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                FilledTonalButton(onClick = { adding = true }, enabled = editable,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("platform-key-add")) {
+                    Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("添加")
+                }
             }
-            SupportingText("同一平台可保存多把密钥")
             if (sessionBusy) SupportingText("会话进行中，暂时无法修改密钥。")
         }
     }, first = {
         if (groups.isEmpty()) item("platform-keys-empty") {
-            SettingsCard { SupportingText("暂无平台密钥信息，请返回后重新进入。") }
+            SettingsCard { SupportingText("尚未添加密钥，点击右上角添加。") }
         }
-        groups.take(split).forEach { (id, credentials) -> platformKeyGroup(id, credentials, sessionBusy, actions) }
+        groups.take(split).forEach { (id, entries) ->
+            item("platform-heading-$id") { PlatformKeyHeading(id, entries.first().label) }
+            items(entries, key = { "platform-credential-${it.id}:${it.credentialId}" }) { key ->
+                KeyRing(key, editable, { editing = "${key.id}:${key.credentialId}" },
+                    { deleting = "${key.id}:${key.credentialId}" })
+            }
+        }
     }, second = {
-        groups.drop(split).forEach { (id, credentials) -> platformKeyGroup(id, credentials, sessionBusy, actions) }
+        groups.drop(split).forEach { (id, entries) ->
+            item("platform-heading-$id") { PlatformKeyHeading(id, entries.first().label) }
+            items(entries, key = { "platform-credential-${it.id}:${it.credentialId}" }) { key ->
+                KeyRing(key, editable, { editing = "${key.id}:${key.credentialId}" },
+                    { deleting = "${key.id}:${key.credentialId}" })
+            }
+        }
     })
+    if (adding) AlertDialog(onDismissRequest = { adding = false }, title = { Text("添加平台密钥") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                platforms.distinctBy { it.id }.forEach { platform ->
+                    TextButton(onClick = {
+                        adding = false
+                        actions.onOpenQuickPlatformKey(platform.id, "")
+                    }, enabled = editable, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                        .testTag("platform-key-add-${platform.id}")) { Text(platform.label) }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { adding = false }) { Text("取消") } })
+    if (selected != null) {
+        val dismiss = { if (selected.hasUnsavedChanges) discard = true else editing = null }
+        AlertDialog(onDismissRequest = dismiss, title = { Text(selected.label, style = MaterialTheme.typography.titleLarge) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { PlatformKeyEditor(selected, editable, actions) } },
+            confirmButton = { TextButton(onClick = dismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("完成") } })
+        if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("配置尚未保存") },
+            text = { Text("是否放弃这把密钥的修改？") }, confirmButton = {
+                TextButton(onClick = {
+                    actions.onDiscardPlatformKey(selected.id, selected.credentialId)
+                    discard = false; editing = null
+                }) { Text("放弃修改") }
+            }, dismissButton = { TextButton(onClick = { discard = false }) { Text("继续编辑") } })
+    }
+    if (removal != null) AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除密钥？") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("将删除${removal.label}的「${removal.credentialLabel}」。")
+                if (removal.usedBy.isNotEmpty()) Text("以下服务需要重新选择密钥：\n" + removal.usedBy.joinToString("\n"))
+                else Text("使用这把密钥的服务将无法调用，需重新选择密钥。")
+            }
+        }, confirmButton = {
+            TextButton(onClick = {
+                actions.onDeletePlatformKey(removal.id, removal.credentialId); deleting = null
+            }, enabled = editable, modifier = Modifier.testTag("platform-key-confirm-delete"),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("删除") }
+        }, dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } })
 }
 
-/** 平台标题沿用卡片正文的内缩，标题、编辑器和新增入口分别懒加载，长列表仍可精确定位。 */
-private fun LazyListScope.platformKeyGroup(platformId: String, credentials: List<PlatformKeyUiState>,
-    sessionBusy: Boolean, actions: SimulSubActions) {
-    item("platform-heading-$platformId") {
-        // 与 SettingsCard 默认的 20dp 内边距一致，对齐正文与输入框边缘，并保留输入框自身的文字留白。
-        Row(Modifier.fillMaxWidth().testTag("platform-heading-$platformId").padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SectionHeading(credentials.first().label)
-                Text("${credentials.count { it.hasSavedKey && !it.isNew }} 把已保存",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+/** 平台标题与钥匙扣文字对齐，不重复堆叠计数或说明。 */
+@Composable
+private fun PlatformKeyHeading(id: String, label: String) {
+    Text(label, Modifier.padding(horizontal = 16.dp).testTag("platform-heading-$id").semantics { heading() },
+        style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** 编辑点击区与删除触控区分开，整条仅显示名称、首尾预览、默认标记与删除入口。 */
+@Composable
+private fun KeyRing(key: PlatformKeyUiState, editable: Boolean, onEdit: () -> Unit, onDelete: () -> Unit) {
+    val itemId = "${key.id}:${key.credentialId}"
+    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "编辑密钥", onClick = onEdit).padding(16.dp)
+                .testTag("platform-key-ring-$itemId"), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Outlined.Key, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(key.credentialLabel, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        if (key.isDefault) Surface(shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Text("默认", Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                    Text(keyRingPreview(key.key), style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
-                Text("${credentials.size} 把", Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            IconButton(onClick = onDelete, enabled = editable,
+                modifier = Modifier.testTag("platform-key-delete-$itemId")) {
+                Icon(Icons.Outlined.DeleteOutline, "删除${key.credentialLabel}", Modifier.size(20.dp))
             }
-        }
-    }
-    items(credentials, key = { "platform-credential-${it.id}:${it.credentialId}" }) { credential ->
-        SettingsCard { PlatformKeyEditor(credential, !sessionBusy, actions) }
-    }
-    item("platform-add-$platformId") {
-        OutlinedButton(onClick = { actions.onAddPlatformKey(platformId) }, enabled = !sessionBusy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("platform-key-add-$platformId")) {
-            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("添加密钥")
         }
     }
 }

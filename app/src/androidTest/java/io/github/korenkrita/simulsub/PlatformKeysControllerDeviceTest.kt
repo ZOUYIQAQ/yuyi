@@ -45,6 +45,45 @@ class PlatformKeysControllerDeviceTest {
     /** 释放控制器的监听和协程，不删除任何数据。 */
     @After fun finish() = onMain { store.clear() }
 
+    /** 删除动作同步存储与就绪状态，空占位隐藏且备用密钥不被借用。 */
+    @Test fun deletingDefaultUpdatesReadinessAndHiddenPlaceholder() = onMain {
+        actions.onPlatformKeyChange("qwen", "测试默认密钥")
+        actions.onSavePlatformKey("qwen")
+        val alternate = UUID.randomUUID().toString()
+        prefs.savePlatformCredential("qwen", alternate, "备用账号", "测试备用密钥")
+        actions.onDeletePlatformKey("qwen", "default")
+        assertEquals("", prefs.onlineKey)
+        assertFalse(controller.state.value.settings.online.hasSavedConfiguration)
+        assertTrue(controller.state.value.settings.platformKeys.none { it.id == "qwen" && it.credentialId == "default" && !it.isPlaceholder })
+        assertTrue(controller.state.value.settings.platformKeys.any { it.credentialId == alternate && !it.isPlaceholder })
+    }
+
+    /** 快捷新增可修复删除后的失效绑定，不重用被删除凭据的标识。 */
+    @Test fun quickAddRepairsDeletedCredentialForItsOwnService() = onMain {
+        actions.onPlatformKeyChange("deepseek", "旧测试密钥")
+        actions.onSavePlatformKey("deepseek")
+        val serviceId = "translation:${prefs.byokProfile.id}"
+        prefs.selectCredential("deepseek", translationCredentialSlot(prefs.byokProfile.id), "default")
+        actions.onDeletePlatformKey("deepseek", "default")
+        actions.onOpenQuickPlatformKey("deepseek", serviceId)
+        assertNotNull(controller.state.value.settings.quickPlatformKey)
+        actions.onQuickPlatformKeyValueChange("新测试密钥")
+        actions.onSaveQuickPlatformKey()
+        assertNull(controller.state.value.settings.quickPlatformKey)
+        assertEquals("新测试密钥", prefs.byokKey)
+        assertNotEquals("default", prefs.selectedCredentialId("deepseek", translationCredentialSlot(prefs.byokProfile.id)))
+    }
+
+    /** 只放弃目标密钥草稿，另一个平台的未保存文本不丢失。 */
+    @Test fun discardOnlyAffectsOneCredential() = onMain {
+        actions.onPlatformKeyChange("qwen", "草稿一")
+        actions.onPlatformKeyChange("deepseek", "草稿二")
+        actions.onDiscardPlatformKey("qwen", "default")
+        assertEquals("", controller.state.value.settings.platformKeys.first { it.id == "qwen" }.key)
+        assertEquals("草稿二", controller.state.value.settings.platformKeys.first { it.id == "deepseek" }.key)
+        assertTrue(controller.state.value.settings.platformKeys.first { it.id == "deepseek" }.hasUnsavedChanges)
+    }
+
     /** 保存后原文不清空；同一个长密钥立即用于两种千问音频连接。 */
     @Test fun rawKeyRoundtripAndSharedAcrossCloudModes() = onMain {
         val raw = " sk-ws-H.PYDLPID_+-/=".repeat(40) + "中文\n尾部 "

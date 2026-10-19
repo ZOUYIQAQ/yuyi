@@ -2,6 +2,7 @@ package io.github.korenkrita.simulsub
 
 import io.github.korenkrita.simulsub.online.CloudAsrConfig
 import io.github.korenkrita.simulsub.online.LiveTranslateConfig
+import io.github.korenkrita.simulsub.online.LiveTranslateModels
 import java.util.UUID
 
 /** 用户创建的具名听写服务；连接凭据始终由端点来源对应的中央密钥管理。 */
@@ -12,6 +13,13 @@ data class ListeningServiceProfile(
     val endpoint: String,
     val model: String,
 ) {
+    /** 旧分段连接只转换模型和标准路由，服务标识与用户名称保持不变。 */
+    fun migratedRealtime(): ListeningServiceProfile? {
+        if (mode != ListeningMode.ONLINE) return null
+        val migrated = LiveTranslateModels.migratedConnection(endpoint, model) ?: return null
+        return copy(endpoint = migrated.first, model = migrated.second).validated()
+    }
+
     /** 校验并规范名称；端点原文保持不变，交给现有协议校验器判断。 */
     fun validated(): ListeningServiceProfile {
         require(runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "听写服务标识必须是 UUID" }

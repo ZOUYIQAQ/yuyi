@@ -23,8 +23,8 @@ android {
         minSdk = 29 // AudioPlaybackCapture
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 37
-        versionName = "1.9.0"
+        versionCode = 46
+        versionName = "2.4.1"
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -51,6 +51,12 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("yuyiRelease")
+        }
+        // 日常模拟器预览采用正式版优化，沿用开发签名覆盖现有测试包，不清空数据。
+        create("preview") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
 

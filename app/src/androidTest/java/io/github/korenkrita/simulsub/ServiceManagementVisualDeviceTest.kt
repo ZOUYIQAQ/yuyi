@@ -28,7 +28,7 @@ class ServiceManagementVisualDeviceTest {
     private var hideKeyboard: () -> Unit = {}
     private val asrId = "fixture-asr"
     private val realtimeId = "fixture-live"
-    private val segmentedId = "fixture-budget"
+    private val realtimeSnapshotId = "fixture-realtime-snapshot"
     private var createdKind = "asr"
     private val translations = mutableMapOf(
         "translation-deepseek" to TranslationApiUiState(profileId = "translation-deepseek",
@@ -83,7 +83,7 @@ class ServiceManagementVisualDeviceTest {
         screenshot("07-设置独立资源分组")
 
         click(hasText("听写服务"))
-        listOf("local:fixture-model", asrId, realtimeId, segmentedId).forEach { id ->
+        listOf("local:fixture-model", asrId, realtimeId, realtimeSnapshotId).forEach { id ->
             reveal(hasTestTag("service-profile-$id"))
             compose.onNodeWithTag("service-profile-$id").assertIsDisplayed()
         }
@@ -178,7 +178,7 @@ class ServiceManagementVisualDeviceTest {
             ServiceProfileUiState("local:fixture-model", "ReazonSpeech", "已安装 · 日语识别模型", kind = "local"),
             ServiceProfileUiState(asrId, "千问 · qwen-audio-3.1-asr-flash-streaming", CloudAsrConfig.DEFAULT_MODEL, kind = "asr", selected = true),
             ServiceProfileUiState(realtimeId, "千问 · qwen3.5-livetranslate-flash-realtime", LiveTranslateModels.REALTIME_ID, kind = "realtime"),
-            ServiceProfileUiState(segmentedId, "千问 · qwen3-livetranslate-flash", LiveTranslateModels.ECONOMY_ID, kind = "segmented"),
+            ServiceProfileUiState(realtimeSnapshotId, "千问 3.5 · 实时听译快照", "${LiveTranslateModels.REALTIME_ID}-2026-05-19", kind = "realtime"),
             ServiceProfileUiState("local:sensevoice", "SenseVoice Small", "需下载 · 多语种识别模型", kind = "local", configured = false),
             ServiceProfileUiState("local:whisper", "Whisper Tiny multilingual", "需下载 · 多语种识别模型", kind = "local", configured = false),
             ServiceProfileUiState("local:moonshine-en", "Moonshine Tiny English", "需下载 · 英语识别模型", kind = "local", configured = false),
@@ -249,8 +249,8 @@ class ServiceManagementVisualDeviceTest {
             state = state.copy(settings = state.settings.copy(
                 listeningEditor = ListeningEditorUiState(id, profile.name,
                     if (profile.kind == "asr") ListeningMode.CLOUD_ASR else ListeningMode.ONLINE),
-                cloudAsr = if (profile.kind == "asr") listeningDraft(profile.kind) else state.settings.cloudAsr,
-                online = if (profile.kind == "asr") state.settings.online else listeningDraft(profile.kind)))
+                cloudAsr = if (profile.kind == "asr") listeningDraft(profile.kind, profile.detail) else state.settings.cloudAsr,
+                online = if (profile.kind == "asr") state.settings.online else listeningDraft(profile.kind, profile.detail)))
         },
         onSaveListeningService = {
             val editor = state.settings.listeningEditor!!
@@ -291,12 +291,11 @@ class ServiceManagementVisualDeviceTest {
                 listeningProfiles = state.settings.listeningProfiles.map { it.copy(selected = it.id == profile.id) }))
     }
 
-    /** 草稿内容只供界面展示，不包含可调用的测试密钥。 */
-    private fun listeningDraft(kind: String) = OnlineListeningUiState(endpoint = when (kind) {
+    /** 草稿保留所编辑服务的实时快照模型，只供界面展示，不包含可调用的测试密钥。 */
+    private fun listeningDraft(kind: String, model: String? = null) = OnlineListeningUiState(endpoint = when (kind) {
         "asr" -> CloudAsrConfig.DEFAULT_ENDPOINT
-        "segmented" -> LiveTranslateModels.ECONOMY_ENDPOINT
         else -> LiveTranslateModels.REALTIME_ENDPOINT
-    }, model = when (kind) { "asr" -> CloudAsrConfig.DEFAULT_MODEL; "segmented" -> LiveTranslateModels.ECONOMY_ID; else -> LiveTranslateModels.REALTIME_ID },
+    }, model = model ?: when (kind) { "asr" -> CloudAsrConfig.DEFAULT_MODEL; else -> LiveTranslateModels.REALTIME_ID },
         hasSavedConfiguration = true)
 
     /** 翻译编辑草稿携带显示名称列表，当前使用标识独立保留在首页状态中。 */

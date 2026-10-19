@@ -37,12 +37,12 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
     private lateinit var back: OnBackPressedDispatcher
     private val asrId = "profile:fixture-asr"
     private val directId = "profile:fixture-realtime"
-    private val segmentedId = "profile:fixture-segmented"
+    private val realtimeSnapshotId = "profile:fixture-realtime-snapshot"
     private val services = listOf(
         UiOption("local:fixture-model", "本地 · 已安装模型"),
         UiOption(asrId, "千问 · 在线听写"),
         UiOption(directId, "千问 · 实时直译"),
-        UiOption(segmentedId, "千问 · 分段直译"),
+        UiOption(realtimeSnapshotId, "千问 3.5 · 实时听译快照"),
         UiOption("catalog", "下载更多本地模型"),
     )
     private val translations = listOf(UiOption("", "默认翻译"), UiOption("profile-deepseek", "已保存 · DeepSeek"),
@@ -51,7 +51,7 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
         ServiceProfileUiState("local:fixture-model", "本地 · 已安装模型", "本地识别模型", kind = "local", selected = true),
         ServiceProfileUiState("fixture-asr", "千问 · 在线听写", CloudAsrConfig.DEFAULT_MODEL, kind = "asr"),
         ServiceProfileUiState("fixture-realtime", "千问 · 实时直译", LiveTranslateModels.REALTIME_ID, kind = "realtime"),
-        ServiceProfileUiState("fixture-segmented", "千问 · 分段直译", LiveTranslateModels.ECONOMY_ID, kind = "segmented"),
+        ServiceProfileUiState("fixture-realtime-snapshot", "千问 3.5 · 实时听译快照", "${LiveTranslateModels.REALTIME_ID}-2026-05-19", kind = "realtime"),
     )
     private val costs = UsageCostUiState(todayAmount = "¥123456789.1234", lastAmount = "¥9876543.2100",
         currentAmount = "¥12345.6789", todayDetail = "今日音频 120 秒，文字输入 1234 个令牌。",
@@ -97,8 +97,11 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
         compose.onNodeWithTag("translation-service-picker").assertDoesNotExist()
         compose.onNodeWithText("管理翻译").assertDoesNotExist()
         screenshot("直译已包含翻译")
-        select("listening-service-picker", "千问 · 分段直译")
-        compose.runOnIdle { assertEquals(segmentedId, state.live.listeningServiceId) }
+        select("listening-service-picker", "千问 3.5 · 实时听译快照")
+        compose.runOnIdle { assertEquals(realtimeSnapshotId, state.live.listeningServiceId) }
+        reveal(hasTestTag("translation-included"))
+        compose.onNodeWithTag("translation-included").assertIsDisplayed()
+        compose.onNodeWithTag("translation-service-picker").assertDoesNotExist()
         select("listening-service-picker", "本地 · 已安装模型")
         reveal(hasTestTag("translation-service-picker"))
         compose.onNodeWithText("已保存 · DeepSeek").assertIsDisplayed()
@@ -230,7 +233,8 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
             state = state.copy(live = state.live.copy(costs = scoped), settings = state.settings.copy(costs = scoped))
         }
         reveal(hasTestTag("live-cost-summary"))
-        compose.onNodeWithText("含未计价服务 · 金额可能不完整 · 查看明细 ›", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("含未计价服务 · 金额可能不完整 · 查看明细 ›", useUnmergedTree = true)
+            .performScrollTo().assertIsDisplayed()
         compose.runOnIdle { state = state.copy(live = state.live.copy(running = true)) }
         reveal(hasTestTag("live-cost-summary"))
         compose.onNodeWithText("含未计价服务 · 金额可能不完整 · 查看明细 ›", useUnmergedTree = true).assertDoesNotExist()
@@ -238,7 +242,7 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
         listOf("cost-today" to false, "cost-last" to true, "cost-current" to false).forEach { (tag, partial) ->
             reveal(hasTestTag(tag))
             val warning = compose.onNode(hasText("存在未计价服务，金额可能不完整") and hasAnyAncestor(hasTestTag(tag)))
-            if (partial) warning.assertIsDisplayed() else warning.assertDoesNotExist()
+            if (partial) warning.performScrollTo().assertIsDisplayed() else warning.assertDoesNotExist()
         }
     }
 
@@ -246,7 +250,7 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
     @Test fun everyModeKeepsBothConnectionFormsAndLocalEntry() {
         show(destination = UiDestination.SETTINGS)
         compose.onNodeWithText("听写服务").performClick()
-        listOf("local:fixture-model", "fixture-asr", "fixture-realtime", "fixture-segmented").forEach { activeId ->
+        listOf("local:fixture-model", "fixture-asr", "fixture-realtime", "fixture-realtime-snapshot").forEach { activeId ->
             val active = state.settings.listeningProfiles.single { it.id == activeId }
             if (!active.selected) profileAction(activeId, "使用")
             val selectedId = if (active.kind == "local") activeId else "profile:$activeId"
@@ -326,7 +330,7 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
             onSelectListeningService = { id ->
                 events += "听写:$id"
                 val mode = when {
-                    id == directId || id == segmentedId -> ListeningMode.ONLINE
+                    id == directId || id == realtimeSnapshotId -> ListeningMode.ONLINE
                     id == asrId -> ListeningMode.CLOUD_ASR
                     else -> ListeningMode.LOCAL
                 }
@@ -340,7 +344,6 @@ class UsageAndServicesUiDeviceTest(private val tablet: Boolean, private val font
                 val asr = profile.kind == "asr"
                 val draft = OnlineListeningUiState(endpoint = when (profile.kind) {
                     "asr" -> CloudAsrConfig.DEFAULT_ENDPOINT
-                    "segmented" -> LiveTranslateModels.ECONOMY_ENDPOINT
                     else -> LiveTranslateModels.REALTIME_ENDPOINT
                 }, model = profile.detail, hasSavedConfiguration = true)
                 state = state.copy(settings = state.settings.copy(

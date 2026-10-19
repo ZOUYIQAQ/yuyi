@@ -18,6 +18,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.runtime.remember
 import io.github.korenkrita.simulsub.models.ModelRepository
 import io.github.korenkrita.simulsub.ui.SimulSubApp
 import kotlinx.coroutines.flow.collect
@@ -57,11 +58,12 @@ class MainActivity : ComponentActivity() {
         controller = ViewModelProvider(this)[AppController::class.java]
         splashTheme.synchronize(SplashTheme.Appearance.from(controller.state.value.settings))
         observeSplashTheme()
-        controller.restoreLauncherIcon()
-        refreshPermissions()
         setContent {
             val state = controller.state.collectAsStateWithLifecycle().value
-            SimulSubApp(state, controller.actions(::beginCapture, ::requestPermission, ::shareRecord, ::openUrl, ::openUpdateUrl))
+            val actions = remember(controller) {
+                controller.actions(::beginCapture, ::requestPermission, ::shareRecord, ::openUrl, ::openUpdateUrl)
+            }
+            SimulSubApp(state, actions)
         }
     }
 

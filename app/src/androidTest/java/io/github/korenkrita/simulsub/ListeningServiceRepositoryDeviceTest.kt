@@ -46,7 +46,7 @@ class ListeningServiceRepositoryDeviceTest {
         assertNull(ListeningServiceRepository(context).activeId)
     }
 
-    /** 新安装预制三套稳定官方连接；目录只保存公开连接字段。 */
+    /** 新安装仅预制在线听写与实时听译；目录只保存公开连接字段。 */
     @Test fun freshInstallAndStoredFieldsContainNoCredentials() {
         val context = context()
         val prefs = Prefs(context)
@@ -54,9 +54,8 @@ class ListeningServiceRepositoryDeviceTest {
         assertTrue(repo.profiles.isEmpty())
         repo.migrateLegacy(prefs)
         val profiles = ListeningServiceRepository(context).profiles
-        assertEquals(3, profiles.size)
-        assertEquals(listOf(CloudAsrConfig.DEFAULT_MODEL, LiveTranslateModels.REALTIME_ID,
-            LiveTranslateModels.ECONOMY_ID), profiles.map { it.model })
+        assertEquals(2, profiles.size)
+        assertEquals(listOf(CloudAsrConfig.DEFAULT_MODEL, LiveTranslateModels.REALTIME_ID), profiles.map { it.model })
         assertNull(repo.activeId)
         val anotherContext = context()
         val anotherRepo = ListeningServiceRepository(anotherContext)
@@ -66,7 +65,7 @@ class ListeningServiceRepositoryDeviceTest {
         assertEquals(setOf("legacyMigratedV1", "builtInsSeededV1", "profiles"), stored.keys)
         val serialized = stored["profiles"] as String
         val array = org.json.JSONArray(serialized)
-        assertEquals(3, array.length())
+        assertEquals(2, array.length())
         for (index in 0 until array.length()) {
             val fields = array.getJSONObject(index)
             assertEquals(5, fields.length())
@@ -88,7 +87,7 @@ class ListeningServiceRepositoryDeviceTest {
         val old = context.getSharedPreferences("jpsub", 0).all.toMap()
         val repo = ListeningServiceRepository(context)
         repo.migrateLegacy(prefs)
-        assertEquals(3, repo.profiles.size)
+        assertEquals(2, repo.profiles.size)
         assertEquals(ListeningMode.ONLINE, repo.profiles.single { it.id == repo.activeId }.mode)
         assertEquals(old, context.getSharedPreferences("jpsub", 0).all)
         val firstIds = repo.profiles.map { it.id }
@@ -109,7 +108,7 @@ class ListeningServiceRepositoryDeviceTest {
         assertTrue(prefs.onlineReady)
         val repo = ListeningServiceRepository(context)
         repo.migrateLegacy(prefs)
-        assertEquals(3, repo.profiles.size)
+        assertEquals(2, repo.profiles.size)
         assertEquals(CloudAsrConfig.DEFAULT_ENDPOINT, repo.profiles.single { it.mode == ListeningMode.CLOUD_ASR }.endpoint)
         assertEquals(LiveTranslateConfig.DEFAULT_ENDPOINT, repo.profiles.single { it.model == LiveTranslateConfig.DEFAULT_MODEL }.endpoint)
         assertEquals(old, context.getSharedPreferences("jpsub", 0).all)
@@ -129,7 +128,7 @@ class ListeningServiceRepositoryDeviceTest {
         repo.migrateLegacy(prefs)
         assertEquals(existing.id, repo.activeId)
         assertEquals(existing, repo.profiles.single { it.mode == ListeningMode.CLOUD_ASR })
-        assertEquals(3, repo.profiles.size)
+        assertEquals(2, repo.profiles.size)
         val firstIds = repo.profiles.map { it.id }
         repo.migrateLegacy(Prefs(context))
         repo.ensureBuiltIns()
@@ -147,7 +146,7 @@ class ListeningServiceRepositoryDeviceTest {
         repo.ensureBuiltIns()
         assertEquals(existing.id, repo.activeId)
         assertEquals(existing, repo.profiles.single { it.model == LiveTranslateModels.REALTIME_ID })
-        assertEquals(3, repo.profiles.size)
+        assertEquals(2, repo.profiles.size)
         val first = repo.profiles
         val restarted = ListeningServiceRepository(context)
         restarted.ensureBuiltIns()
@@ -162,7 +161,7 @@ class ListeningServiceRepositoryDeviceTest {
         val builtIn = repo.profiles.single { it.mode == ListeningMode.CLOUD_ASR }
         repo.save(builtIn.copy(endpoint = "wss://workspace.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference"))
         repo.ensureBuiltIns()
-        assertEquals(3, repo.profiles.size)
+        assertEquals(2, repo.profiles.size)
         assertEquals(1, repo.profiles.count { it.mode == ListeningMode.CLOUD_ASR })
     }
 

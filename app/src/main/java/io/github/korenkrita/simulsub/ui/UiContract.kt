@@ -9,13 +9,29 @@ typealias CaptionLimitMode = io.github.korenkrita.simulsub.CaptionLimitMode
 /** 页面标识由控制器持有，重建后可恢复当前入口。 */
 enum class UiDestination(val title: String) { LIVE("同传"), SUBTITLE("字幕"), MODELS("听写服务"), SCENES("场景术语"), SETTINGS("设置") }
 
-/** 首次配置区分本地、直接听译、在线听写后文字翻译三条路径，各步均可跳过。 */
+/** 导航绘制和主页面动画共用同一顺序，避免两处各自定义左右关系。 */
+internal val mainNavigationDestinations = listOf(UiDestination.LIVE, UiDestination.SUBTITLE, UiDestination.SETTINGS)
+
+/** 首次配置只提供本地和在线两条简洁路径，各步均可跳过。 */
 enum class OnboardingStep { PERMISSIONS, MODE, API, MODEL, ONLINE }
+
+/** 首次引导仅暴露供应商、模型和密钥；密钥随控制器保存，不进入页面恢复包。 */
+data class OnboardingSetupUiState(
+    val providerId: String = "deepseek",
+    val model: String = "deepseek-flash",
+    val providers: List<UiOption> = emptyList(),
+    val models: List<UiOption> = emptyList(),
+    val key: String = "",
+    val keySaved: Boolean = false,
+    val testing: Boolean = false,
+    val message: UiMessage? = null,
+)
 
 /** 引导完成状态来自真实持久化配置，不将草稿或下载中模型视为可用。 */
 data class OnboardingUiState(val step: OnboardingStep = OnboardingStep.PERMISSIONS,
     val apiReady: Boolean = false, val modelReady: Boolean = false,
-    val listeningMode: ListeningMode = ListeningMode.LOCAL, val onlineReady: Boolean = false)
+    val listeningMode: ListeningMode = ListeningMode.LOCAL, val onlineReady: Boolean = false,
+    val setup: OnboardingSetupUiState = OnboardingSetupUiState())
 
 /** 主题仅影响应用界面，悬浮字幕的配色独立设置。 */
 enum class UiThemeMode(val title: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
@@ -205,6 +221,8 @@ data class PlatformKeyUiState(
     val credentialLabel: String = "默认密钥",
     val isNew: Boolean = false,
     val isDefault: Boolean = false,
+    val isPlaceholder: Boolean = false,
+    val usedBy: List<String> = emptyList(),
 )
 
 /** 快捷密钥表单仅留在控制器内存；服务标识只决定保存后的凭据绑定。 */
@@ -239,6 +257,7 @@ data class CaptionPaletteUiState(val id: String, val label: String, val foregrou
 data class SubtitleStyleUiState(
     val textSp: Float = 18f,
     val backgroundAlpha: Float = 0.8f,
+    /** 零表示自动宽度，正值表示观看区域的固定比例。 */
     val widthFraction: Float = 0.9f,
     /** 默认自动随内容调整高度，零表示自动高度。 */
     val heightFraction: Float = 0f,
@@ -445,6 +464,8 @@ data class SimulSubActions(
     val onPlatformKeyChange: (String, String) -> Unit = { _, _ -> },
     val onSavePlatformKey: (String) -> Unit = {},
     val onAddPlatformKey: (String) -> Unit = {},
+    val onDeletePlatformKey: (String, String) -> Unit = { _, _ -> },
+    val onDiscardPlatformKey: (String, String) -> Unit = { _, _ -> },
     val onPlatformKeyLabelChange: (String, String, String) -> Unit = { _, _, _ -> },
     val onPlatformCredentialChange: (String, String, String) -> Unit = { _, _, _ -> },
     val onSavePlatformCredential: (String, String) -> Unit = { _, _ -> },
@@ -458,7 +479,12 @@ data class SimulSubActions(
     val onDiscardPlatformKeys: () -> Unit = {},
     val onSelectListeningService: (String) -> Unit = {},
     val onChooseOnboardingListeningService: (String) -> Unit = {},
-    /** 创建类型为 asr、realtime 或 segmented；第二参数保留兼容，界面传空字符串。 */
+    val onChooseOnboardingRoute: (ListeningMode) -> Unit = {},
+    val onOnboardingProviderChange: (String) -> Unit = {},
+    val onOnboardingModelChange: (String) -> Unit = {},
+    val onOnboardingKeyChange: (String) -> Unit = {},
+    val onOnboardingTest: () -> Unit = {},
+    /** 创建类型为 asr 或 realtime；第二参数保留兼容，界面传空字符串。 */
     val onCreateListeningService: (String, String) -> Unit = { _, _ -> },
     val onEditListeningService: (String) -> Unit = {},
     val onListeningServiceNameChange: (String) -> Unit = {},

@@ -23,10 +23,8 @@ data class LiveTranslateConfig(
     /** 返回不包含配置原文的校验说明；空值表示通过，源语种为空时由云端识别。 */
     fun validationError(): String? = when {
         baseUrl() == null -> "听译端点必须是无账号、查询参数和片段的 HTTPS 或 WSS 地址"
-        LiveTranslateModels.find(model) == null -> "请选择已接入的千问实时听译或省钱分段模型"
-        !isRealtime && !endpoint.startsWith("https://", ignoreCase = true) -> "省钱分段模型需要 HTTPS 接口地址"
-        !isRealtime && baseUrl()?.pathSegments?.takeLast(4) != listOf("compatible-mode", "v1", "chat", "completions") ->
-            "省钱分段地址需以 /compatible-mode/v1/chat/completions 结束"
+        LiveTranslateModels.isRetired(model) -> "分段听译已停用，请重新选择千问实时听译服务"
+        LiveTranslateModels.find(model) == null -> "请选择已接入的千问实时听译模型"
         apiKey.isEmpty() -> "请先配置阿里百炼平台密钥"
         sourceLang != null && sourceLang !in SUPPORTED_TARGET_LANGUAGES -> "听译源语种暂不支持"
         targetLang !in SUPPORTED_TARGET_LANGUAGES -> "听译目标语种暂不支持"
@@ -96,6 +94,8 @@ data class LiveTranslateError(val code: Code, val message: String) {
 interface LiveTranslateListener {
     /** 每个已完成响应或文件片段通知一次服务端报告的用量；未知字段保持 null。 */
     fun onUsage(eventId: String, usage: MeteredUsage) {}
+    /** 实时听译报告同一连接的累计快照；响应号变化不代表新的计量基线。 */
+    fun onCumulativeUsage(eventId: String, usage: MeteredUsage) { onUsage(eventId, usage) }
     /** 通知握手、可发送音频及终止状态。 */
     fun onState(state: LiveTranslateState) {}
     /** 以完整字幕快照通知新增或更新，同段快照相同则不重复通知。 */

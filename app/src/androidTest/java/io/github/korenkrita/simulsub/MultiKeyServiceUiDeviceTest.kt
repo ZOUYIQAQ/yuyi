@@ -283,7 +283,7 @@ class MultiKeyServiceUiDeviceTest {
                 listeningProfiles = listOf(
                     ServiceProfileUiState("local:fixture-installed", "本地 · 已安装测试模型", kind = "local"),
                     ServiceProfileUiState(asrId, "千问 · 测试听写", kind = "asr", selected = true, platformId = "qwen", credentialId = "course"),
-                    ServiceProfileUiState("fixture-direct", "千问 · 测试实时听译", kind = "realtime", platformId = "qwen"),
+                    ServiceProfileUiState("fixture-direct", "千问 · 测试实时听译", kind = "direct", platformId = "qwen"),
                     ServiceProfileUiState("local:fixture-missing", "本地 · 待下载测试模型", kind = "local", configured = false)),
                 translationProfiles = listOf(ServiceProfileUiState(translationId, "DeepSeek · 测试翻译", selected = true,
                     platformId = "deepseek", credentialId = "backup"))))
@@ -396,7 +396,7 @@ class MultiKeyServiceUiDeviceTest {
     private fun decorate(profile: ServiceProfileUiState, translation: Boolean): ServiceProfileUiState {
         val keys = savedCredentials.values.filter { it.id == profile.platformId }
         val activeCredential = profile.credentialId.ifEmpty { "default" }
-        return profile.copy(credentialOptions = keys.map { UiOption(it.credentialId, it.credentialLabel) },
+        return profile.copy(credentialOptions = keys.map { UiOption(it.credentialId, it.credentialLabel, if (it.hasSavedKey) "已保存" else "未填写") },
             credentialLabel = keys.firstOrNull { it.credentialId == activeCredential }?.credentialLabel.orEmpty(),
             selected = if (translation) state.live.translationServiceId == profile.id
                 else state.live.listeningServiceId == if (profile.kind == "local") profile.id else "profile:${profile.id}")
@@ -421,7 +421,8 @@ class MultiKeyServiceUiDeviceTest {
 
     /** 服务操作使用卡片稳定标识限定范围，避免多个同名按钮之间产生歧义。 */
     private fun cardAction(id: String, label: String) {
-        click(hasText(label) and hasAnyAncestor(hasTestTag("service-profile-$id")))
+        if (label == "编辑" || label == "选择密钥") click(hasTestTag("configure-service-$id"))
+        else click(hasText(label) and hasAnyAncestor(hasTestTag("service-profile-$id")))
     }
 
     /** 弹窗标题和平台密钥选择器必须可见，证明停留在内置服务的轻量选择弹窗。 */

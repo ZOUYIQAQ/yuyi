@@ -2,11 +2,13 @@ package io.github.korenkrita.simulsub
 
 import android.content.Context
 import io.github.korenkrita.simulsub.online.LiveTranslateConfig
+import io.github.korenkrita.simulsub.online.LiveTranslateModels
 import io.github.korenkrita.simulsub.online.CloudAsrConfig
 
 /** Subtitle look, shared by the settings screen (live preview) and the overlay. */
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jpsub", Context.MODE_PRIVATE)
+    private val listeningServicesSp = ctx.getSharedPreferences("listening_services", Context.MODE_PRIVATE)
     private val platformKeys = PlatformKeyStore(sp, KeyBox::seal, KeyBox::open)
     private val migrationKey = "platformCredentialsMigratedV1"
     private val qwenHostMigrationKey = "platformQwenHostsMigratedV1"
@@ -20,7 +22,7 @@ class Prefs(ctx: Context) {
     private fun checkedPlatformId(id: String): String {
         require(id == PlatformCredentials.QWEN.id || id == PlatformCredentials.DEEPSEEK.id ||
             (id.startsWith("origin:") && PlatformCredentials.forUrl(id.removePrefix("origin:"))?.let {
-                it.id == id || sp.contains("platformKey:$id")
+                it.id == id || sp.contains("platformKey:$id") || platformKeys.storedPlatforms(sp.all).any { stored -> stored.id == id }
             } == true)) { "平台标识无效" }
         return id
     }
@@ -125,6 +127,14 @@ class Prefs(ctx: Context) {
     fun platformCredentials(platformId: String): List<PlatformCredential> =
         platformKeys.credentials(sp.all, checkedPlatformId(platformId))
 
+    /** 判断凭据是否确实保存，兼容占位不作为钥匙扣显示。 */
+    fun hasStoredPlatformCredential(platformId: String, credentialId: String): Boolean =
+        platformKeys.isStored(sp.all, checkedPlatformId(platformId), credentialId)
+
+    /** 删除用户确认的凭据；服务引用失效后需重新选择。 */
+    fun deletePlatformCredential(platformId: String, credentialId: String) =
+        platformKeys.delete(checkedPlatformId(platformId), credentialId)
+
     /** 读取平台当前默认标识；缺少元数据时为中央标识，损坏标识直接报错。 */
     fun defaultPlatformCredentialId(platformId: String): String =
         platformKeys.defaultId(sp.all, checkedPlatformId(platformId))
@@ -194,8 +204,63 @@ class Prefs(ctx: Context) {
         return boundKey(snapshot, endpoint, listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model))
     }
 
+    /** 使用与凭据仓库相同的编码定位绑定，只复制标识，不读取或重写任何密文。 */
+    private fun onlineBindingKey(platformId: String, endpoint: String, model: String): String {
+        val flags = android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        val platform = android.util.Base64.encodeToString(platformId.toByteArray(Charsets.UTF_8), flags)
+        val slot = listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model)
+        val encodedSlot = android.util.Base64.encodeToString(slot.toByteArray(Charsets.UTF_8), flags)
+        return "platformCredentialBinding:$platform:$encodedSlot"
+    }
+
+    /** 已有实时服务即使跟随默认也受保护，迁移不能改变另一服务实际使用的凭据。 */
+    private fun hasRealtimeConnection(snapshot: Map<String, *>, endpoint: String, model: String): Boolean {
+        if (snapshot["onlineEndpoint"] == endpoint && snapshot["onlineModel"] == model) return true
+        val array = runCatching { org.json.JSONArray(listeningServicesSp.getString("profiles", null) ?: "[]") }
+            .getOrNull() ?: return false
+        return (0 until array.length()).any { index ->
+            val item = array.optJSONObject(index) ?: return@any false
+            item.optString("mode") == ListeningMode.ONLINE.name &&
+                item.optString("endpoint") == endpoint && item.optString("model") == model
+        }
+    }
+
+    /** 为重新选择准备实时绑定；当前旧连接保持待选择，冲突时不覆盖任何凭据。 */
+    internal fun migrateRetiredOnlineConnection(endpoint: String, model: String,
+        preserveCurrent: Boolean = false): Pair<String, String>? = synchronized(sp) {
+        val migrated = LiveTranslateModels.migratedConnection(endpoint, model)
+            ?: return@synchronized null
+        val platform = PlatformCredentials.forUrl(endpoint)?.id ?: return@synchronized null
+        if (PlatformCredentials.forUrl(migrated.first)?.id != platform) return@synchronized null
+        val snapshot = sp.all
+        val sourceKey = onlineBindingKey(platform, endpoint, model)
+        val targetKey = onlineBindingKey(platform, migrated.first, migrated.second)
+        val sourceId = runCatching { platformKeys.selectedId(snapshot, platform,
+            listeningCredentialSlot(ListeningMode.ONLINE, endpoint, model)) }.getOrElse { return@synchronized null }
+        val targetId = runCatching { platformKeys.selectedId(snapshot, platform,
+            listeningCredentialSlot(ListeningMode.ONLINE, migrated.first, migrated.second)) }.getOrElse { return@synchronized null }
+        if ((snapshot.containsKey(targetKey) || hasRealtimeConnection(snapshot, migrated.first, migrated.second)) &&
+            sourceId != targetId) return@synchronized null
+        val editor = sp.edit()
+        var changed = false
+        if (!snapshot.containsKey(targetKey) && snapshot.containsKey(sourceKey)) {
+            editor.putString(targetKey, snapshot[sourceKey] as String)
+            changed = true
+        }
+        if (preserveCurrent && !snapshot.containsKey("retiredOnlineConnectionV1")) {
+            editor.putString("retiredOnlineConnectionV1",
+                org.json.JSONObject().put("endpoint", endpoint).put("model", model).toString())
+            changed = true
+        }
+        if (changed) check(editor.commit()) { "旧分段听译配置迁移失败，请重试" }
+        migrated
+    }
+
     /** 先完成可逆加密，再原子写入云端配置；失败时不保存半套连接信息。 */
     fun saveOnline(endpoint: String, model: String, key: String) = synchronized(sp) {
+        require(!LiveTranslateModels.isRetired(model.trim())) {
+            "请选择已接入的千问实时听译模型"
+        }
         val platform = requireNotNull(PlatformCredentials.forUrl(endpoint)) { "在线听译地址无效" }
         val editor = sp.edit().putString("onlineEndpoint", endpoint.trim()).putString("onlineModel", model.trim())
         platformKeys.putBoundKey(editor, sp.all, platform.id,
@@ -262,6 +327,7 @@ class Prefs(ctx: Context) {
         migratePlatformKeys()
         migrateQwenHostKeys()
         migrateJevKeys()
+        migrateRetiredOnlineConnection(onlineEndpoint, onlineModel, preserveCurrent = true)
         ByokTranslator.defaultUserAgent = "Yuyi/${BuildConfig.VERSION_NAME}"
         // 停用旧固定高度默认迁移；保留已存高度、预留选择及旧迁移标记，不反向推断用户意图。
         val range = sentenceRange()
@@ -299,7 +365,7 @@ class Prefs(ctx: Context) {
         get() = sp.getString("palette", CaptionOverlayView.PALETTES[0].id)!!
         set(v) = sp.edit().putString("palette", v).apply()
 
-    /** Overlay width as a fraction of the screen width */
+    /** 字幕宽度占观看区域的比例，零表示随内容自动伸缩。 */
     var widthFrac: Float
         get() = sp.getFloat("widthFrac", DEFAULT_WIDTH)
         set(v) = sp.edit().putFloat("widthFrac", v).apply()
@@ -715,14 +781,17 @@ class Prefs(ctx: Context) {
 
     companion object {
         const val DEFAULT_WIDTH = 0.90f
-        /** Width slider / resize range as a fraction of the screen width. */
+        /** 手动拖动角落缩放时的最小宽度比例，不限制设置中的自动宽度。 */
         const val MIN_WIDTH = 0.40f
     }
 }
 
-/** AES-GCM with a non-exportable Android Keystore key; output = base64(iv ‖ ciphertext). */
+/** 使用不可导出的设备密钥执行 AES-GCM，持久化格式保持为 base64(IV + 密文)。 */
 private object KeyBox {
     private const val ALIAS = "jpsub-jev"
+    private val decrypted = DecryptionCache(decrypt = ::decrypt)
+
+    /** 每次真正执行加解密时重新获取设备密钥，让别名异常后的重试有机会恢复。 */
     private fun key(): javax.crypto.SecretKey {
         val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getKey(ALIAS, null) as? javax.crypto.SecretKey)?.let { return it }
@@ -733,11 +802,16 @@ private object KeyBox {
             .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE).build())
         return g.generateKey()
     }
+    /** 每次使用真实 AES-GCM 和新 IV 加密，不向解密缓存预填未经解密的结果。 */
     fun seal(s: String): String {
         val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply { init(javax.crypto.Cipher.ENCRYPT_MODE, key()) }
         return android.util.Base64.encodeToString(c.iv + c.doFinal(s.toByteArray()), android.util.Base64.NO_WRAP)
     }
-    fun open(b64: String): String {
+    /** 仅按完整密文复用成功解密值，不缓存偏好键、默认指针或服务绑定。 */
+    fun open(b64: String): String = decrypted.open(b64)
+
+    /** 缓存未命中时执行原有认证解密，任何异常均由调用方处理。 */
+    private fun decrypt(b64: String): String {
         val b = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
         val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
         c.init(javax.crypto.Cipher.DECRYPT_MODE, key(), javax.crypto.spec.GCMParameterSpec(128, b, 0, 12))

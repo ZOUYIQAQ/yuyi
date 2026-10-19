@@ -29,6 +29,7 @@ class OnlineListeningUiDeviceTest(private val tablet: Boolean, private val fontS
     private var testView: android.view.View? = null
     private val saved = OnlineListeningUiState(endpoint = "wss://workspace.example.test/api-ws/v1/realtime",
         model = LiveTranslateModels.REALTIME_ID, key = "完整测试密钥", hasSavedConfiguration = true)
+    private val onlineServiceId = "online-configuration-fixture"
 
     companion object {
         /** 每条交互覆盖手机、平板与两倍字号，全部使用同一应用组合入口。 */
@@ -72,15 +73,14 @@ class OnlineListeningUiDeviceTest(private val tablet: Boolean, private val fontS
     @Test fun explicitTestShowsResultWithoutSaving() {
         show()
         openListening()
-        scrollFormTo(hasTestTag("online-model"))
-        compose.onNodeWithText("千问 3.5 · 实时听译").performClick()
-        compose.onNodeWithText("千问 3 · 省钱分段").performScrollTo().performClick()
+        scrollFormTo(hasTestTag("online-endpoint"))
+        compose.onNodeWithTag("online-endpoint").performTextReplacement("wss://workspace.example.test:8443/api-ws/v1/realtime")
         clickForm("测试在线连接")
         scrollFormTo(hasText("连接验证成功，未发送音频"))
         compose.onNodeWithText("连接验证成功，未发送音频").performScrollTo().assertIsDisplayed()
         compose.runOnIdle {
             assertTrue(state.settings.online.hasUnsavedChanges)
-            assertEquals(LiveTranslateModels.ECONOMY_ID, state.settings.online.model)
+            assertEquals(LiveTranslateModels.REALTIME_ID, state.settings.online.model)
             assertEquals(listOf("草稿", "测试"), events.filter { it in listOf("草稿", "测试", "保存") })
             assertFalse("滚动查看测试结果不能取消连接测试", events.contains("取消测试"))
         }
@@ -93,25 +93,27 @@ class OnlineListeningUiDeviceTest(private val tablet: Boolean, private val fontS
         compose.runOnIdle { assertFalse(state.settings.online.hasUnsavedChanges) }
     }
 
-    /** 模型是只读下拉框；切换省钱版同步协议路由，密钥和未保存保护不受影响。 */
+    /** 模型只读下拉只保留实时听译，打开菜单不改写密钥或制造未保存草稿。 */
     @Test fun modelMenuUsesSupportedOptionsAndUpdatesTheEndpoint() {
         show()
         openListening()
         scrollFormTo(hasTestTag("online-model"))
         compose.onNodeWithTag("online-model").assert(SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsActions.SetText))
         compose.onNodeWithText("千问 3.5 · 实时听译").performClick()
-        compose.onNodeWithText("千问 3 · 省钱分段").performScrollTo().performClick()
+        compose.onNodeWithText("千问 3 · 省钱分段").assertDoesNotExist()
+        compose.onNodeWithText("已停用的千问分段听译").assertDoesNotExist()
+        compose.runOnIdle { backDispatcher.onBackPressed() }
         compose.runOnIdle {
-            assertEquals(LiveTranslateModels.ECONOMY_ID, state.settings.online.model)
-            assertEquals("https://workspace.example.test/compatible-mode/v1/chat/completions", state.settings.online.endpoint)
+            assertEquals(LiveTranslateModels.REALTIME_ID, state.settings.online.model)
+            assertEquals(saved.endpoint, state.settings.online.endpoint)
             assertEquals(saved.key, state.settings.platformKeys.single { it.id == "qwen" }.key)
-            assertTrue(state.settings.online.hasUnsavedChanges)
+            assertFalse(state.settings.online.hasUnsavedChanges)
             assertFalse(events.contains("测试") || events.contains("保存"))
         }
-        compose.onNodeWithText("千问 3 · 省钱分段").performClick()
+        compose.onNodeWithText("千问 3.5 · 实时听译").performClick()
         compose.runOnIdle { backDispatcher.onBackPressed() }
-        compose.onNodeWithContentDescription("返回设置").assertExists()
-        compose.runOnIdle { assertEquals(1, events.count { it == "草稿" }) }
+        compose.onNodeWithContentDescription("返回听写服务列表").assertExists()
+        compose.runOnIdle { assertEquals(0, events.count { it == "草稿" }) }
     }
 
     /** 中央密钥显隐只影响显示，听写页官方说明只打开帮助。 */
@@ -323,10 +325,14 @@ class OnlineListeningUiDeviceTest(private val tablet: Boolean, private val fontS
         }
     }
 
-    /** 从真实主导航进入设置，避免测试直接依赖根界面的私有路由状态。 */
+    /** 从真实导航进入听写服务目录，再点击现有实时服务的编辑按钮打开表单。 */
     private fun openListening() {
         compose.onNode(isSelectable() and hasText("设置")).performClick()
-        compose.onNodeWithText("听写").performClick()
+        compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("听写服务"))
+        compose.onNodeWithText("听写服务").performScrollTo().performClick()
+        val card = hasTestTag("service-profile-$onlineServiceId")
+        compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(card)
+        compose.onNode(hasText("编辑") and hasAnyAncestor(card)).performScrollTo().performClick()
     }
 
     /** 首页主操作可能位于语言卡片下方，先真实滚动再验证可见性与点击行为。 */
@@ -387,9 +393,19 @@ class OnlineListeningUiDeviceTest(private val tablet: Boolean, private val fontS
             settings = SettingsUiState(listeningMode = mode, online = if (dirty)
                 saved.copy(model = "未保存在线模型", hasUnsavedChanges = true) else saved,
                 listeningServiceId = listeningServiceId, listeningServices = listeningServices,
+                listeningProfiles = listOf(ServiceProfileUiState(onlineServiceId, "千问 3.5 · 实时听译",
+                    LiveTranslateModels.REALTIME_ID, kind = "realtime", builtIn = false)),
                 platformKeys = listOf(PlatformKeyUiState("qwen", "阿里百炼 · 千问", "完整测试密钥", true))))
         val actions = SimulSubActions(
             onNavigate = { state = state.copy(destination = it); events += "导航:${it.name}" },
+            onEditListeningService = { id ->
+                assertEquals(onlineServiceId, id)
+                state = state.copy(settings = state.settings.copy(
+                    listeningEditor = ListeningEditorUiState(id, "千问 3.5 · 实时听译", ListeningMode.ONLINE)))
+            },
+            onCloseListeningServiceEditor = {
+                state = state.copy(settings = state.settings.copy(listeningEditor = null))
+            },
             onStart = { events += "开始" },
             onSelectListeningService = { id ->
                 val selected = if (id.startsWith("local:")) ListeningMode.LOCAL else ListeningMode.ONLINE

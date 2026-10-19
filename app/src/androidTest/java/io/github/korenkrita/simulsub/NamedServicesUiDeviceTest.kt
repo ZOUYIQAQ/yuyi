@@ -26,7 +26,7 @@ class NamedServicesUiDeviceTest {
         ServiceProfileUiState("local:fixture-model", "ReazonSpeech", "已安装模型", kind = "local"),
         ServiceProfileUiState(cloudId, "千问 · qwen-audio-3.1-asr-flash-streaming", "qwen-audio-3.1-asr-flash-streaming · 待填写平台密钥", kind = "asr"),
         ServiceProfileUiState("direct-fixture", "千问 · qwen3.5-livetranslate-flash-realtime", "实时听译模型", kind = "realtime"),
-        ServiceProfileUiState("segmented-fixture", "千问 · qwen3-livetranslate-flash", LiveTranslateModels.ECONOMY_ID, kind = "segmented"),
+        ServiceProfileUiState("realtime-snapshot-fixture", "千问 3.5 · 实时听译快照", "${LiveTranslateModels.REALTIME_ID}-2026-05-19", kind = "realtime"),
         ServiceProfileUiState("local:sensevoice", "SenseVoice Small", "需下载", kind = "local", configured = false),
         ServiceProfileUiState("local:whisper", "Whisper Tiny multilingual", "需下载", kind = "local", configured = false),
         ServiceProfileUiState("local:moonshine-en", "Moonshine Tiny English", "需下载", kind = "local", configured = false),
@@ -234,7 +234,7 @@ class NamedServicesUiDeviceTest {
                 onCreateTranslationProvider = { events += "意外新建翻译" },
                 onEditListeningService = { events += "编辑听写:$it" }, onEditTranslationService = { events += "编辑翻译:$it" }))
         openSection("听写服务")
-        listOf(cloudId, "direct-fixture", "segmented-fixture").forEach { id ->
+        listOf(cloudId, "direct-fixture", "realtime-snapshot-fixture").forEach { id ->
             val status = hasText("待填写平台密钥") and hasAnyAncestor(hasTestTag("service-profile-$id"))
             reveal(status)
             compose.onNode(status).assertIsDisplayed()

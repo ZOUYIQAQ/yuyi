@@ -95,7 +95,10 @@ internal fun ListeningModePicker(mode: ListeningMode, enabled: Boolean, onSelect
 }
 
 /** 兼容旧控制器时也只保留真实服务，管理和模型资源使用独立入口。 */
-internal fun List<UiOption>.serviceOptions(): List<UiOption> = filterNot { it.id == "catalog" || it.id == "manage" }
+internal fun List<UiOption>.serviceOptions(): List<UiOption> = filterNot {
+    it.id == "catalog" || it.id == "manage" ||
+        (it.id.startsWith("direct:") && LiveTranslateModels.isRetired(it.id.removePrefix("direct:")))
+}
 
 /** 两步服务合为一张平整卡片，说明收进行内，复用选择器菜单并保留空状态与原动作。 */
 @Composable
@@ -187,8 +190,7 @@ internal fun ListeningSettings(state: SettingsUiState, sessionBusy: Boolean, act
     PageColumns(wide, first = {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SectionHeading(if (asr) "千问在线听写接口" else
-                    if (LiveTranslateModels.find(configuration.model)?.realtime == false) "千问分段听译接口" else "千问实时听译接口",
+                SectionHeading(if (asr) "千问在线听写接口" else "千问实时听译接口",
                     configuration.model)
                 OnlineConfigurationIntro(editorActions, editor.mode)
             }
@@ -257,7 +259,9 @@ private fun OnlineConfigurationForm(online: OnlineListeningUiState, sessionBusy:
                         LiveTranslateModels.endpointAfterSelection(online.endpoint, online.model, model)))
                 }
                 SupportingText(if (asr) "仅建立在线听写会话，翻译由独立文字 API 完成。" else
-                    LiveTranslateModels.find(online.model)?.description ?: "当前模型未接入，请从下拉列表重新选择。")
+                    if (LiveTranslateModels.isRetired(online.model))
+                        "分段听译已停用，请明确选择千问实时听译并重新保存；原平台密钥与绑定已保留。"
+                    else LiveTranslateModels.find(online.model)?.description ?: "当前模型未接入，请从下拉列表重新选择。")
                 if (!asr) SupportingText("费用为北京地域公开原价估算，不含译文输出；实际按服务商用量计费。")
             }
             ServiceCredentialPicker(

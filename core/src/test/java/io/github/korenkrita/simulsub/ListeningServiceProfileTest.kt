@@ -16,9 +16,9 @@ class ListeningServiceProfileTest {
         assertEquals("工作听写", asr.name)
         assertEquals(endpoint, asr.endpoint)
         assertNotEquals(asr.id, ListeningServiceProfile.newId())
-        assertEquals(LiveTranslateModels.ECONOMY_ENDPOINT,
-            ListeningServiceProfile(ListeningServiceProfile.newId(), "省钱", ListeningMode.ONLINE,
-                LiveTranslateModels.ECONOMY_ENDPOINT, LiveTranslateModels.ECONOMY_ID).validated().endpoint)
+        assertEquals(LiveTranslateModels.REALTIME_ENDPOINT,
+            ListeningServiceProfile(ListeningServiceProfile.newId(), "实时", ListeningMode.ONLINE,
+                LiveTranslateModels.REALTIME_ENDPOINT, LiveTranslateModels.REALTIME_ID).validated().endpoint)
     }
 
     /** 不允许空名、超长名、本地模式或伪造标识进入目录。 */
@@ -40,5 +40,16 @@ class ListeningServiceProfileTest {
             base.copy(mode = ListeningMode.CLOUD_ASR, model = CloudAsrConfig.DEFAULT_MODEL))) {
             try { bad.validated(); fail("应拒绝不匹配的模型或地址") } catch (_: IllegalArgumentException) { }
         }
+    }
+
+    /** 迁移保留服务身份和名称，只转换旧模型与同来源路由；非在线模式不受影响。 */
+    @Test fun migrationKeepsServiceIdentityAndName() {
+        val old = ListeningServiceProfile(ListeningServiceProfile.newId(), "我的服务", ListeningMode.ONLINE,
+            LiveTranslateModels.ECONOMY_ENDPOINT, LiveTranslateModels.ECONOMY_ID)
+        assertThrows(IllegalArgumentException::class.java) { old.validated() }
+        assertEquals(old.copy(endpoint = LiveTranslateModels.REALTIME_ENDPOINT, model = LiveTranslateModels.REALTIME_ID),
+            old.migratedRealtime())
+        assertNull(old.copy(mode = ListeningMode.CLOUD_ASR).migratedRealtime())
+        assertNull(old.copy(endpoint = "https://example.com/custom").migratedRealtime())
     }
 }

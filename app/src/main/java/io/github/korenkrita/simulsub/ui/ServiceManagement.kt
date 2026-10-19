@@ -8,6 +8,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Subtitles
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -223,47 +227,71 @@ private fun ServiceProfilesList(profiles: List<ServiceProfileUiState>, wide: Boo
     }
 }
 
-/** 正文与配置文字左对齐，使用按钮保持主层级；删除图标独立显示，按钮组支持自然换行。 */
+/** 以服务类型、模型与用途建立身份，密钥仅作为辅助信息，配置和使用各有明确入口。 */
 @Composable
 private fun ServiceProfileCard(profile: ServiceProfileUiState, enabled: Boolean,
     onEdit: () -> Unit, onUse: () -> Unit, onDelete: (() -> Unit)? = null, deleteEnabled: Boolean = false) {
     val local = profile.kind == "local" || profile.id.startsWith("local:")
     val needsDownload = local && !profile.configured
+    val type = when { local -> "本地识别"; profile.kind == "asr" -> "在线听写"; profile.kind == "direct" -> "实时听译"; else -> "文字翻译" }
+    val summary = when {
+        local -> "在设备上识别语音，需搭配文字翻译服务。"
+        profile.kind == "asr" -> "在线识别语音，需搭配文字翻译服务生成译文。"
+        profile.kind == "direct" -> "语音直接生成译文字幕，无需另配文字翻译服务。"
+        else -> "将听写结果翻成字幕，可搭配本地或在线听写。"
+    }
+    val serviceIcon = when {
+        local || profile.kind == "asr" -> Icons.Outlined.GraphicEq
+        profile.kind == "direct" -> Icons.Outlined.Subtitles
+        else -> Icons.Outlined.Translate
+    }
     Box(Modifier.fillMaxWidth().testTag("service-profile-${profile.id}")) {
-      SettingsCard(padding = 16.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Text(profile.name, style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f).padding(top = if (onDelete != null) 8.dp else 0.dp))
+        SettingsCard(padding = 16.dp, spacing = 12.dp) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Icon(serviceIcon, null, Modifier.padding(10.dp).size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(type, style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        if (profile.selected) Surface(shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Text("使用中", Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                }
                 if (onDelete != null) IconButton(onClick = onDelete, enabled = deleteEnabled,
                     modifier = Modifier.testTag("delete-translation-service-${profile.id}")) {
                     Icon(Icons.Outlined.DeleteOutline, "删除翻译服务：${profile.name}", Modifier.size(20.dp))
                 }
             }
-            if (profile.detail.isNotBlank()) SupportingText(profile.detail)
-            if (!local && profile.credentialLabel.isNotBlank()) SupportingText("密钥：${profile.credentialLabel}")
-            Text(when { needsDownload -> "模型文件尚未下载"; local -> "已安装"; profile.configured -> "已保存"; else -> "待填写平台密钥" },
-                style = MaterialTheme.typography.labelLarge)
-            if (profile.selected) Text("使用中", style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary)
-            ActionRow {
-                if (!local) TextButton(onClick = onEdit, enabled = enabled,
-                    // 保留最小触控宽度但让内容靠左，避免短文字被按钮默认内边距或居中布局推偏。
-                    modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 48.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp)) {
-                    Box(Modifier.widthIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
-                        Text(if (profile.builtIn) "选择密钥" else "编辑")
-                    }
-                }
-                Button(onClick = onUse, enabled = enabled && (needsDownload || (profile.configured && !profile.selected)),
-                    modifier = Modifier.heightIn(min = 48.dp)) {
-                    Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp))
+            SupportingText(summary)
+            if (profile.detail.isNotBlank() && !profile.name.contains(profile.detail))
+                Text(profile.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (local) { if (needsDownload) "模型文件尚未下载" else "已安装" }
+                else "密钥：${profile.credentialLabel.ifBlank { "未配置" }}${if (!profile.configured && profile.credentialLabel.isNotBlank()) " · 待配置" else ""}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!local) OutlinedButton(onClick = onEdit, enabled = enabled,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("configure-service-${profile.id}")) {
+                    Icon(Icons.Outlined.Tune, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(when { needsDownload -> "下载模型"; profile.selected -> "正在使用"; else -> "使用" })
+                    Text("配置服务")
+                }
+                if (!profile.selected) FilledTonalButton(onClick = onUse,
+                    enabled = enabled && (needsDownload || profile.configured),
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(if (needsDownload) "下载模型" else "使用")
                 }
             }
         }
-      }
     }
 }
 

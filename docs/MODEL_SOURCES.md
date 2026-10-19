@@ -10,11 +10,25 @@
 | Moonshine Tiny 英语 | 124,611,393 字节 | [bf2b762c076d8ea61e2af0b3851c9564fb77552e](https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/tree/bf2b762c076d8ea61e2af0b3851c9564fb77552e) | 尚未找到同版本的可靠国内备用；HF-mirror 实测跳回官方，不列作可用国内源 |
 | Moonshine Tiny 日语 | 72,758,660 字节 | [550e2eb0a8b33092f3b394f64649ee1b3d9eb506](https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-tiny-ja-quantized-2026-02-27/tree/550e2eb0a8b33092f3b394f64649ee1b3d9eb506) | [ModelScope 23edc3631598ff4ac5bef6acf0db465443a56451](https://modelscope.cn/models/liaowenbin/sherpa-onnx-moonshine-tiny-ja-quantized/resolve/23edc3631598ff4ac5bef6acf0db465443a56451/encoder_model.ort)，完整下载逐字节一致 |
 
-Whisper、Moonshine 英语权重为 MIT；Moonshine 日语为含商业使用条件的 Community License，不能当作 MIT。许可原文已随包加入 `Whisper-LICENSE.txt`、`Moonshine-LICENSE.txt`、`Moonshine-Japanese-LICENSE.txt`，模型库可打开固定来源的许可页面。本次五款模型在同一模拟器上的 FLEURS validation 前 20 句结果见下方；没有同条件完整集结果。
+Whisper、Moonshine 英语权重为 MIT；Moonshine 日语为含商业使用条件的 Community License，不能当作 MIT。许可原文已随包加入 `Whisper-LICENSE.txt`、`Moonshine-LICENSE.txt`、`Moonshine-Japanese-LICENSE.txt`，模型库可打开固定来源的许可页面。模型卡片采用下方官方或论文参考错误率，耗时单独保留本机数据；历史20句评测记录继续保留。
 
-### 三款新增模型的公开标准结果与本应用证据边界
+### 当前模型卡片参考（2.1.2）
 
-下表是**上游模型家族的公开参考结果**，不是本应用固定 INT8/量化导出在 Android 上的成绩，不能与本次模拟器小样本或旧两款的 Mac 整集自测横向排名。论文的文本规整、解码配置和模型文件与本应用也未证明完全相同；模型卡片只展示本次固定导出的小样本实测。英语 Moonshine v1 与日语 Moonshine v2 是不同代模型，不能互借结果。
+保留原来的简介、日英错误率和耗时结构，仅替换错误率及来源说明。错误率是官方或作者论文公布的模型参考；ReazonSpeech另采用原项目完整集实测，并在卡片小字明确来源。耗时仍为下方Android模拟器20句的本机中位数，不使用论文GPU延迟代替手机速度。
+
+| 模型 | 日语错误率参考 | 英语错误率参考 | 公开来源 |
+| --- | --- | --- | --- |
+| ReazonSpeech k2 v2 ja-en | 8.48%，FLEURS字错误率 | 22.66%，FLEURS词错误率 | [原项目完整集实测](https://github.com/KorenKrita/simul-subtitle/blob/97e0a49954fc01029468775d3d93e195adbf146f/docs/asr.md)：日语650句、英语647句；卡片小字标为原项目实测 |
+| SenseVoice Small | 11.96%，Common Voice字错误率 | 14.71%，Common Voice词错误率 | [FunAudioLLM官方论文表6](https://arxiv.org/html/2407.04051v1)的SenseVoice-S列 |
+| Whisper Tiny 多语种 | 37.0%，FLEURS字错误率 | 12.4%，FLEURS词错误率 | [OpenAI官方论文表13，第24页](https://cdn.openai.com/papers/whisper.pdf#page=24)的Whisper tiny行；不是tiny.en |
+| Moonshine Tiny 英语v1 | 不支持日语 | 4.52%，LibriSpeech test-clean词错误率 | [Moonshine作者论文表3](https://arxiv.org/html/2410.15608v2)的Tiny列 |
+| Moonshine Tiny 日语v2 | 17.87%，FLEURS字错误率 | 不支持英语 | [Flavors of Moonshine作者论文表8](https://arxiv.org/html/2509.02523v1)的Final行 |
+
+以下其他论文结果与历史小样本用于追溯，不替代上表的当前展示值。不同数据集的数字仅作参考。
+
+### 其他公开参考与固定导出版本
+
+下表是**上游模型家族的公开参考结果**，不是本应用固定 INT8/量化导出在 Android 上的成绩，不能与本次模拟器小样本或旧两款的 Mac 整集自测横向排名。论文的文本规整、解码配置和模型文件与本应用也未证明完全相同；模型卡片采用公开参考数字，并注明相应数据集；本机20句耗时单独标注。英语 Moonshine v1 与日语 Moonshine v2 是不同代模型，不能互借结果。
 
 | 本应用固定导出 | 可参考的公开标准结果 | 版本与条件 | 本项目固定导出证据 |
 | --- | --- | --- | --- |
@@ -26,13 +40,13 @@ Whisper、Moonshine 英语权重为 MIT；Moonshine 日语为含商业使用条�
 
 设备样例速度入口为 `AdditionalModelSampleBenchmarkDeviceTest`，读取应用外部 `files/.qa_models` 下的完整夹具（主机副本：`/tmp/simul-model-slice.gNkkGW/.qa_models`）。Whisper 分别使用英语 `wavs/en.wav` 和日语 `wavs/ja-16k.wav`，两个 Moonshine 只测各自支持的语言；先校验模型及样例 SHA-256，固定 2 线程、同一识别器预热 1 次、实际解码 3 次，日志输出设备、样例、每轮毫秒、中位毫秒和完整识别原文。样例是模型官方样例，非 FLEURS，且英语与日语不是同一录音；其耗时只能在相同设备和相同样例下解释，不能推成标准错误率或与旧两款 Mac FLEURS 耗时排名。此测试文件目前仅准备，尚未运行，没有设备速度数值可填。
 
-### 固定 20 句 FLEURS 小样本评测来源与同组结果
+### 历史固定20句 FLEURS 小样本评测来源与同组结果
 
 评测语料来自 Google 的 [FLEURS 数据集卡](https://huggingface.co/datasets/google/fleurs)。公开取数入口为 [日语 ja_jp validation 第 0–19 行](https://datasets-server.huggingface.co/rows?dataset=google%2Ffleurs&config=ja_jp&split=validation&offset=0&length=20)和[英语 en_us validation 第 0–19 行](https://datasets-server.huggingface.co/rows?dataset=google%2Ffleurs&config=en_us&split=validation&offset=0&length=20)；每种语言固定 `offset=0,length=20`，没有使用 test 分片。参考文本取 `raw_transcription`；音频由 `afconvert` 转换为 16 kHz 单声道 PCM16。完整清单 `.qa/model-standard/manifest.json` 的 SHA-256 为 `688d65a9735b88bd01bb68571d97da0230de1aa2241af2c3f219fafbaad7164a`。清单与音频保存在被 Git 忽略的 `.qa/model-standard/`，仓库文档只记录公开入口和清单摘要，不收录音频或有时效的签名 URL。重新获取时音频 URL 与转换字节可能变化，设备结果以本次固定清单摘要为准。
 
 `AdditionalModelFleursBenchmarkDeviceTest` 提供 8 个独立测试：Whisper 日/英、Moonshine v1 英、Moonshine v2 日、Reazon 日/英、SenseVoice 日/英。每组必须有对应模型与 20 条样本；缺失会失败，不会跳过。模型来自应用外部 `files/.qa_models/<模型ID>/{asr,vad}`，样本来自 `files/.qa_models/model-standard/`；结果写入 `files/qa-model-standard/<模型ID>-<语言>-<时间戳>.json`。测试固定 2 线程、预热 1 次、逐条单次解码，记录全部参考原文、识别原文、编辑距离、耗时及总体错误率，单句耗时取 20 条的中位数。日语按 NFKC、小写、去标点和空白后逐字计算 CER；英语按 NFKC、小写、去标点后按空白分词计算 WER。总体错误率为 20 条编辑距离之和除以参考字/词数之和，不取逐句百分比平均。空识别仍计入，解码异常以空识别计为整句删除并单列失败数。此项是统一小样本观察值，不是 FLEURS 整集成绩。
 
-旧两款本机夹具来自 `.qa/direct-asr/`，设备上已按 `ModelCatalog.kt` 清单映射到 `asr/` 并补齐 VAD。统一测试的初始设备结果在被 Git 忽略的 `.qa/cloud-asr/all-model-results/`；日语 Moonshine 分片复测与 Whisper 尾补诊断在 `.qa/cloud-asr/padding-results/`；Whisper 最终复测在 `.qa/cloud-asr/final-benchmark-results/`。已复核并用于卡片的八组如下，均为 `sdk_gphone64_arm64`、2 线程、20 句、0 空结果、0 解码失败，且结果中的 `manifest_sha256` 与上述清单一致。错误率保留两位小数，耗时为单句中位数四舍五入到毫秒。汇总条件和原始数值另见 [机器可读摘要](benchmarks/2026-10-16.json)。
+旧两款本机夹具来自 `.qa/direct-asr/`，设备上已按 `ModelCatalog.kt` 清单映射到 `asr/` 并补齐 VAD。统一测试的初始设备结果在被 Git 忽略的 `.qa/cloud-asr/all-model-results/`；日语 Moonshine 分片复测与 Whisper 尾补诊断在 `.qa/cloud-asr/padding-results/`；Whisper 最终复测在 `.qa/cloud-asr/final-benchmark-results/`。历史已复核的八组如下，错误率已由上方公开参考替换，耗时继续保留，均为 `sdk_gphone64_arm64`、2 线程、20 句、0 空结果、0 解码失败，且结果中的 `manifest_sha256` 与上述清单一致。错误率保留两位小数，耗时为单句中位数四舍五入到毫秒。汇总条件和原始数值另见 [机器可读摘要](benchmarks/2026-10-16.json)。
 
 | 固定导出 | 语言与指标 | 20句错误率 | 单句中位耗时 | 设备结果文件 |
 | --- | --- | ---: | ---: | --- |

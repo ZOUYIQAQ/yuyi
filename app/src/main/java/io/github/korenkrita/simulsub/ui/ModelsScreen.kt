@@ -177,7 +177,7 @@ private fun ModelSections(model: ModelUiState, actions: SimulSubActions, column:
             if (details) {
                 SupportingText("来源：${model.sourceLabel}\n许可：${model.license}")
                 if (model.verificationDetail.isNotEmpty()) SupportingText(model.verificationDetail)
-                if (comparison != null) SupportingText("测试说明：${comparison.evaluationNote}")
+                if (comparison != null) SupportingText("参考说明：${comparison.evaluationNote}")
                 ActionRow {
                     if (model.sourceUrl.isNotEmpty()) TextButton(onClick = { actions.onModelSource(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看下载来源") }
                     if (model.license.isNotBlank() || model.licenseUrl.isNotEmpty()) TextButton(onClick = { actions.onModelLicense(model.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("查看许可") }
@@ -202,10 +202,10 @@ private fun ModelBenchmark(comparison: ModelComparison) {
             val englishLabel = englishMs?.let { "$it ms" }
                 ?: if (comparison.englishErrorRate.startsWith("不支持")) "不支持" else "待复核"
             ModelMetadata("识别耗时（日/英）", "$japaneseLabel / $englishLabel")
-            Text("单句中位数，不含翻译等待", style = MaterialTheme.typography.bodySmall,
+            Text("本机单句中位数，不含翻译等待", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text("日/英各20段标准录音 · 数值越低越好",
+        Text("${comparison.benchmarkLabel} · 数值越低越好",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

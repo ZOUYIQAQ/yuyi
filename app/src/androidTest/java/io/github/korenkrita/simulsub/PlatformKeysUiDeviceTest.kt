@@ -2,8 +2,7 @@ package io.github.korenkrita.simulsub
 
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -43,13 +42,13 @@ class PlatformKeysUiDeviceTest(private val tablet: Boolean, private val fontScal
         show()
         enter("平台密钥")
         val raw = "sk-ws-H.PYDLPID._+-/=" + "长密钥Abc-_=+".repeat(50)
-        reveal(hasTestTag("platform-key-qwen:default"))
+        openKey("qwen:default")
         compose.onNodeWithTag("platform-key-qwen:default").performTextReplacement(raw)
         compose.runOnIdle { assertEquals(raw, state.settings.platformKeys.first().key) }
         reveal(hasTestTag("platform-key-save-qwen:default"))
         compose.onNodeWithTag("platform-key-save-qwen:default").performClick()
         compose.runOnIdle { assertEquals(1, saves); assertEquals(raw, state.settings.platformKeys.first().key) }
-        reveal(hasTestTag("platform-key-qwen:default"))
+        openKey("qwen:default")
         compose.onNodeWithContentDescription("显示阿里百炼 · 千问密钥").performClick()
         compose.onNodeWithTag("platform-key-qwen:default").assertTextContains(raw)
         compose.onNodeWithContentDescription("隐藏阿里百炼 · 千问密钥").performClick()
@@ -61,12 +60,13 @@ class PlatformKeysUiDeviceTest(private val tablet: Boolean, private val fontScal
     /** 未保存退出先确认，继续编辑保留草稿，放弃恢复已存值。 */
     @Test fun unsavedKeysAreProtectedOnBack() {
         show(); enter("平台密钥")
-        reveal(hasTestTag("platform-key-qwen:default"))
+        openKey("qwen:default")
         compose.onNodeWithTag("platform-key-qwen:default").performTextInput("draft")
-        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText("完成").performClick()
         compose.onNodeWithText("配置尚未保存").assertIsDisplayed()
         compose.onNodeWithText("继续编辑").performClick()
-        compose.runOnIdle { assertEquals("draft", state.settings.platformKeys.first().key); back.onBackPressed() }
+        compose.runOnIdle { assertEquals("draft", state.settings.platformKeys.first().key) }
+        compose.onNodeWithText("完成").performClick()
         compose.onNodeWithText("放弃修改").performClick()
         compose.runOnIdle { assertEquals("", state.settings.platformKeys.first().key); assertEquals(0, saves) }
     }
@@ -103,10 +103,11 @@ class PlatformKeysUiDeviceTest(private val tablet: Boolean, private val fontScal
         show()
         reveal(hasText("管理平台密钥"))
         compose.onNodeWithText("管理平台密钥").performClick()
-        reveal(hasTestTag("platform-key-qwen:default"))
+        openKey("qwen:default")
         compose.onNodeWithTag("platform-key-qwen:default").performTextInput("onboarding-test")
         reveal(hasTestTag("platform-key-save-qwen:default"))
         compose.onNodeWithTag("platform-key-save-qwen:default").performClick()
+        compose.onNodeWithText("完成").performClick()
         compose.onNodeWithText("返回当前引导步骤").performClick()
         reveal(hasTestTag("cloud-asr-endpoint"))
         compose.onNodeWithTag("cloud-asr-endpoint").assertIsEnabled()
@@ -165,6 +166,8 @@ class PlatformKeysUiDeviceTest(private val tablet: Boolean, private val fontScal
                     if (it.id == id && it.credentialId == credentialId) it.copy(key = text, hasUnsavedChanges = true) else it })) },
                 onSavePlatformCredential = { id, credentialId -> saves++; state = state.copy(settings = state.settings.copy(platformKeys = state.settings.platformKeys.map {
                     if (it.id == id && it.credentialId == credentialId) it.copy(hasSavedKey = true, hasUnsavedChanges = false) else it })) },
+                onDiscardPlatformKey = { id, credentialId -> state = state.copy(settings = state.settings.copy(platformKeys = state.settings.platformKeys.map {
+                    if (it.id == id && it.credentialId == credentialId) it.copy(key = "", hasUnsavedChanges = false) else it })) },
                 onDiscardPlatformKeys = { state = state.copy(settings = state.settings.copy(platformKeys = state.settings.platformKeys.map { it.copy(key = "", hasUnsavedChanges = false) })) },
                 onCloudAsrDraftChange = { asrEdits++; state = state.copy(settings = state.settings.copy(cloudAsr = it.copy(hasUnsavedChanges = true))) },
                 onOnlineDraftChange = { onlineEdits++; state = state.copy(settings = state.settings.copy(online = it.copy(hasUnsavedChanges = true))) },
@@ -181,16 +184,28 @@ class PlatformKeysUiDeviceTest(private val tablet: Boolean, private val fontScal
                 },
                 onCloseListeningServiceEditor = { state = state.copy(settings = state.settings.copy(listeningEditor = null)) },
             )
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                Box(Modifier.requiredSize(if (tablet) 1100.dp else 412.dp, if (tablet) 760.dp else 880.dp)) { SimulSubApp(state, actions) }
+            CompositionLocalProvider(LocalDensity provides Density(if (tablet) 0.6f else 1f, fontScale)) {
+                Box(Modifier.requiredSize(if (tablet) 1040.dp else 360.dp, 720.dp)
+                    .consumeWindowInsets(WindowInsets.systemBars.union(WindowInsets.displayCutout)).padding(top = 24.dp, bottom = 24.dp)) { SimulSubApp(state, actions) }
             }
         }
+    }
+
+    /** 密钥列表默认折叠，通过钥匙扣打开真实编辑弹窗。 */
+    private fun openKey(id: String) {
+        if (compose.onAllNodesWithTag("platform-key-$id").fetchSemanticsNodes().isNotEmpty()) return
+        reveal(hasTestTag("platform-key-ring-$id"))
+        compose.onNodeWithTag("platform-key-ring-$id").performClick()
     }
 
     /** 列表使用真实滚动，不以直接调用回调冒充用户点击。 */
     private fun reveal(matcher: SemanticsMatcher) {
         compose.waitForIdle()
         try { compose.onNode(matcher).assertIsDisplayed(); return } catch (_: AssertionError) { }
+        if (compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty()) {
+            runCatching { compose.onNode(matcher).performScrollTo() }
+            compose.onNode(matcher).assertIsDisplayed(); return
+        }
         val lists = compose.onAllNodes(hasScrollToIndexAction()).fetchSemanticsNodes().size
         var lastFailure: AssertionError? = null
         for (index in 0 until lists) {

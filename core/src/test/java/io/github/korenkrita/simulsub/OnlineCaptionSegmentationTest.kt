@@ -151,6 +151,168 @@ class OnlineCaptionSegmentationTest {
         assertTrue(adapter.acceptSegmented(LiveTranslationText("accent", "", accent, true)).first().zh.endsWith("e\u0301"))
     }
 
+    /** 原文快照不变而译文逐句增长时，旧尾片不能继续携带整段原文。 */
+    @Test fun growingConfirmedTranslationNeverAccumulatesWholeSourceCopies() {
+        val adapter = OnlineCaptionAdapter()
+        val board = CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES, 10, 1000) }
+        val source = "最初の文です。次の文です。最後の文です。"
+        deliver(adapter, board, LiveTranslationText("a", source, "第一句。", false, "第一句。"))
+        deliver(adapter, board, LiveTranslationText("a", source, "第一句。第二句。", false, "第一句。第二句。"))
+        assertEquals(source, board.snapshot().joinToString("") { it.ja })
+        deliver(adapter, board, LiveTranslationText("a", source, "第一句。第二句。第三句。", false, "第一句。第二句。第三句。"))
+        assertEquals(listOf("最初の文です。", "次の文です。", "最後の文です。"), board.snapshot().map { it.ja })
+    }
+
+    /** 流式确认前缀和预测尾部也按顺序分配已有原文，不等全文定稿才拆原文。 */
+    @Test fun streamingSourceUsesOrderedPartsForConfirmedRowsAndDraft() {
+        val parts = OnlineCaptionAdapter().acceptSegmented(
+            LiveTranslationText("a", "最初です。次です。", "第一句。预测尾部", false, "第一句。"))
+        assertEquals(listOf("最初です。", "次です。"), parts.map { it.ja })
+        assertEquals(listOf(true, false), parts.map { it.isFinal })
+    }
+
+    /** 流式原文变长或被识别修正时，只更新原有字幕槽位且完整替换旧原文。 */
+    @Test fun streamingSourceGrowthAndCorrectionKeepStableSlots() {
+        val adapter = OnlineCaptionAdapter()
+        val board = CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES, 10, 1000) }
+        val initial = LiveTranslationText("a", "最初です。", "第一句。预测", false, "第一句。")
+        deliver(adapter, board, initial)
+        val ids = board.snapshot().map { it.segmentId }
+        for (source in listOf("最初です。次です。", "最初の修正です。予測も修正します。")) {
+            deliver(adapter, board, initial.copy(sourceText = source))
+            assertEquals(ids, board.snapshot().map { it.segmentId })
+            assertEquals(source, board.snapshot().joinToString("") { it.ja })
+            assertEquals(listOf("第一句。", "预测"), board.snapshot().map { it.zh })
+            assertEquals(listOf(true, false), board.snapshot().map { it.isFinal })
+        }
+    }
+
+    /** 缺少对应标点时只作顺序切分，不能把完整长原文塞入最后一片或丢掉文字。 */
+    @Test fun unmatchedLongSourceIsPartitionedWithoutLoss() {
+        val source = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめも"
+        val parts = OnlineCaptionAdapter().acceptSegmented(LiveTranslationText("a", source, "第一句。第二句。第三句。", true))
+        assertEquals(source, parts.joinToString("") { it.ja })
+        assertTrue(parts.all { it.ja.isNotEmpty() && it.ja != source })
+    }
+
+    /** 原译文句子数一致时先保住句末锚点，再处理句内长度差异，避免第二句原文跑到第一句。 */
+    @Test fun sentenceAnchorsSurviveDifferentReadingChunkCounts() {
+        val firstSource = "これは最初の長い説明であり途中に句読点がありません。"
+        val secondSource = "次です。"
+        val firstTranslation = "这".repeat(39) + "。"
+        val parts = OnlineCaptionAdapter().acceptSegmented(
+            LiveTranslationText("a", firstSource + secondSource, firstTranslation + "第二句。", true))
+        assertEquals(firstTranslation, parts.dropLast(1).joinToString("") { it.zh })
+        assertEquals(firstSource, parts.dropLast(1).joinToString("") { it.ja })
+        assertEquals(secondSource, parts.last().ja)
+    }
+
+    /** 迟到原文切点不匹配时仍修订原编号，源文本变化也不能留下前一版片段。 */
+    @Test fun lateUnmatchedSourceAndSourceCorrectionKeepExistingRows() {
+        val adapter = OnlineCaptionAdapter()
+        val board = CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES, 10, 1000) }
+        val translation = "第一句。第二句。第三句。"
+        deliver(adapter, board, LiveTranslationText("a", "", translation, true))
+        val ids = board.snapshot().map { it.segmentId }
+        for (source in listOf("あいうえおかきくけこさしすせそ", "修正された原文には対応する句読点がありません")) {
+            deliver(adapter, board, LiveTranslationText("a", source, translation, true))
+            assertEquals(ids, board.snapshot().map { it.segmentId })
+            assertEquals(source, board.snapshot().joinToString("") { it.ja })
+            assertTrue(board.snapshot().all { it.ja.isNotEmpty() && it.ja != source })
+        }
+    }
+
+    /** 预测尾部改写、撤回后重新定稿时，原文必须从当前快照重新分配且不残留旧片。 */
+    @Test fun draftWithdrawalAndFinalRevisionPreserveSourceExactlyOnce() {
+        val adapter = OnlineCaptionAdapter()
+        val board = CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES, 10, 1000) }
+        val source = "最初です。次です。最後です。"
+        for (text in listOf(
+            LiveTranslationText("a", source, "第一句。预测", false, "第一句。"),
+            LiveTranslationText("a", source, "第一句。新预测的句子。", false, "第一句。"),
+            LiveTranslationText("a", source, "第一句。", false, "第一句。"),
+            LiveTranslationText("a", source, "修订成一句。", true)
+        )) {
+            deliver(adapter, board, text)
+            assertEquals(source, board.snapshot().joinToString("") { it.ja })
+            assertEquals(text.translatedText, board.snapshot().joinToString("") { it.zh })
+        }
+    }
+
+    /** 多片定稿合并为较少片段时，原文随修订重新分配，旧片撤回不能带走中间原文。 */
+    @Test fun finalCorrectionRepartitionsSourceWhenRowsShrink() {
+        val adapter = OnlineCaptionAdapter()
+        val board = CaptionBoard().apply { setRetention(CaptionLimitMode.SENTENCES, 10, 1000) }
+        val source = "最初です。次です。最後です。"
+        deliver(adapter, board, LiveTranslationText("a", source, "第一句。第二句。第三句。", true))
+        val id = board.snapshot().first().segmentId
+        deliver(adapter, board, LiveTranslationText("a", source, "修订成一句。", true))
+        assertEquals(id, board.snapshot().single().segmentId)
+        assertEquals(source, board.snapshot().single().ja)
+    }
+
+    /** 原文不足以逐片分配时允许空片，但代理对、组合重音和表情连字不能拆开或复制。 */
+    @Test fun shortAndCombinedSourceGlyphsAreNeverSplitOrDuplicated() {
+        for (source in listOf("あ", "👨‍👩‍👧‍👦", "e\u0301", "🇯🇵", "中".repeat(17) + "👨‍👩‍👧‍👦" + "后".repeat(30))) {
+            val parts = OnlineCaptionAdapter().acceptSegmented(LiveTranslationText("a", source, "一。二。三。四。", true))
+            assertEquals(source, parts.joinToString("") { it.ja })
+            if (source.length < 18) assertEquals(listOf(source), parts.map { it.ja }.filter { it.isNotEmpty() })
+            else assertTrue(parts.any { it.ja.contains("👨‍👩‍👧‍👦") })
+        }
+    }
+
+    /** 原文分配不能改变仅译文模式的段号、确认状态和修订次数。 */
+    @Test fun sourcePartitioningLeavesTranslationOnlyBehaviorUnchanged() {
+        val translatedOnly = OnlineCaptionAdapter()
+        val bilingual = OnlineCaptionAdapter()
+        for (text in listOf(
+            LiveTranslationText("a", "", "第一句。预测", false, "第一句。"),
+            LiveTranslationText("a", "", "第一句。第二句。新预测", false, "第一句。第二句。"),
+            LiveTranslationText("a", "", "第一句。第二句。", true),
+            LiveTranslationText("a", "", "修正的一句。", true)
+        )) {
+            val expected = translatedOnly.acceptSegmented(text)
+            val actual = bilingual.acceptSegmented(text.copy(sourceText = "最初です。次です。最後です。"))
+            // 原文独立修订可能多发旧片；对应的译文变更必须保持相同编号和修订次数。
+            expected.forEach { old ->
+                val updated = actual.single { it.segmentId == old.segmentId }
+                assertEquals(old.zh, updated.zh)
+                assertEquals(old.isFinal, updated.isFinal)
+                assertEquals(old.revision, updated.revision)
+            }
+        }
+    }
+
+    /** 直接合并分段器快照，验证不同标点、字形、原文迟到和尾片复用时的完整性。 */
+    @Test fun segmenterSnapshotsPreserveEverySourceCharacterAcrossRevisions() {
+        val sources = listOf(
+            "Hello Dr. Smith, the value is 3.14. We can read all these words without losing spaces.",
+            "長い原文です。".repeat(15),
+            "👨‍👩‍👧‍👦e\u0301🇯🇵".repeat(8)
+        )
+        for (source in sources) {
+            val segmenter = OnlineCaptionSegmenter()
+            val visible = linkedMapOf<String, LiveTranslationText>()
+            for (text in listOf(
+                LiveTranslationText("a", "", "一。予测", false, "一。"),
+                LiveTranslationText("a", source, "一。予测", false, "一。"),
+                LiveTranslationText("a", source, "一。二。予测", false, "一。二。"),
+                LiveTranslationText("a", source, "一。二。", false, "一。二。"),
+                LiveTranslationText("a", source, "一。二。三。", true),
+                LiveTranslationText("a", source, "最终修订。", true)
+            )) {
+                segmenter.accept(text).forEach { change ->
+                    if (change.text.translatedText.isEmpty()) visible.remove(change.text.segmentId)
+                    else visible[change.text.segmentId] = change.text
+                }
+                val parts = visible.values.sortedBy { it.segmentId.substringAfterLast('/').toInt() }
+                assertEquals(text.sourceText, parts.joinToString("") { it.sourceText })
+                assertEquals(text.translatedText, parts.joinToString("") { it.translatedText })
+                assertTrue(segmenter.accept(text).isEmpty())
+            }
+        }
+    }
+
     /** 模拟生产在线路径：新段进入字幕板，既有定稿只允许原位校正。 */
     private fun deliver(adapter: OnlineCaptionAdapter, board: CaptionBoard, text: LiveTranslationText) {
         adapter.acceptSegmented(text).forEach { if (!board.accept(it)) board.updateOnlineFinal(it) }

@@ -20,6 +20,8 @@ import androidx.compose.animation.*
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -58,7 +60,8 @@ private fun SimulSubRoot(state: SimulSubUiState, actions: SimulSubActions) {
         OnboardingScreen(state, actions)
         return
     }
-    val mainDestinations = listOf(UiDestination.LIVE, UiDestination.SUBTITLE, UiDestination.SETTINGS)
+    val mainDestinations = mainNavigationDestinations
+    val layoutDirection = LocalLayoutDirection.current
     var detailReturnDestination by rememberSaveable { mutableStateOf(UiDestination.SETTINGS) }
     var detailReturnSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var settingsReturnDestination by rememberSaveable { mutableStateOf(UiDestination.SETTINGS) }
@@ -335,6 +338,7 @@ private fun SimulSubRoot(state: SimulSubUiState, actions: SimulSubActions) {
                     ) { padding ->
                         // 表单单独避让键盘；先消费导航占位，避免再多留一段导航栏高度。
                         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+                            ModelDownloadIndicator(state.models)
                             state.message?.let { message ->
                                 Box(Modifier.fillMaxWidth().heightIn(max = messageMaxHeight).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
                                     MessagePanel(message, actions.onDismissMessage)
@@ -342,11 +346,12 @@ private fun SimulSubRoot(state: SimulSubUiState, actions: SimulSubActions) {
                             }
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                 AnimatedContent(targetState = state.destination,
-                                    transitionSpec = { routeTransition(forward = targetState != UiDestination.LIVE) }, label = "主页面切换") { destination ->
+                                    transitionSpec = { mainPageTransition(vertical = useRail, layoutDirection = layoutDirection) }, label = "主页面切换") { destination ->
                                     val page = rememberRouteSnapshot(destination == state.destination, state)
                                     val settingsRoute = rememberRouteSnapshot(destination == state.destination, settingsSection to translationEditorOpen)
                                     // 页面退出动画组合后仍按稳定路由保留位置，业务状态继续仅由控制器持有。
                                     pageStateHolder.SaveableStateProvider(destination.name) {
+                                      Box(Modifier.fillMaxSize().testTag("main-page-${destination.name}")) {
                                         when (destination) {
                                             UiDestination.LIVE -> RouteScrollStateProvider("main/live") { LiveScreen(page.live, routedActions, wide) }
                                             UiDestination.SUBTITLE -> RouteScrollStateProvider("main/subtitle") { SubtitleSettings(page.settings.subtitle, routedActions, wide, null, page.live.finalOnly) }
@@ -362,6 +367,7 @@ private fun SimulSubRoot(state: SimulSubUiState, actions: SimulSubActions) {
                                                     else requestExit { settingsSection = section; translationEditorOpen = false }
                                                 })
                                         }
+                                      }
                                     }
                                 }
                             }

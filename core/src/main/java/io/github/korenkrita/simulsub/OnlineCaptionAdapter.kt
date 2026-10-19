@@ -38,7 +38,9 @@ class OnlineCaptionAdapter {
             Timing(0, 0, 0, 0, 0, 0, 0), timeEstimated = true)
         if (text.isFinal) {
             lastFinal = maxOf(lastFinal, entry.id)
-            finished[text.segmentId] = caption
+            // 空定稿仅撤回活动草稿，不永久完成消息；再次出现时分配高于撤回水位的新编号。
+            // 真定稿的撤回已在上方 finished 分支原位处理，仍保留完成身份，不能重新开放草稿。
+            if (text.translatedText.isNotEmpty()) finished[text.segmentId] = caption
             entries.remove(text.segmentId)
         }
         while (entries.size > 64) entries.remove(entries.keys.first())

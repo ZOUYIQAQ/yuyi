@@ -212,7 +212,8 @@ class QwenLiveTranslateClient internal constructor(
                     if (responseId.isNotEmpty() && meteredResponses.add(responseId)) {
                         // 在字幕解析之前记录已返回的实际用量；字幕协议出错也不丢失该响应。
                         val usage = parseMeteredUsage(response?.opt("usage"))
-                        notifyListener { listener.onUsage(responseId, usage) }
+                        // 实测3.5每个响应携带的是连接累计值，不能把响应号当作独立费用相加。
+                        notifyListener { listener.onCumulativeUsage(responseId, usage) }
                     }
                     if (terminal()) return
                 }

@@ -28,14 +28,13 @@ class LiveTranslateConfigTest {
         }
     }
 
-    /** 省钱模型走 HTTPS 文本流接口，模型名放请求体而不是实时会话查询参数。 */
-    @Test fun economyUsesItsOwnProtocolAndOnlyKnownModels() {
+    /** 旧分段稳定版和快照均不能通过校验或被当成实时模型。 */
+    @Test fun retiredEconomyModelsAreRejected() {
         val config = LiveTranslateConfig(endpoint = LiveTranslateModels.ECONOMY_ENDPOINT,
             model = LiveTranslateModels.ECONOMY_ID, apiKey = "key", sourceLang = "ja")
-        assertNull(config.validationError())
+        assertNotNull(config.validationError())
         assertFalse(config.isRealtime)
-        assertEquals(LiveTranslateModels.ECONOMY_ENDPOINT, config.requestUrl().toString())
-        assertNull(config.requestUrl().query)
+        assertNotNull(config.copy(model = "${LiveTranslateModels.ECONOMY_ID}-2025-12-01").validationError())
         assertNotNull(config.copy(endpoint = "wss://example.com/realtime").validationError())
         assertNotNull(config.copy(endpoint = "https://example.com/api-ws/v1/realtime").validationError())
         assertNotNull(config.copy(model = "qwen3-livetranslate-flash-2027-01-01").validationError())

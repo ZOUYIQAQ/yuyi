@@ -20,8 +20,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.io.File
 import java.util.UUID
 import io.github.korenkrita.simulsub.online.*
@@ -79,9 +82,20 @@ class AppController internal constructor(application: Application,
     private var testedEndpoint: TestedEndpoint? = null
     private var deletingModelId: String? = null
     private var onboardingStep: OnboardingStep? = if (appearance.getBoolean("onboarding_completed", false)) null else OnboardingStep.PERMISSIONS
+    private var onboardingProviderId = appearance.getString("onboarding_provider", "deepseek").orEmpty()
+        .takeIf { id -> TextServiceProviders.entries.any { it.id == id } } ?: "deepseek"
+    private var onboardingSetupProbe: TranslationSetupDiscovery? = null
+    internal var onboardingProbeFactory: (ByokService, String, Int, (ByokService, MtResult) -> Unit) -> TranslationSetupDiscovery =
+        { service, system, tokens, usage -> TranslationSetupProbe(service, system, tokens, usage) }
+    private var onboardingKeyDraft: String? = null
+    private var onboardingSaveError: UiMessage? = null
+    private val pendingModelDownloads = mutableSetOf<String>()
     private var generation: Job? = null
-    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        viewModelScope.launch { refresh() }
+    private var refreshJob: Job? = null
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        // 拖动落点不参与页面显示，抬手保存坐标不能触发整份服务配置重建。
+        if (key !in placementPreferenceKeys)
+            requestRefresh()
     }
     private var permissions = emptyList<PermissionUiState>().withRequiredPermissions()
 
@@ -91,9 +105,22 @@ class AppController internal constructor(application: Application,
         prefs.listen(prefListener)
         mutableState.update { it.copy(settings = it.settings.copy(api = savedApi(), online = savedOnline(), cloudAsr = savedCloudAsr(), platformKeys = savedPlatformKeys())) }
         refreshPermissions()
-        viewModelScope.launch { models.state.collect { refresh() } }
-        viewModelScope.launch { CaptionService.state.collect { refresh() } }
-        viewModelScope.launch { costs.state.collect { refresh() } }
+        viewModelScope.launch { models.state.collect {
+            announceModelDownloadChanges(it)
+            activateOnboardingModelWhenReady()
+            requestRefresh()
+        } }
+        // 首页已取消逐句字幕预览：正文变化只绘制悬浮窗，不重建整份服务与密钥设置。
+        viewModelScope.launch {
+            CaptionService.state.map { it.running to it.status }.distinctUntilChanged().collect { (running, status) ->
+                if (running != state.value.live.running) refresh()
+                else if (running) mutableState.update { it.copy(live = it.live.copy(statusDetail = status.ifBlank { "正在听取目标应用播放的声音" })) }
+            }
+        }
+        viewModelScope.launch { costs.state.collect { summary ->
+            val presentation = costUiState(summary)
+            mutableState.update { it.copy(live = it.live.copy(costs = presentation), settings = it.settings.copy(costs = presentation)) }
+        } }
         viewModelScope.launch {
             while (isActive) {
                 delay(60_000)
@@ -122,7 +149,7 @@ class AppController internal constructor(application: Application,
         },
         onRestartOnboarding = {
             if (CaptionService.running) message("请先停止同传，再重新配置", true)
-            else { onboardingStep = OnboardingStep.PERMISSIONS; refresh() }
+            else { clearModelOperationNotice(); onboardingStep = OnboardingStep.PERMISSIONS; refresh() }
         },
         onStart = { cancelProbe(); cancelOnlineProbe(); cancelJevProbe(); start() },
         onStop = { cancelProbe(); CaptionService.stop(getApplication()) },
@@ -152,6 +179,8 @@ class AppController internal constructor(application: Application,
         onPlatformKeyChange = ::editPlatformKey,
         onSavePlatformKey = ::savePlatformKey,
         onAddPlatformKey = ::addPlatformKey,
+        onDeletePlatformKey = ::deletePlatformKey,
+        onDiscardPlatformKey = ::discardPlatformKey,
         onPlatformKeyLabelChange = { platform, id, label -> editPlatformCredential(platform, id, label = label) },
         onPlatformCredentialChange = { platform, id, key -> editPlatformCredential(platform, id, key = key) },
         onSavePlatformCredential = ::savePlatformCredential,
@@ -173,6 +202,15 @@ class AppController internal constructor(application: Application,
         onCloseListeningServiceEditor = ::closeListeningServiceEditor,
         onSelectListeningService = ::selectListeningService,
         onChooseOnboardingListeningService = ::chooseOnboardingListeningService,
+        onChooseOnboardingRoute = ::chooseOnboardingRoute,
+        onOnboardingProviderChange = ::changeOnboardingProvider,
+        onOnboardingModelChange = ::changeOnboardingModel,
+        onOnboardingKeyChange = ::saveOnboardingKey,
+        onOnboardingTest = {
+            if (onboardingSaveError == null) {
+                if (prefs.listeningMode == ListeningMode.ONLINE) testOnline() else testOnboardingTranslation()
+            }
+        },
         onSelectTranslationService = { id ->
             if (!CaptionService.running) prefs.byokProfiles.firstOrNull { it.id == id }?.let { selected ->
                 changeApiProfile { prefs.useByokProfile(selected) }
@@ -193,7 +231,7 @@ class AppController internal constructor(application: Application,
             "https://help.aliyun.com/zh/model-studio/qwen3-5-livetranslate-flash-realtime"
             else "https://help.aliyun.com/zh/model-studio/qwen3-livetranslate-flash") },
         onRefreshModels = { models.refresh() },
-        onDownloadModel = { models.download(it) },
+        onDownloadModel = ::startModelDownload,
         onCancelDownload = { models.cancel(it) },
         onRequestDeleteModel = ::requestDeleteModel,
         onDismissDeleteModel = {
@@ -203,6 +241,7 @@ class AppController internal constructor(application: Application,
         onActivateModel = { id ->
             if (CaptionService.running) message("请先停止同传，再切换识别模型", true)
             else {
+                clearModelOperationNotice()
                 models.select(id)
                 preferredLocalModelId = id
                 appearance.edit().putString("preferred_local_model", id).apply()
@@ -318,11 +357,11 @@ class AppController internal constructor(application: Application,
         onDismissMessage = { mutableState.update { it.copy(message = null) } },
     )
 
-    /** 开屏和返回前台时恢复真实入口，同时更新界面中的图标偏好。 */
+    /** 前台恢复时核对真实图标入口，仅更新图标状态，不重建整页服务配置。 */
     fun restoreLauncherIcon() {
         runCatching { launcherIcons.reconcile() }
             .onFailure { message("桌面图标暂时无法恢复，可在外观中重新选择", true) }
-        refresh()
+        mutableState.update { it.copy(settings = it.settings.copy(launcherIcon = launcherIcons.current)) }
     }
 
     /** 主题操作才同步自动纯色，字幕刷新不触发系统组件切换。 */
@@ -331,12 +370,17 @@ class AppController internal constructor(application: Application,
             .onFailure { message("桌面图标颜色暂未更新，可在外观中重新保存", true) }
     }
 
-    /** 接收系统授权状态，只展示系统实际授予的结果。 */
-    fun setPermissions(value: List<PermissionUiState>) { permissions = value.withRequiredPermissions(); refresh() }
+    /** 系统实值没有改变时复用当前页面，避免初始化与首次onResume重复重建整份服务配置。 */
+    fun setPermissions(value: List<PermissionUiState>) {
+        val actual = value.withRequiredPermissions()
+        if (permissions == actual && state.value.live.permissions == actual) return
+        permissions = actual
+        refresh()
+    }
 
     /** 冷启动与授权返回共用系统实值；不缓存本次会话的屏幕捕获授权。 */
     fun refreshPermissions() {
-        costs.refreshToday()
+        viewModelScope.launch(Dispatchers.IO) { costs.refreshToday() }
         val context = getApplication<Application>().applicationContext
         setPermissions(emptyList<PermissionUiState>().withRequiredPermissions().map { permission ->
             permission.copy(granted = when (permission.id) {
@@ -349,22 +393,32 @@ class AppController internal constructor(application: Application,
             required = false))
     }
 
-    /** 引导不会隐式保存或下载；未准备好可明确跳过，最后一步结束后不再自动出现。 */
+    /** 引导按已保存配置判断就绪；下载须主动确认，各步可跳过，完成后不再自动出现。 */
     private fun advanceOnboarding(skip: Boolean) {
         val step = onboardingStep ?: return
         val ready = when (step) {
             OnboardingStep.PERMISSIONS -> permissions.filter { it.required }.all { it.granted }
             OnboardingStep.MODE -> true
-            OnboardingStep.ONLINE -> savedListeningReady() && listeningDraft().let { !it.hasUnsavedChanges && !it.testing }
-            OnboardingStep.API -> prefs.byokReady && !state.value.settings.api.hasUnsavedChanges
+            OnboardingStep.ONLINE -> prefs.onlineReady && onboardingSaveError == null
+            OnboardingStep.API -> prefs.byokReady && onboardingLocalReady() && onboardingSaveError == null
             OnboardingStep.MODEL -> models.selectedPaths() != null
         }
         if (!skip && !ready) return
+        if (step == OnboardingStep.MODE) {
+            // 跳过路线选择不启动下载；仍可在下一页显式下载或继续跳过。
+            if (prefs.listeningMode != ListeningMode.ONLINE) {
+                runCatching { prepareOnboardingLocal() }.onFailure {
+                    onboardingSaveError = UiMessage(it.message ?: "配置暂未完成，请重试", true)
+                    refresh()
+                    return
+                }
+            }
+        }
         val steps = onboardingSteps(prefs.listeningMode)
         onboardingStep = steps.getOrNull(steps.indexOf(step) + 1)
         cancelProbe(); cancelOnlineProbe()
         if (onboardingStep == null) {
-            appearance.edit().putBoolean("onboarding_completed", true).apply()
+            appearance.edit().putBoolean("onboarding_completed", true).putBoolean("onboarding_local_requested", false).apply()
             mutableState.update { it.copy(destination = UiDestination.LIVE) }
         }
         refresh()
@@ -403,12 +457,21 @@ class AppController internal constructor(application: Application,
         }
     }
 
+    /** 同一次偏好事务逐键通知时只安排一次重建，避免主线程连续重复解析所有配置。 */
+    private fun requestRefresh() {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
+            yield()
+            refresh()
+        }
+    }
+
     /** 更新持久化状态，保持用户尚未保存的 API 和场景草稿。 */
     private fun refresh() {
         val library = models.state.value
         val modelWorkBusy = library.entries.any { it.status in listOf(ModelStatus.QUEUED, ModelStatus.DOWNLOADING, ModelStatus.VERIFYING) }
         val session = CaptionService.state.value
-        if (probe != null && (session.running || prefs.byokProfile.id != probeActiveProfileId ||
+        if ((probe != null || onboardingSetupProbe != null) && (session.running || prefs.byokProfile.id != probeActiveProfileId ||
                 apiProfile()?.let { prefs.byokService(it) } != probeService)) cancelProbe()
         if (testedEndpoint != null && (session.running || prefs.byokProfile.id != testedEndpoint?.activeProfileId ||
                 apiProfile()?.let { prefs.byokService(it) } != testedEndpoint?.previouslySaved)) cancelProbe()
@@ -465,7 +528,8 @@ class AppController internal constructor(application: Application,
         }
         mutableState.update { old ->
             old.copy(
-                onboarding = onboardingStep?.let { OnboardingUiState(it, prefs.byokReady, selected != null, prefs.listeningMode, savedListeningReady()) },
+                onboarding = onboardingStep?.let { OnboardingUiState(it, prefs.byokReady && onboardingSaveError == null,
+                    onboardingLocalReady(), prefs.listeningMode, prefs.onlineReady && onboardingSaveError == null, onboardingSetup()) },
                 live = old.live.copy(
                     running = session.running,
                     listeningMode = prefs.listeningMode,
@@ -653,12 +717,43 @@ class AppController internal constructor(application: Application,
             saved.map { credential ->
                 val old = previous.firstOrNull { it.id == platform.id && it.credentialId == credential.id }
                 if (old?.hasUnsavedChanges == true) old.copy(hasSavedKey = credential.key.isNotEmpty(),
-                    isDefault = credential.id == runCatching { prefs.defaultPlatformCredentialId(platform.id) }.getOrNull())
+                    isDefault = credential.id == runCatching { prefs.defaultPlatformCredentialId(platform.id) }.getOrNull(),
+                    isPlaceholder = !prefs.hasStoredPlatformCredential(platform.id, credential.id),
+                    usedBy = credentialUsage(platform.id, credential.id))
                 else PlatformKeyUiState(platform.id, platform.label, credential.key, credential.key.isNotEmpty(),
                     message = old?.message, credentialId = credential.id, credentialLabel = credential.label,
-                    isDefault = credential.id == runCatching { prefs.defaultPlatformCredentialId(platform.id) }.getOrNull())
+                    isDefault = credential.id == runCatching { prefs.defaultPlatformCredentialId(platform.id) }.getOrNull(),
+                    isPlaceholder = !prefs.hasStoredPlatformCredential(platform.id, credential.id),
+                    usedBy = credentialUsage(platform.id, credential.id))
             } + previous.filter { it.id == platform.id && it.isNew && saved.none { saved -> saved.id == it.credentialId } }
         }
+    }
+
+    /** 仅在删除确认中列出真正读取该凭据的连接，默认跟随也按当前指针计算。 */
+    private fun credentialUsage(platformId: String, credentialId: String): List<String> {
+        val targets = prefs.byokProfiles.map { Triple(it.name, prefs.byokUrl(it), translationCredentialSlot(it.id)) } +
+            services.profiles.filter { it.mode != ListeningMode.LOCAL }.map {
+                Triple(it.name, it.endpoint, listeningCredentialSlot(it.mode, it.endpoint, it.model))
+            } + JevProvider.entries.filter { it.needsKey }.map { Triple("Jev · ${it.name}", it.url, jevCredentialSlot(it)) }
+        return targets.filter { (_, endpoint, slot) -> PlatformCredentials.forUrl(endpoint)?.id == platformId &&
+            prefs.credentialFor(platformId, slot)?.id == credentialId }.map { it.first }.distinct()
+    }
+
+    /** 单条弹窗放弃草稿时，不影响其他凭据的未保存修改。 */
+    private fun discardPlatformKey(platformId: String, credentialId: String) {
+        val previous = state.value.settings.platformKeys.filterNot { it.id == platformId && it.credentialId == credentialId }
+        mutableState.update { it.copy(settings = it.settings.copy(platformKeys = savedPlatformKeys(previous))) }
+    }
+
+    /** 界面二次确认后才删除；删除失败仍保留钥匙扣和错误提示。 */
+    private fun deletePlatformKey(platformId: String, credentialId: String) {
+        if (CaptionService.running || state.value.live.busy) return
+        cancelProbe(); cancelOnlineProbe(); cancelJevProbe()
+        val result = runCatching { prefs.deletePlatformCredential(platformId, credentialId) }
+        if (result.isSuccess) {
+            discardPlatformKey(platformId, credentialId)
+            refresh()
+        } else message(result.exceptionOrNull()?.message ?: "密钥删除失败，请重试", true)
     }
 
     /** 新密钥仅创建独立草稿，保存前不进入服务下拉。 */
@@ -771,7 +866,7 @@ class AppController internal constructor(application: Application,
         }
         val default = credentials.firstOrNull { it.id == defaultId }
         mutableState.update { it.copy(settings = it.settings.copy(quickPlatformKey = QuickPlatformKeyUiState(
-            platformId, platform.label, if (first) defaultId else UUID.randomUUID().toString(), serviceId,
+            platformId, platform.label, if (first && defaultId.isNotEmpty()) defaultId else UUID.randomUUID().toString(), serviceId,
             name = if (first) default?.label ?: "默认密钥" else "密钥 ${credentials.size + 1}",
         ))) }
     }
@@ -801,7 +896,7 @@ class AppController internal constructor(application: Application,
             prefs.savePlatformCredential(draft.platformId, draft.credentialId, draft.name, draft.key)
             if (target != null) {
                 // 首次填入平台默认项时保留“跟随默认”，之后切换默认仍对该服务生效。
-                val alreadyFollowsDefault = prefs.selectedCredentialId(draft.platformId, target.second) == null &&
+                val alreadyFollowsDefault = runCatching { prefs.selectedCredentialId(draft.platformId, target.second) == null }.getOrDefault(false) &&
                     prefs.defaultPlatformCredentialId(draft.platformId) == draft.credentialId
                 if (!alreadyFollowsDefault) prefs.selectCredential(draft.platformId, target.second, draft.credentialId)
             }
@@ -835,7 +930,7 @@ class AppController internal constructor(application: Application,
 
     /** 编辑器可选择平台中的所有命名密钥，并支持跟随平台默认。 */
     private fun credentialOptions(platformId: String): List<UiOption> = listOf(UiOption("", "跟随默认密钥")) +
-        prefs.platformCredentials(platformId).map { UiOption(it.id, it.label, if (it.key.isEmpty()) "未填写" else "已保存") }
+        prefs.platformCredentials(platformId).filter { prefs.hasStoredPlatformCredential(platformId, it.id) }.map { UiOption(it.id, it.label, if (it.key.isEmpty()) "未填写" else "已保存") }
 
     /** 云端表单按自己的地址和模型展示凭据绑定，缺密钥时仍能就地新增。 */
     private fun bindListeningCredentials(mode: ListeningMode, draft: OnlineListeningUiState): OnlineListeningUiState {
@@ -923,6 +1018,7 @@ class AppController internal constructor(application: Application,
             it.copy(settings = it.settings.copy(api = draft.copy(hasUnsavedChanges = isApiDirty(draft)),
                 platformKeys = savedPlatformKeys(it.settings.platformKeys, draft.url)))
         }
+        refreshOnboardingSetup()
     }
 
     /** 连接草稿只比较连接字段，中央密钥的修改由独立草稿保护。 */
@@ -985,7 +1081,7 @@ class AppController internal constructor(application: Application,
 
     /** 用临时配置测试，不保存草稿或探测结果；只有用户确认才写入设置。 */
     private fun testApi() {
-        if (CaptionService.running || probe != null) return
+        if (CaptionService.running || probe != null || onboardingSetupProbe != null) return
         val draft = apiSnapshot(state.value.settings.api)
         if (draft.profileId != apiProfile()?.id) return
         val (error, url) = ByokTranslator.chatUrl(draft.url)
@@ -1000,7 +1096,9 @@ class AppController internal constructor(application: Application,
         probe = translator
         probeService = previous
         probeActiveProfileId = prefs.byokProfile.id
-        updateApi { it.copy(testing = true, canTest = false, suggestedUrl = "", message = UiMessage("正在测试草稿地址与关闭思考参数，最多 2 个同源地址、12 次请求，服务商可能计费；不会自动保存。")) }
+        updateApi { it.copy(testing = true, canTest = false, suggestedUrl = "", message = UiMessage(
+            if (onboardingStep == OnboardingStep.API) "正在测试连接；密钥已自动保存。"
+            else "正在测试草稿地址与关闭思考参数，最多 2 个同源地址、12 次请求，服务商可能计费；不会自动保存。")) }
         probeJob = viewModelScope.launch {
             val outcome = withContext(Dispatchers.IO) { runCatching { translator.probeConnection(draft.url) }.getOrNull() }
             if (probe === translator) {
@@ -1022,7 +1120,8 @@ class AppController internal constructor(application: Application,
                     val notice = if (outcome.variantName == ByokTranslator.NONE_WORKED)
                         "连接可用，但未能关闭思考，字幕延迟可能较大" else "连接测试通过"
                     updateApi { it.copy(testing = false, canTest = true, suggestedUrl = testedUrl,
-                        message = UiMessage("$notice；可在下方替换并保存，不操作即保持原配置。")) }
+                        message = UiMessage(if (onboardingStep == OnboardingStep.API) "$notice；密钥已自动保存。"
+                            else "$notice；可在下方替换并保存，不操作即保持原配置。")) }
                 }
             }
         }
@@ -1051,6 +1150,8 @@ class AppController internal constructor(application: Application,
     private fun cancelProbe() {
         testedEndpoint = null
         val translator = probe
+        val setupProbe = onboardingSetupProbe
+        onboardingSetupProbe = null
         probe = null
         probeService = null
         probeActiveProfileId = null
@@ -1058,6 +1159,7 @@ class AppController internal constructor(application: Application,
         probeJob = null
         updateApi { it.copy(testing = false, canTest = !CaptionService.running, suggestedUrl = "", message = if (it.testing) UiMessage("连接测试已取消") else it.message) }
         translator?.cancel()
+        setupProbe?.cancel()
         job?.cancel()
     }
 
@@ -1083,7 +1185,6 @@ class AppController internal constructor(application: Application,
         val model = when (kind) {
             "asr" -> CloudAsrConfig.DEFAULT_MODEL
             "realtime" -> LiveTranslateModels.REALTIME_ID
-            "segmented" -> LiveTranslateModels.ECONOMY_ID
             else -> return
         }
         val endpoint = if (mode == ListeningMode.CLOUD_ASR) CloudAsrConfig.DEFAULT_ENDPOINT
@@ -1222,6 +1323,268 @@ class AppController internal constructor(application: Application,
         if (state.value.live.listeningServiceId == id) advanceOnboarding(false)
     }
 
+    /** 引导固定两条基础路线，只有明确点击本地下载按钮才允许联网下载。 */
+    private fun chooseOnboardingRoute(mode: ListeningMode) {
+        if (onboardingStep != OnboardingStep.MODE || CaptionService.running || state.value.live.busy) return
+        if (mode !in listOf(ListeningMode.LOCAL, ListeningMode.ONLINE)) return
+        cancelProbe(); cancelOnlineProbe()
+        onboardingKeyDraft = null; onboardingSaveError = null
+        runCatching {
+            if (mode == ListeningMode.LOCAL) prepareOnboardingLocal()
+            else {
+                val endpoint = LiveTranslateModels.REALTIME_ENDPOINT
+                val model = LiveTranslateModels.REALTIME_ID
+                val existing = services.profiles.firstOrNull { it.mode == ListeningMode.ONLINE && it.endpoint == endpoint && it.model == model }
+                    ?: ListeningServiceProfile(ListeningServiceProfile.newId(), "千问实时听译", ListeningMode.ONLINE, endpoint, model).also(services::save)
+                activateListeningProfile(existing)
+                updateOnline { savedOnline() }
+            }
+            onboardingStep = if (mode == ListeningMode.ONLINE) OnboardingStep.ONLINE else OnboardingStep.API
+        }.onFailure { onboardingSaveError = UiMessage(it.message ?: "配置暂未完成，请重试", true) }
+        refresh()
+    }
+
+    /** 选择本地只预填配置并启用已安装模型；下载必须在配置页由用户主动点击。 */
+    private fun prepareOnboardingLocal() {
+        clearModelOperationNotice()
+        preferredLocalModelId = "reazonspeech"
+        appearance.edit().putString("preferred_local_model", preferredLocalModelId).apply()
+        services.select(null)
+        changeListeningMode(ListeningMode.LOCAL)
+        prepareOnboardingTranslation()
+        val entry = models.state.value.entries.firstOrNull { it.spec.id == "reazonspeech" }
+        if (entry?.status == ModelStatus.READY) models.select("reazonspeech")
+    }
+
+    /** 下载完成即启用引导确认的模型，不影响离开引导后用户选择的其他模型。 */
+    private fun activateOnboardingModelWhenReady() {
+        if (onboardingStep !in listOf(OnboardingStep.API, OnboardingStep.MODEL) || prefs.listeningMode != ListeningMode.LOCAL ||
+            !appearance.getBoolean("onboarding_local_requested", false)) return
+        val library = models.state.value
+        if (library.selectedId != "reazonspeech" && library.entries.any { it.spec.id == "reazonspeech" && it.status == ModelStatus.READY })
+            models.select("reazonspeech")
+    }
+
+    /** 只提示本次观察到的下载终态，已安装模型的普通扫描不重复报下载完成。 */
+    private fun announceModelDownloadChanges(library: ModelLibraryState) {
+        val active = setOf(ModelStatus.QUEUED, ModelStatus.DOWNLOADING, ModelStatus.VERIFYING)
+        pendingModelDownloads += library.entries.filter { it.status in active }.map { it.spec.id }
+        val completed = library.entries.filter { it.spec.id in pendingModelDownloads && it.status == ModelStatus.READY }
+        val failed = library.entries.firstOrNull { it.spec.id in pendingModelDownloads && it.status == ModelStatus.FAILED }
+        val cancelled = library.entries.firstOrNull { it.spec.id in pendingModelDownloads && it.status == ModelStatus.CANCELLED }
+        pendingModelDownloads.removeAll(library.entries.filter { it.status in setOf(ModelStatus.READY, ModelStatus.FAILED, ModelStatus.CANCELLED) }.map { it.spec.id }.toSet())
+        when {
+            completed.isNotEmpty() -> message("${completed.joinToString("、") { it.spec.name }} 模型下载完成")
+            failed != null -> message("${failed.spec.name} 下载失败：${failed.error ?: "请重试"}", true)
+            cancelled != null -> message("${cancelled.spec.name} 下载已取消")
+        }
+    }
+
+    /** 新操作或重新配置结束旧操作提示的展示周期，模型自身的实际错误仍由仓库状态保留。 */
+    private fun clearModelOperationNotice() {
+        mutableState.update { root -> root.copy(models = root.models.copy(message = null)) }
+    }
+
+    /** 先记录用户确认的下载，再交给持久任务，避免缓存命中太快而漏掉完成提示。 */
+    private fun startModelDownload(id: String) {
+        clearModelOperationNotice()
+        // 跳过方式选择后仍可在配置页主动下载，此时也需要在下载完成后自动启用。
+        if (id == "reazonspeech" && prefs.listeningMode == ListeningMode.LOCAL &&
+            onboardingStep in listOf(OnboardingStep.API, OnboardingStep.MODEL))
+            appearance.edit().putBoolean("onboarding_local_requested", true).apply()
+        if (!models.isReady(id)) pendingModelDownloads += id
+        models.download(id)
+    }
+
+    /** 本地完成条件明确要求初始识别模型已校验且已选中，不能借用别的模型的就绪状态。 */
+    private fun onboardingLocalReady(): Boolean = models.state.value.selectedId == "reazonspeech" &&
+        models.state.value.entries.any { it.spec.id == "reazonspeech" && it.status == ModelStatus.READY } && models.selectedPaths() != null
+
+    /** 引导中的供应商模板提供全部连接字段；用户只接触供应商、模型和密钥。 */
+    private fun onboardingProvider(): TextServiceProvider = TextServiceProviders.entries.first { it.id == onboardingProviderId }
+
+    /** 探测地址只允许保留模板的协议、主机与端口，不能将共享凭据发往其他来源。 */
+    private fun onboardingEndpoint(): String {
+        val provider = onboardingProvider()
+        val candidate = appearance.getString("onboarding_endpoint:${provider.id}", provider.url).orEmpty()
+        return candidate.takeIf { sameOrigin(it, provider.url) && ByokTranslator.chatUrl(it).first == null } ?: provider.url
+    }
+
+    /** 自动配置仅更换同源接口路径，不扫描端口或接受其他站点地址。 */
+    private fun sameOrigin(first: String, second: String): Boolean = runCatching {
+        val a = java.net.URI(first); val b = java.net.URI(second)
+        a.scheme.equals(b.scheme, true) && a.host != null && a.host.equals(b.host, true) && a.port == b.port
+    }.getOrDefault(false)
+
+    /** 成功获取的账户模型目录优先于预设；未获取目录时仍可使用内置建议。 */
+    private fun onboardingTranslationModels(): List<String> {
+        val provider = onboardingProvider()
+        val stored = appearance.getString("onboarding_models:${provider.id}", null)
+        val discovered = runCatching { org.json.JSONArray(stored ?: "[]") }
+            .getOrNull()?.let { data -> (0 until minOf(data.length(), 256)).mapNotNull { data.opt(it) as? String } }.orEmpty()
+            .filter { it.isNotBlank() && it.length <= 256 && it.none(Char::isISOControl) }.distinct()
+        val choices = if (stored != null) discovered else TextModelCatalog.forProvider(provider.id)
+        val selected = appearance.getString("onboarding_model:${provider.id}", null)
+            ?.takeIf { it.isNotBlank() && it.length <= 256 && it.none(Char::isISOControl) }
+        return if (selected != null && selected !in choices) listOf(selected) + choices else choices
+    }
+
+    /** 每个平台记住自己的选择，探测返回的新模型同样能在引导中选择。 */
+    private fun onboardingTranslationModel(): String {
+        val provider = onboardingProvider()
+        val models = onboardingTranslationModels()
+        val default = provider.model.takeIf { it.isNotBlank() && it in models } ?: models.firstOrNull().orEmpty()
+        return appearance.getString("onboarding_model:${provider.id}", default).orEmpty().takeIf { it in models } ?: default
+    }
+
+    /** 复用完全相同的已存服务，否则只复用引导自建项，避免覆盖用户其他接口。 */
+    private fun prepareOnboardingTranslation() {
+        val provider = onboardingProvider()
+        val model = onboardingTranslationModel()
+        val exact = prefs.byokProfiles.firstOrNull { prefs.byokUrl(it) == onboardingEndpoint() && prefs.byokModel(it) == model }
+        val ownedId = appearance.getString("onboarding_profile:${provider.id}", null)
+        val owned = prefs.byokProfiles.firstOrNull { it.id == ownedId }
+        val profile = exact ?: owned ?: run {
+            val base = "初次配置 · ${provider.title}"
+            var name = base
+            var suffix = 2
+            while (prefs.byokProfiles.any { it.name == name }) name = "$base ${suffix++}"
+            prefs.addByokProfile(name, select = false).also {
+                appearance.edit().putString("onboarding_profile:${provider.id}", it.id).apply()
+            }
+        }
+        prefs.saveByok(onboardingEndpoint(), model, null, profile = profile)
+        prefs.useByokProfile(profile)
+        translationTargetProfileId = null
+        updateApi { savedApi() }
+    }
+
+    /** 极简引导测试自动保存真实通过的地址与模型，普通设置页仍保留原有人工确认行为。 */
+    private fun testOnboardingTranslation() {
+        if (onboardingStep != OnboardingStep.API || prefs.listeningMode != ListeningMode.LOCAL ||
+            CaptionService.running || probe != null || onboardingSetupProbe != null) return
+        val draft = apiSnapshot(state.value.settings.api)
+        val target = apiProfile() ?: return
+        val previous = prefs.byokService(target) ?: return
+        if (draft.profileId != target.id || previous.key.isEmpty()) return
+        cancelProbe()
+        val provider = onboardingProviderId
+        val selectedProfile = prefs.byokProfile.id
+        val client = onboardingProbeFactory(previous, byokSystem(prefs.scene, prefs.sourceLang, prefs.targetLang),
+            mtMaxTokens(prefs.targetLang)) { service, usage -> costs.recordTranslation(null, CostCategory.TEST, service, usage) }
+        onboardingSetupProbe = client
+        probeService = previous; probeActiveProfileId = selectedProfile
+        val candidates = onboardingTranslationModels()
+        updateApi { it.copy(testing = true, canTest = false, message = UiMessage("正在获取模型并测试连接…")) }
+        probeJob = viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { client.probe(candidates) }
+                if (onboardingSetupProbe !== client) return@launch
+                if (onboardingStep != OnboardingStep.API || provider != onboardingProviderId || CaptionService.running ||
+                    selectedProfile != prefs.byokProfile.id || previous != prefs.byokService(target) ||
+                    draft != apiSnapshot(state.value.settings.api)) { cancelProbe(); return@launch }
+                onboardingSetupProbe = null; probeService = null; probeActiveProfileId = null; probeJob = null
+                val url = result.url
+                val model = result.model
+                // 即使前几项未通过，也保留供应商目录供用户选择；当前配置不因列表刷新而偷偷变更。
+                if (result.catalogAvailable && (url == null || sameOrigin(url, previous.url))) appearance.edit()
+                    .putString("onboarding_models:$provider", org.json.JSONArray(result.models).toString())
+                    .putString("onboarding_model:$provider", draft.model).apply()
+                if (url == null || model == null || !sameOrigin(url, previous.url) || ByokTranslator.chatUrl(url).first != null) {
+                    updateApi { it.copy(testing = false, canTest = true,
+                        message = UiMessage(result.error ?: "没有找到可用的翻译配置，请选择模型后重试", true)) }
+                    refresh()
+                    return@launch
+                }
+                runCatching {
+                    prefs.saveByok(url, model, null, previous.userAgent, previous.headers, target)
+                    result.variantName?.let { prefs.setByokVariant(url, model, it) }
+                    appearance.edit().apply {
+                        putString("onboarding_endpoint:$provider", url)
+                        putString("onboarding_model:$provider", model)
+                        if (result.catalogAvailable && result.models.isNotEmpty())
+                            putString("onboarding_models:$provider", org.json.JSONArray(result.models).toString())
+                    }.apply()
+                }.onSuccess {
+                    val note = if (result.catalogAvailable) "模型列表已更新" else "未获取模型列表，保留已有选项"
+                    val thinking = if (result.variantName == ByokTranslator.NONE_WORKED) "；该模型思考未关闭，字幕可能较慢" else ""
+                    updateApi { savedApi().copy(message = UiMessage("连接测试通过，已自动选择并保存 $model；$note$thinking")) }
+                }.onFailure {
+                    updateApi { it.copy(testing = false, canTest = true, message = UiMessage("配置未能保存，请重试", true)) }
+                }
+                refresh()
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) {
+                if (onboardingSetupProbe === client) {
+                    onboardingSetupProbe = null; probeService = null; probeActiveProfileId = null; probeJob = null
+                    updateApi { it.copy(testing = false, canTest = true, message = UiMessage("连接测试失败，请稍后重试", true)) }
+                }
+            } finally { client.cancel() }
+        }
+    }
+
+    /** 供应商切换重新读取该平台自己的密钥，不把上个平台输入带到新地址。 */
+    private fun changeOnboardingProvider(id: String) {
+        if (onboardingStep != OnboardingStep.API || CaptionService.running || TextServiceProviders.entries.none { it.id == id }) return
+        cancelProbe()
+        onboardingProviderId = id
+        onboardingKeyDraft = null; onboardingSaveError = null
+        appearance.edit().putString("onboarding_provider", id).apply()
+        runCatching { prepareOnboardingTranslation() }
+            .onFailure { onboardingSaveError = UiMessage(it.message ?: "供应商配置保存失败", true) }
+        refresh()
+    }
+
+    /** 模型只能从该平台的预制项选取，连接地址始终由模板自动提供。 */
+    private fun changeOnboardingModel(model: String) {
+        if (onboardingStep != OnboardingStep.API || CaptionService.running || model !in onboardingTranslationModels()) return
+        cancelProbe()
+        onboardingKeyDraft = null; onboardingSaveError = null
+        appearance.edit().putString("onboarding_model:$onboardingProviderId", model).apply()
+        runCatching { prepareOnboardingTranslation() }
+            .onFailure { onboardingSaveError = UiMessage(it.message ?: "模型配置保存失败", true) }
+        refresh()
+    }
+
+    /** 原样保存每次输入到共用凭据库；成功不清空输入，失败保留本次输入供重试。 */
+    private fun saveOnboardingKey(value: String) {
+        if (onboardingStep !in listOf(OnboardingStep.API, OnboardingStep.ONLINE) || CaptionService.running) return
+        cancelProbe(); cancelOnlineProbe()
+        onboardingKeyDraft = value; onboardingSaveError = null
+        // 账户改变后需重新获取目录，旧账户的模型不能冒充新密钥可用项。
+        appearance.edit().remove("onboarding_models:$onboardingProviderId").apply()
+        runCatching {
+            if (prefs.listeningMode == ListeningMode.ONLINE) {
+                prefs.saveOnline(LiveTranslateModels.REALTIME_ENDPOINT, LiveTranslateModels.REALTIME_ID, value)
+                updateOnline { savedOnline() }
+            } else {
+                prefs.saveByok(onboardingEndpoint(), onboardingTranslationModel(), value)
+                updateApi { savedApi() }
+            }
+            onboardingKeyDraft = null
+        }.onFailure { onboardingSaveError = UiMessage(it.message ?: "密钥未能保存，请重试", true) }
+        refresh()
+    }
+
+    /** 引导快照只包含简化表单，成功测试不是就绪前提，错误提示不包含密钥。 */
+    private fun onboardingSetup(): OnboardingSetupUiState {
+        val online = prefs.listeningMode == ListeningMode.ONLINE
+        val draft = state.value.settings
+        val key = onboardingKeyDraft ?: if (online) prefs.onlineKey else
+            prefs.byokKey.orEmpty().takeIf { prefs.byokUrl == onboardingEndpoint() }.orEmpty()
+        return OnboardingSetupUiState(onboardingProviderId, onboardingTranslationModel(),
+            TextServiceProviders.entries.map { UiOption(it.id, it.title) },
+            onboardingTranslationModels().map { UiOption(it, it) }, key,
+            keySaved = onboardingKeyDraft == null && onboardingSaveError == null && key.isNotEmpty(),
+            testing = if (online) draft.online.testing else draft.api.testing,
+            message = onboardingSaveError ?: if (online) draft.online.message else draft.api.message)
+    }
+
+    /** 异步测试只刷新引导表单，避免为一条测试消息重建整个服务目录。 */
+    private fun refreshOnboardingSetup() {
+        if (onboardingStep != null) mutableState.update { root -> root.copy(onboarding = root.onboarding?.copy(setup = onboardingSetup())) }
+    }
+
     /** 内部运行路径仍兼容旧配置，界面通过听写与翻译两步选择。 */
     private fun changeListeningMode(mode: ListeningMode) {
         if (mode == prefs.listeningMode) return
@@ -1302,6 +1665,7 @@ class AppController internal constructor(application: Application,
     /** 统一修改云端草稿，不把用户输入隐式写入偏好。 */
     private fun updateOnline(change: (OnlineListeningUiState) -> OnlineListeningUiState) {
         mutableState.update { root -> root.copy(settings = root.settings.copy(online = change(root.settings.online))) }
+        refreshOnboardingSetup()
     }
 
     /** 编辑使旧测试失效；运行中的会话始终使用启动时的配置快照。 */
@@ -1364,25 +1728,15 @@ class AppController internal constructor(application: Application,
             /** 只保留客户端生成的错误说明，不把服务端原始正文写入界面或日志。 */
             override fun onError(value: LiveTranslateError) { error.set(value.message) }
             /** 即使测试失败，已返回的计量也属于本次显式测试。 */
-            override fun onUsage(eventId: String, usage: MeteredUsage) {
+            override fun onCumulativeUsage(eventId: String, usage: MeteredUsage) {
                 costs.recordObserved(null, CostCategory.TEST, config.endpoint, config.model, usage,
-                    eventId = "$streamId:$eventId")
+                    eventId = "$streamId:usage", cumulative = true)
             }
         }
-        val client: AutoCloseable
-        val verify: () -> Boolean
-        if (config.isRealtime) {
-            val realtime = QwenLiveTranslateClient(config, listener)
-            client = realtime
-            verify = { try { realtime.start() && realtime.awaitReady() } finally { realtime.finish(); realtime.close() } }
-        } else {
-            val file = QwenFileTranslateClient(config, listener)
-            client = file
-            verify = { try { file.probe() } finally { file.close() } }
-        }
+        val client = QwenLiveTranslateClient(config, listener)
+        val verify = { try { client.start() && client.awaitReady() } finally { client.finish(); client.close() } }
         onlineProbe = client
-        updateOnline { it.copy(testing = true, message = UiMessage(if (config.isRealtime)
-            "正在验证连接与会话配置，不发送播放音频…" else "正在验证鉴权与模型权限，不发送播放音频…")) }
+        updateOnline { it.copy(testing = true, message = UiMessage("正在验证连接与会话配置，不发送播放音频…")) }
         onlineProbeJob = viewModelScope.launch {
             val ready = withContext(Dispatchers.IO) {
                 verify()
@@ -1390,7 +1744,8 @@ class AppController internal constructor(application: Application,
             if (token != onlineProbeGeneration || onlineProbe !== client) return@launch
             onlineProbe = null; onlineProbeJob = null
             updateOnline { it.copy(testing = false, message = UiMessage(
-                if (ready) (if (config.isRealtime) "连接与会话配置可用" else "鉴权与模型权限可用") + "；尚未测试音频听译，配置仍需点击保存。"
+                if (ready) if (onboardingStep == OnboardingStep.ONLINE) "连接可用，密钥已自动保存。"
+                    else "连接与会话配置可用；尚未测试音频听译，配置仍需点击保存。"
                 else error.get() ?: "连接测试未通过，请检查地址、密钥、模型和网络", !ready)) }
         }
     }
@@ -1450,7 +1805,7 @@ class AppController internal constructor(application: Application,
     /** 修改字幕样式立即持久化，服务通过原有监听同步变化。 */
     private fun saveStyle(style: SubtitleStyleUiState) {
         prefs.setStyle(style.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), style.backgroundAlpha.coerceIn(0f, 1f))
-        prefs.widthFrac = style.widthFraction.coerceIn(Prefs.MIN_WIDTH, 1f)
+        prefs.widthFrac = style.widthFraction.coerceIn(0f, 1f)
         prefs.heightFrac = style.heightFraction.coerceIn(0f, CaptionService.MAX_CAPTION_FRAC)
         prefs.setCaptionRetention(style.limitMode, style.maxSentences, style.keepChars)
         prefs.showJa = style.showOriginal; prefs.showStats = style.showStats; prefs.palette = style.paletteId
@@ -1740,5 +2095,9 @@ class AppController internal constructor(application: Application,
     /** 销毁控制器时取消探测，避免离开应用后继续发送连接测试请求。 */
     override fun onCleared() { prefs.unlisten(prefListener); cancelProbe(); cancelOnlineProbe(); cancelJevProbe(); generation?.cancel(); updateJob?.cancel(); super.onCleared() }
 
-    companion object { const val REPOSITORY = "https://github.com/ZOUYIQAQ/yuyi" }
+    companion object {
+        const val REPOSITORY = "https://github.com/ZOUYIQAQ/yuyi"
+        private val placementPreferenceKeys = setOf("overlayX", "overlayY", "overlayBaselineY",
+            "overlayBaselineAreaWidth", "overlayBaselineAreaHeight")
+    }
 }

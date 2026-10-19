@@ -13,6 +13,41 @@ import java.util.UUID
 class UsageCostRepositoryDeviceTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    /** 用户停止后原生资源释放再慢，也不能把等待时间算入同传时长，迟到费用继续保存。 */
+    @Test fun delayedCleanupRetainsActualStopTimeAndLateUsage() {
+        var now = at(17, 10)
+        val (repo, _) = repository({ now })
+        val id = repo.beginSession("有后台清理的会话")
+        val stopped = now + 30_000
+        now += 90_000
+        repo.endSession(id, stopped)
+        repo.record(id, CostCategory.TEST, "https://cost.example/v1", "测试模型", MeteredUsage(inputTokens = 1))
+        assertEquals(30L, repo.state.value.lastSession!!.durationSeconds)
+        assertEquals(1, repo.state.value.lastSession!!.requests)
+        repo.endSession(id)
+        assertEquals(30L, repo.state.value.lastSession!!.durationSeconds)
+    }
+
+    /** 异步恢复和开始会话争用同一初始化门，后台任务不能把本次新会话标记成历史孤儿。 */
+    @Test fun deferredStartupCannotCloseANewSession() {
+        val constructor = UsageCostRepository::class.java.getDeclaredConstructor(Context::class.java,
+            kotlin.jvm.functions.Function0::class.java, String::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        val clock = { at(17, 10) }
+        val repo = constructor.newInstance(context, clock, "usage-cost-async-${UUID.randomUUID()}.db", false)
+        val id = repo.beginSession("本次会话")
+        val loader = UsageCostRepository::class.java.getDeclaredField("loader").apply { isAccessible = true }
+            .get(null) as java.util.concurrent.ExecutorService
+        loader.submit {}.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        repo.record(id, CostCategory.TEST, "https://cost.example/v1", "测试模型", MeteredUsage(inputTokens = 1))
+        assertNotNull(repo.state.value.currentSession)
+        assertEquals(1, repo.state.value.currentSession!!.requests)
+        assertNull(repo.state.value.lastSession)
+        repo.endSession(id)
+        assertNull(repo.state.value.currentSession)
+        assertEquals(1, repo.state.value.lastSession!!.requests)
+    }
+
     /** 后台写入延迟不改变原始回报所属时段，后续小时查询仍按实际观测时间统计。 */
     @Test fun delayedPersistenceRetainsObservationTime() {
         val observed = at(17, 10)
