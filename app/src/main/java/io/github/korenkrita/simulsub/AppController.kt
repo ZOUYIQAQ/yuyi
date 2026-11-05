@@ -33,15 +33,15 @@ import io.github.korenkrita.simulsub.online.*
 class AppController internal constructor(application: Application,
     private val releaseSource: ReleaseUpdateSource,
     private val updateClock: () -> Long,
-    private val jevProbeFactory: (JevProvider, String, Lang?, Target) -> Judge,
+    private val jevProbeFactory: (JevConnection, Lang?, Target) -> Judge,
 ) : AndroidViewModel(application) {
-    /** 保留已有三参数注入接口，Jev生产请求独立设置十秒测试时限。 */
+    /** 生产连接测试使用完整快照，并设置独立的十秒时限。 */
     internal constructor(application: Application, releaseSource: ReleaseUpdateSource, updateClock: () -> Long) :
-        this(application, releaseSource, updateClock, { provider, key, source, target ->
-            Jev(provider, key, deadlineMs = 10_000, source = source, target = target,
+        this(application, releaseSource, updateClock, { connection, source, target ->
+            Jev(connection.provider, connection.key.orEmpty(), url = connection.url, model = connection.model, deadlineMs = 10_000, source = source, target = target,
                 clock = android.os.SystemClock::elapsedRealtime,
                 onUsage = { usage -> UsageCostRepository.get(application).recordObserved(null, CostCategory.TEST,
-                    provider.url, provider.model, usage) })
+                    connection.url, connection.model, usage) })
         })
     /** 生产入口保持AndroidViewModel所需的单参数构造器，测试可以注入网络与时钟。 */
     constructor(application: Application) : this(application, GithubReleaseUpdateSource(), System::currentTimeMillis)
@@ -187,6 +187,7 @@ class AppController internal constructor(application: Application,
         onServiceCredentialChange = ::selectServiceCredential,
         onSetDefaultPlatformKey = ::setDefaultPlatformKey,
         onOpenQuickPlatformKey = ::openQuickPlatformKey,
+        onQuickPlatformKeyPlatformChange = ::changeQuickPlatform,
         onQuickPlatformKeyNameChange = { name -> updateQuickPlatformKey { it.copy(name = name, message = null) } },
         onQuickPlatformKeyValueChange = { key -> updateQuickPlatformKey { it.copy(key = key, message = null) } },
         onSaveQuickPlatformKey = ::saveQuickPlatformKey,
@@ -324,6 +325,13 @@ class AppController internal constructor(application: Application,
         onThemeChange = { prefs.theme = when (it) { UiThemeMode.SYSTEM -> "system"; UiThemeMode.LIGHT -> "light"; UiThemeMode.DARK -> "dark" }; updateLauncherTheme(); refresh() },
         onDynamicColorsChange = { appearance.edit().putBoolean("dynamic", it).apply(); updateLauncherTheme(); refresh() },
         onAdvancedChange = ::saveAdvanced,
+        onSaveJevCustom = { config ->
+            if (!CaptionService.running) {
+                cancelJevProbe()
+                prefs.setJevCustom(config)
+                refresh()
+            }
+        },
         onSaveJevKey = { saveJevKey() },
         onTestJevConnection = ::testJevConnection,
         onCancelJevTest = { cancelJevProbe(showMessage = true) },
@@ -468,6 +476,7 @@ class AppController internal constructor(application: Application,
 
     /** 更新持久化状态，保持用户尚未保存的 API 和场景草稿。 */
     private fun refresh() {
+        val jevConnection = prefs.jevConnection()
         val library = models.state.value
         val modelWorkBusy = library.entries.any { it.status in listOf(ModelStatus.QUEUED, ModelStatus.DOWNLOADING, ModelStatus.VERIFYING) }
         val session = CaptionService.state.value
@@ -628,12 +637,13 @@ class AppController internal constructor(application: Application,
                         maxContextSentences = Pipeline.MAX_PREVIOUS_SENTENCES, dedupeJoin = prefs.dedupeJoin,
                         jevOn = prefs.jevOn, jevCheck = prefs.jevCheck, jevProviderId = prefs.jevProvider.name,
                         jevProviders = JevProvider.entries.map { UiOption(it.name, it.label) },
-                        jevNeedsKey = prefs.jevProvider.needsKey,
-                        jevCredentialOptions = PlatformCredentials.forUrl(prefs.jevProvider.url)?.let { credentialOptions(it.id) }.orEmpty(),
-                        jevCredentialId = PlatformCredentials.forUrl(prefs.jevProvider.url)?.let { uiCredentialSelection(it.id, "jev:${prefs.jevProvider.name}") }.orEmpty(),
-                        jevCredentialLabel = PlatformCredentials.forUrl(prefs.jevProvider.url)?.let { credentialLabel(it.id, "jev:${prefs.jevProvider.name}") }.orEmpty(),
-                        jevHasSavedKey = !prefs.jevKey(prefs.jevProvider).isNullOrEmpty(),
-                        jevKey = prefs.jevKey(prefs.jevProvider),
+                        jevNeedsKey = prefs.jevProvider.needsKey || prefs.jevProvider == JevProvider.CUSTOM,
+                        jevCustom = prefs.jevCustom, jevEndpoint = jevConnection.url,
+                        jevCredentialOptions = PlatformCredentials.forUrl(jevConnection.url)?.let { credentialOptions(it.id) }.orEmpty(),
+                        jevCredentialId = PlatformCredentials.forUrl(jevConnection.url)?.let { uiCredentialSelection(it.id, "jev:${prefs.jevProvider.name}") }.orEmpty(),
+                        jevCredentialLabel = PlatformCredentials.forUrl(jevConnection.url)?.let { credentialLabel(it.id, "jev:${prefs.jevProvider.name}") }.orEmpty(),
+                        jevHasSavedKey = !jevConnection.key.isNullOrEmpty(),
+                        jevKey = jevConnection.key,
                         jevMessage = old.settings.advanced.jevMessage.takeIf { old.settings.advanced.jevProviderId == prefs.jevProvider.name },
                     ), version = BuildConfig.VERSION_NAME,
                 ),
@@ -734,7 +744,8 @@ class AppController internal constructor(application: Application,
         val targets = prefs.byokProfiles.map { Triple(it.name, prefs.byokUrl(it), translationCredentialSlot(it.id)) } +
             services.profiles.filter { it.mode != ListeningMode.LOCAL }.map {
                 Triple(it.name, it.endpoint, listeningCredentialSlot(it.mode, it.endpoint, it.model))
-            } + JevProvider.entries.filter { it.needsKey }.map { Triple("Jev · ${it.name}", it.url, jevCredentialSlot(it)) }
+            } + JevProvider.entries.filter { it.needsKey || it == JevProvider.CUSTOM }.map {
+                Triple("Jev · ${it.label}", prefs.jevConnection(it).url, jevCredentialSlot(it)) }
         return targets.filter { (_, endpoint, slot) -> PlatformCredentials.forUrl(endpoint)?.id == platformId &&
             prefs.credentialFor(platformId, slot)?.id == credentialId }.map { it.first }.distinct()
     }
@@ -834,7 +845,7 @@ class AppController internal constructor(application: Application,
             }
             serviceId.startsWith("jev:") -> {
                 val provider = JevProvider.entries.firstOrNull { it.name == serviceId.removePrefix("jev:") } ?: return null
-                PlatformCredentials.forUrl(provider.url) to "jev:${provider.name}"
+                PlatformCredentials.forUrl(prefs.jevConnection(provider).url) to "jev:${provider.name}"
             }
             else -> {
                 val profile = services.profiles.firstOrNull { it.id == serviceId.removePrefix("profile:") } ?: return null
@@ -855,8 +866,15 @@ class AppController internal constructor(application: Application,
     /** 无密钥时直接填写当前默认项；已有凭据则新建一条，避免覆盖原密钥。 */
     private fun openQuickPlatformKey(platformId: String, serviceId: String) {
         if (CaptionService.running || state.value.live.busy || state.value.settings.quickPlatformKey != null) return
-        val platform = state.value.settings.platformKeys.firstOrNull { it.id == platformId }
-            ?.let { CredentialPlatform(it.id, it.label) } ?: return
+        val platforms = (PlatformCredentials.defaults + prefs.credentialPlatforms).distinctBy { it.id }
+        if (platformId.isEmpty() && serviceId.isEmpty()) {
+            mutableState.update { it.copy(settings = it.settings.copy(quickPlatformKey = QuickPlatformKeyUiState(
+                "", "", UUID.randomUUID().toString(), name = "默认密钥", platformEditable = true,
+                platforms = platforms.map { option -> UiOption(option.id, option.label) },
+            ))) }
+            return
+        }
+        val platform = platforms.firstOrNull { it.id == platformId } ?: return
         if (serviceId.isNotBlank() && serviceCredentialTarget(serviceId)?.first?.id != platformId) return
         val credentials = prefs.platformCredentials(platformId)
         val first = credentials.none { it.key.isNotEmpty() }
@@ -868,7 +886,19 @@ class AppController internal constructor(application: Application,
         mutableState.update { it.copy(settings = it.settings.copy(quickPlatformKey = QuickPlatformKeyUiState(
             platformId, platform.label, if (first && defaultId.isNotEmpty()) defaultId else UUID.randomUUID().toString(), serviceId,
             name = if (first) default?.label ?: "默认密钥" else "密钥 ${credentials.size + 1}",
+            platformEditable = serviceId.isEmpty(), platforms = platforms.map { option -> UiOption(option.id, option.label) },
         ))) }
+    }
+
+    /** 在同一表单切换预设或输入自定义来源；只改所属平台，不清除备注与密钥草稿。 */
+    private fun changeQuickPlatform(input: String) {
+        val draft = state.value.settings.quickPlatformKey ?: return
+        if (!draft.platformEditable || draft.serviceId.isNotEmpty()) return
+        val preset = draft.platforms.firstOrNull { it.id == input || it.label == input }
+        val platform = preset?.let { CredentialPlatform(it.id, it.label) } ?: PlatformCredentials.forUrl(input)
+        updateQuickPlatformKey { it.copy(platformInput = preset?.label ?: input,
+            platformId = platform?.id.orEmpty(), platformLabel = platform?.label.orEmpty(),
+            credentialId = if (it.platformId == platform?.id) it.credentialId else UUID.randomUUID().toString(), message = null) }
     }
 
     /** 快捷输入只改内存草稿，不复制到连接表单或可恢复页面状态。 */
@@ -884,6 +914,10 @@ class AppController internal constructor(application: Application,
         val draft = state.value.settings.quickPlatformKey ?: return
         if (draft.key.isEmpty()) {
             updateQuickPlatformKey { it.copy(message = UiMessage("请输入密钥", true)) }
+            return
+        }
+        if (draft.platformId.isEmpty()) {
+            updateQuickPlatformKey { it.copy(message = UiMessage("请选择平台，或填写完整的服务地址", true)) }
             return
         }
         val target = draft.serviceId.takeIf { it.isNotBlank() }?.let(::serviceCredentialTarget)
@@ -1831,11 +1865,14 @@ class AppController internal constructor(application: Application,
     private fun testJevConnection() {
         if (CaptionService.running || jevProbe != null || state.value.settings.api.testing ||
             state.value.settings.online.testing || state.value.settings.cloudAsr.testing) return
-        val provider = prefs.jevProvider
-        val platform = PlatformCredentials.forUrl(provider.url)
-        val key = if (provider.needsKey) prefs.jevKey(provider).orEmpty() else ""
-        if (provider.needsKey && key.isEmpty()) {
-            updateJevProbe(false, UiMessage("请先为${provider.label}选择或添加密钥", true))
+        val connection = prefs.jevConnection()
+        val provider = connection.provider
+        val platform = PlatformCredentials.forUrl(connection.url)
+        if (connection.url.isEmpty() || connection.model.isBlank()) {
+            updateJevProbe(false, UiMessage("请先配置自定义服务的地址与模型", true)); return
+        }
+        if (connection.key == null) {
+            updateJevProbe(false, UiMessage("请先为${provider.label}选择或添加平台密钥", true))
             return
         }
         if (state.value.settings.platformKeys.any { it.id == platform?.id && it.hasUnsavedChanges }) {
@@ -1844,7 +1881,7 @@ class AppController internal constructor(application: Application,
         }
         cancelJevProbe()
         val token = jevProbeGeneration
-        val client = jevProbeFactory(provider, key, prefs.sourceLang, prefs.targetLang)
+        val client = jevProbeFactory(connection, prefs.sourceLang, prefs.targetLang)
         jevProbe = client
         updateJevProbe(true, UiMessage("正在验证${provider.label}的连接、鉴权与模型响应…"))
         jevProbeJob = viewModelScope.launch {
@@ -1852,11 +1889,11 @@ class AppController internal constructor(application: Application,
                 val result = withContext(Dispatchers.IO) {
                     runCatching { client.unfinished("このV何者気になるV、他とは違うVだから") }.getOrNull()
                 }
-                if (token != jevProbeGeneration || jevProbe !== client || provider != prefs.jevProvider) return@launch
+                if (token != jevProbeGeneration || jevProbe !== client || !connection.sameAs(prefs.jevConnection())) return@launch
                 jevProbe = null; jevProbeJob = null
                 val valid = result?.status == 200 && result.error == null && result.noul?.let { it in 0.0..1.0 } == true
                 val detail = when {
-                    valid -> "连接测试通过 · HTTP 200 · ${result!!.ms} 毫秒 · ${provider.model}"
+                    valid -> "连接测试通过 · HTTP 200 · ${result!!.ms} 毫秒 · ${connection.model}"
                     result?.status == 401 || result?.status == 403 -> "鉴权失败，请检查平台密钥、账户余额与模型权限"
                     result?.status == 429 || result?.error == "paused" -> "服务限流或额度不足，请稍后再试或检查账户配额"
                     result?.status == 404 -> "服务地址或模型不可用，请检查供应商支持情况"
@@ -1893,7 +1930,7 @@ class AppController internal constructor(application: Application,
         if (cloudSessionLocked()) return
         val draft = state.value.settings.advanced
         val provider = prefs.jevProvider
-        if (draft.jevProviderId != provider.name || !provider.needsKey) return
+        if (draft.jevProviderId != provider.name || (!provider.needsKey && provider != JevProvider.CUSTOM)) return
         draft.jevKey?.let { prefs.setJevKey(provider, it) } ?: return
         mutableState.update { it.copy(settings = it.settings.copy(advanced = it.settings.advanced.copy(
             jevKey = prefs.jevKey(provider).orEmpty(),

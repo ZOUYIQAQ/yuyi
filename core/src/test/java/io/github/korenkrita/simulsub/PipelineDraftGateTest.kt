@@ -97,10 +97,10 @@ class PipelineDraftGateTest {
     @Test
     fun unicodeCodePointsAreCountedInsteadOfSurrogates() {
         Session().use { s ->
-            s.process("😀"); s.caption()
-            s.process("😀😁😂😃😄"); s.assertSkipped(); assertEquals(1, s.calls.size)
-            s.process("😀😁😂😃😄😅"); s.caption()
-            s.process("😀😆😇😈😉😊"); assertEquals("😀😆😇😈😉😊", s.caption().ja)
+            s.process("𠀀"); s.caption()
+            s.process("𠀀𠀁𠀂𠀃𠀄"); s.assertSkipped(); assertEquals(1, s.calls.size)
+            s.process("𠀀𠀁𠀂𠀃𠀄𠀅"); s.caption()
+            s.process("𠀀𠀆𠀇𠀈𠀉𠀊"); assertEquals("𠀀𠀆𠀇𠀈𠀉𠀊", s.caption().ja)
         }
     }
 

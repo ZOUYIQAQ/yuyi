@@ -65,6 +65,27 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     }
     private var externalToolbar = false
     private var requestedCardWidth = LayoutParams.MATCH_PARENT
+    private var targetAutoWidth = -1
+    private var movingWidth: Float? = null
+    private var widthFrom = 0f
+    private var widthElapsed = 0L
+    private var widthFrameTime = 0L
+    private var lastDrawnWidth = 0
+    private var widthStepPosted = false
+    private val widthEasing = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+    /** 只有上一尺寸真正绘制后才推进宽度，窗口忙碌时也不会吞掉中间帧。 */
+    private val widthStep = Runnable {
+        widthStepPosted = false
+        if (movingWidth != null) {
+            val now = android.os.SystemClock.uptimeMillis()
+            widthElapsed = if (!android.animation.ValueAnimator.areAnimatorsEnabled()) 280L else
+                (widthElapsed + (now - widthFrameTime).coerceIn(16L, 64L)).coerceAtMost(280L)
+            widthFrameTime = now
+            movingWidth = if (widthElapsed >= 280L) null else
+                widthFrom + (targetAutoWidth - widthFrom) * widthEasing.getInterpolation(widthElapsed / 280f)
+            requestLayout(); invalidate()
+        }
+    }
     private val bg = GradientDrawable().apply { cornerRadius = dp(12f) }
 
     var textSp = 13f; private set
@@ -231,16 +252,25 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 统一绘制连续圆角背景；正文由视口高度过渡，草稿只改变背景下沿。 */
     override fun dispatchDraw(canvas: Canvas) {
+        if (canvas.isHardwareAccelerated || !isHardwareAccelerated) {
+            lastDrawnWidth = width
+            if (movingWidth != null && !widthStepPosted) {
+                widthStepPosted = true
+                postOnAnimation(widthStep)
+            }
+        }
         val extension = if (draftSlotEnabled) (draftSlot.bottom - card.bottom).coerceAtLeast(0) else 0
         val bottom = card.bottom + (extension * draftBackgroundFraction).toInt()
-        bg.setBounds(card.left, card.top, card.right, bottom)
+        bg.setBounds(if (requestedCardWidth == 0) 0 else card.left, card.top,
+            if (requestedCardWidth == 0) width else card.right, bottom)
         bg.draw(canvas)
         super.dispatchDraw(canvas)
     }
 
     /** 伸展中的背景没有覆盖到的草稿先裁切，文字始终位于黑框内，工具栏保持独立。 */
     override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
-        if (child !== draftSlot) return super.drawChild(canvas, child, drawingTime)
+        if (child !== draftSlot && (child !== card || requestedCardWidth != 0))
+            return super.drawChild(canvas, child, drawingTime)
         val save = canvas.save()
         canvas.clipRect(bg.bounds)
         val drawn = super.drawChild(canvas, child, drawingTime)
@@ -250,6 +280,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 离开页面或停止服务立即停止背景回调，重新附着时显示已选择的最终状态。 */
     override fun onDetachedFromWindow() {
+        stopWidthTransition()
+        lastDrawnWidth = 0
+        targetAutoWidth = -1
         draftBackgroundAnimator?.cancel(); draftBackgroundAnimator = null
         draftBackgroundFraction = if (draftBackgroundTarget) 1f else 0f
         super.onDetachedFromWindow()
@@ -308,6 +341,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 零宽度表示随内容伸缩；固定宽度仍同步黑框和草稿槽，工具栏不参与。 */
     fun setCardWidth(px: Int) {
+        if (px != 0) stopWidthTransition()
         requestedCardWidth = px
         applyCardWidth(if (px == 0) LayoutParams.MATCH_PARENT else px)
         requestLayout()
@@ -333,14 +367,46 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
             .coerceIn(1, availableWidth.coerceAtLeast(1))
     }
 
-    /** 自动模式每次从完整内容确定宽度，禁止依赖上一帧已折行的测量结果。 */
+    /** 完整内容只按目标宽度排版一次；外层视口平滑收放，避免逐帧换行取消滚动并抖动。 */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        text.animateWidthReflow = requestedCardWidth == 0
         val available = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
         if (requestedCardWidth >= 0) {
             val width = if (requestedCardWidth == 0) contentWidthPx(available) else requestedCardWidth.coerceIn(1, available)
+            if (requestedCardWidth == 0 && targetAutoWidth != width) {
+                val from = lastDrawnWidth.coerceAtMost(available).toFloat()
+                stopWidthTransition()
+                targetAutoWidth = width
+                if (isAttachedToWindow && from > 0 && abs(from - width) > 1f &&
+                    android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                    movingWidth = from
+                    widthFrom = from
+                    widthElapsed = 0L
+                    widthFrameTime = android.os.SystemClock.uptimeMillis()
+                }
+            }
             applyCardWidth(width)
             super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), heightMeasureSpec)
+            if (requestedCardWidth == 0) setMeasuredDimension(
+                (movingWidth?.let { kotlin.math.round(it).toInt() } ?: width).coerceIn(1, available), measuredHeight)
         } else super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    /** 文字与草稿共用稳定的目标排版并保持居中，背景和触摸边界跟随实际视口宽度。 */
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (requestedCardWidth == 0) {
+            card.offsetLeftAndRight((width - card.width) / 2 - card.left)
+            draftSlot.offsetLeftAndRight((width - draftSlot.width) / 2 - draftSlot.left)
+        }
+    }
+
+    /** 手动缩放、切回固定宽度或离开窗口时立即释放过渡，不让动画追赶手指。 */
+    private fun stopWidthTransition() {
+        removeCallbacks(widthStep)
+        widthStepPosted = false
+        movingWidth = null
+        targetAutoWidth = -1
     }
     /** 同步黑框与草稿槽的横向偏移，工具栏放在整个字幕块的上方或下方，并按宿主计算的重叠避让。 */
     fun placeCard(cardOffset: Int, toolbarOffset: Int, toolbarAbove: Boolean, overlapPx: Int) {

@@ -95,12 +95,11 @@ class CompactKeysUiDeviceTest(private val tablet: Boolean, private val fontScale
         compose.onNodeWithTag("platform-key-qwen:default").assertDoesNotExist()
     }
 
-    /** 无用平台不占列表；添加入口仍可选择它，会话锁定时禁止新增和删除。 */
+    /** 无用平台不占列表；新增直接派发表单动作，会话锁定时禁止新增和删除。 */
     @Test fun unusedPlatformIsAvailableOnlyWhenAdding() {
         show()
         compose.onNodeWithTag("platform-key-add").performClick()
-        compose.onNodeWithTag("platform-key-add-unused").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(listOf("unused"), additions); busy = true }
+        compose.runOnIdle { assertEquals(listOf(""), additions); busy = true }
         compose.onNodeWithTag("platform-key-add").assertIsNotEnabled()
         compose.onNodeWithTag("platform-key-delete-qwen:default").assertIsNotEnabled()
     }

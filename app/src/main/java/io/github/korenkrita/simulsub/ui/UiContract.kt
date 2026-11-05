@@ -234,6 +234,9 @@ data class QuickPlatformKeyUiState(
     val name: String = "",
     val key: String = "",
     val message: UiMessage? = null,
+    val platformEditable: Boolean = false,
+    val platformInput: String = platformLabel,
+    val platforms: List<UiOption> = emptyList(),
 )
 
 /** 在线连接草稿独立保存；key 仅保留兼容契约，界面统一从平台密钥页编辑。 */
@@ -258,7 +261,7 @@ data class SubtitleStyleUiState(
     val textSp: Float = 18f,
     val backgroundAlpha: Float = 0.8f,
     /** 零表示自动宽度，正值表示观看区域的固定比例。 */
-    val widthFraction: Float = 0.9f,
+    val widthFraction: Float = 0f,
     /** 默认自动随内容调整高度，零表示自动高度。 */
     val heightFraction: Float = 0f,
     val keepSentences: Int = 3,
@@ -289,6 +292,8 @@ data class AdvancedUiState(
     val jevProviderId: String = "",
     val jevProviders: List<UiOption> = emptyList(),
     val jevNeedsKey: Boolean = false,
+    val jevCustom: io.github.korenkrita.simulsub.JevCustom? = null,
+    val jevEndpoint: String = "",
     val jevHasSavedKey: Boolean = false,
     val jevKey: String? = null,
     val jevMessage: UiMessage? = null,
@@ -426,6 +431,7 @@ data class SimulSubActions(
     val onLauncherIconChange: (LauncherIconChoice) -> Unit = {},
     val onDynamicColorsChange: (Boolean) -> Unit = {},
     val onAdvancedChange: (AdvancedUiState) -> Unit = {},
+    val onSaveJevCustom: (io.github.korenkrita.simulsub.JevCustom) -> Unit = {},
     val onSaveJevKey: () -> Unit = {},
     val onTestJevConnection: () -> Unit = {},
     val onCancelJevTest: () -> Unit = {},
@@ -472,6 +478,7 @@ data class SimulSubActions(
     val onServiceCredentialChange: (String, String) -> Unit = { _, _ -> },
     val onSetDefaultPlatformKey: (String, String) -> Unit = { _, _ -> },
     val onOpenQuickPlatformKey: (String, String) -> Unit = { _, _ -> },
+    val onQuickPlatformKeyPlatformChange: (String) -> Unit = {},
     val onQuickPlatformKeyNameChange: (String) -> Unit = {},
     val onQuickPlatformKeyValueChange: (String) -> Unit = {},
     val onSaveQuickPlatformKey: () -> Unit = {},

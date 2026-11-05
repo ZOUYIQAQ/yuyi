@@ -153,7 +153,17 @@ data class Target(val lang: Lang?, val name: String) {
 }
 
 /** A model may still emit a think block or a stray "</think>"; it is never shown. */
-fun stripThink(s: String): String = s.replace(Regex("(?s)<think>.*?</think>"), "").replace("</think>", "").replace("<think>", "").trim()
+fun stripThink(s: String): String = s.replace(THINK_BLOCK, "").replace(THINK_TAG, "").trim()
+private val THINK_BLOCK = Regex("(?s)<think>.*?</think>|<\\|channel>thought.*?<channel\\|>")
+private val THINK_TAG = Regex("</?think>|<\\|channel>thought|<channel\\|>")
+
+/** 空的 Gemma 思考通道属于格式标记；只有非空通道才认定模型仍在思考。 */
+fun hasThought(s: String): Boolean = s.contains("<think>") ||
+    Regex("(?s)<\\|channel>thought(.*?)(<channel\\|>|$)").findAll(s).any { it.groupValues[1].isNotBlank() }
+
+/** 未闭合的思考内容不能当成字幕展示。 */
+fun openThought(s: String): Boolean = s.lastIndexOf("<think>") > s.lastIndexOf("</think>") ||
+    s.lastIndexOf("<|channel>thought") > s.lastIndexOf("<channel|>")
 
 /**
  * Output cap of one translation. 160 tokens covered the longest Chinese output measured (segments are up to ~10 s with
@@ -263,7 +273,7 @@ object SseStream {
                 if ((reasoningTokens ?: 0) > 0) thinking = true
             }
         }
-        if (text.contains("<think>")) thinking = true
+        if (hasThought(text.toString())) thinking = true
         return if (!done) null else Streamed(text.toString(), finish, promptTokens, outputTokens, thinking, cached)
     }
 }
@@ -336,8 +346,9 @@ fun generateTerms(service: ByokService, stored: String?, remember: (String) -> U
                   onUsage: (MtResult) -> Unit = {})
     : Pair<List<Pair<String, String>>?, String?> {
     val n = max.coerceIn(1, MAX_GENERATE)
-    var variant = ByokTranslator.variant(stored)
-    if (stored == null) {
+    val current = ByokTranslator.current(stored)
+    var variant = ByokTranslator.variant(current)
+    if (current == null) {
         val p = ByokTranslator(service, byokSystem(Scene.GENERAL, source, target), null,
             maxTokens = mtMaxTokens(target), onUsage = onUsage)
         val steps = mutableListOf<ByokTranslator.Step>()
@@ -349,7 +360,8 @@ fun generateTerms(service: ByokService, stored: String?, remember: (String) -> U
             else -> steps.lastOrNull()?.result?.let { if (it.stop == 'f') return null to ByokTranslator.why(it) }
         }
     }
-    val t = ByokTranslator(service, termsSystem(label, background, have, n, source, target), variant,
+    val t = ByokTranslator(service, termsSystem(label, background, have, n, source, target),
+        variant?.let { ByokTranslator.ThinkingOff(it.name, it.label, it.params) },
         deadlineMs = 60_000, maxTokens = 40 * n + 200, firstContentMs = 30_000, onUsage = onUsage)
     val r = t.translate("列出术语。") ?: return null to "没有收到回复"
     if (r.stop == 'f' && r.text.isEmpty()) return null to when {
@@ -485,7 +497,7 @@ class ByokTranslator(
     private fun call(user: String, v: ThinkingOff?, firstMs: Long, endpoint: String = service.url): MtResult {
         val body = Json.encode(mapOf(
             "model" to model,
-            "messages" to listOf(mapOf("role" to "system", "content" to system), mapOf("role" to "user", "content" to user)),
+            "messages" to listOf(mapOf("role" to "system", "content" to (system + (v?.systemNote?.let { "\n\n$it" } ?: ""))), mapOf("role" to "user", "content" to user)),
             "temperature" to 0, "max_tokens" to maxTokens, "stream" to true,
             "stream_options" to mapOf("include_usage" to true),
         ) + (v?.params ?: emptyMap()))
@@ -510,7 +522,7 @@ class ByokTranslator(
         // the log gets the cleaned text, status, timings and usage.
         val res = SseStream.streamResult(r, body, null)
         // reasoning that never closed (the model ran out of tokens while thinking) is not a translation
-        val open = res.raw.lastIndexOf("<think>") > res.raw.lastIndexOf("</think>")
+        val open = openThought(res.raw)
         // what a caption may show: reasoning removed until nothing changes, then the key masked until it is gone, so
         // that MtResult.text (which strips once more) can no longer join anything into the key
         var clean = if (open) "" else res.raw
@@ -524,7 +536,7 @@ class ByokTranslator(
         val result = MtResult(clean, if (open) 'f' else res.stop, res.promptTokens,
             res.outputTokens, firstContentMs = res.firstContentMs, request = res.request, response = null, http = res.http,
             error = if (open) (if (res.stop == 'l' || res.stop == 'e') "unfinished thinking" else res.error ?: "unfinished thinking") else res.error,
-            thinking = res.thinking || open || res.raw.contains("<think>"), cachedTokens = res.cachedTokens)
+            thinking = res.thinking || open || hasThought(res.raw), cachedTokens = res.cachedTokens)
         // 只记录确实开始写出请求的调用；探测的每个候选请求也分别上报。
         completed.set(result)
         reportUsage()
@@ -540,18 +552,19 @@ class ByokTranslator(
         if (!SseStream.hasText(line)) return false
         val j = runCatching { Json.parse(line.removePrefix("data:").trim()) as? Map<*, *> }.getOrNull() ?: return false
         seen.append((((j["choices"] as? List<*>)?.firstOrNull() as? Map<*, *>)?.get("delta") as? Map<*, *>)?.get("content") as? String ?: return false)
-        var s = seen.toString().replace(Regex("(?s)<think>.*?</think>"), "").replace(Regex("(?s)<think>.*"), "")
+        var s = seen.toString().replace(THINK_BLOCK, "")
+            .replace(Regex("(?s)<think>.*|<\\|channel>thought.*"), "")
         // "<", "<thi", "</thin" … at the end may be the start of a tag still arriving
         val lt = s.lastIndexOf('<')
-        if (lt >= 0 && ("<think>".startsWith(s.substring(lt)) || "</think>".startsWith(s.substring(lt)))) s = s.substring(0, lt)
-        return s.replace("</think>", "").isNotBlank()
+        if (lt >= 0 && listOf("<think>", "</think>", "<|channel>thought", "<channel|>").any { it.startsWith(s.substring(lt)) }) s = s.substring(0, lt)
+        return s.replace(THINK_TAG, "").isNotBlank()
     }
 
     /** 终止当前实例及所有后续思考参数、后缀候选的请求。 */
     override fun cancel() { cancelled = true; calls.cancel() }
 
     /** One way to ask for no thinking; [params] are added to the request body. */
-    class ThinkingOff(val name: String, val label: String, val params: Map<String, Any>)
+    class ThinkingOff(val name: String, val label: String, val params: Map<String, Any>, val systemNote: String? = null)
 
     /** One probe step: which variant, what came back. */
     class Step(val variant: ThinkingOff, val result: MtResult)
@@ -560,7 +573,7 @@ class ByokTranslator(
     data class ConnectionProbeResult(val url: String?, val variantName: String?, val lastResult: MtResult?, val error: String? = null)
 
     /**
-     * 仅探测输入地址的同源后缀，不改动已保存配置。仅 404/405 换后缀，每址最多六次请求。
+     * 仅探测输入地址的同源后缀，不改动已保存配置。仅 404/405 换后缀，每址最多尝试当前策略列表中的全部开关。
      * 成功包含所有开关均仍思考的情况，此时 [ConnectionProbeResult.variantName] 为 [NONE_WORKED]。
      * 与 [probe] 共用 [calls]，所以 [cancel] 仍为终止操作。
      */
@@ -602,7 +615,7 @@ class ByokTranslator(
      */
     fun probe(steps: MutableList<Step>): ThinkingOff? = probeAt(url, steps)
 
-    /** 复用六种思考开关；连接测试额外在超时或服务故障时立即停止。 */
+    /** 复用当前全部思考开关；连接测试额外在超时或服务故障时立即停止。 */
     private fun probeAt(endpoint: String, steps: MutableList<Step>, stopOnFailure: Boolean = false,
                         request: (String, ThinkingOff) -> MtResult = { target, v -> call(byokUser(PROBE_TEXT), v, deadlineMs, target) }): ThinkingOff? {
         for (v in THINKING_OFF) {
@@ -641,7 +654,7 @@ class ByokTranslator(
     companion object {
         const val PROBE_TEXT = "このV何者気になるV、他とは違うVだから"
         /** Stored instead of a variant when the service answered but every switch still thought: do not probe again. */
-        const val NONE_WORKED = "-"
+        val NONE_WORKED: String get() = "-${THINKING_OFF.size}"
         /** Sent when the user set none: "SimulSub/<version>", set by each app at start. */
         @Volatile var defaultUserAgent = "SimulSub"
 
@@ -676,13 +689,25 @@ class ByokTranslator(
             ThinkingOff("reasoning", "reasoning: enabled false", mapOf("reasoning" to mapOf("enabled" to false))),
             // OpenAI-style reasoning models and Gemini's OpenAI endpoint
             ThinkingOff("effort", "reasoning_effort: none", mapOf("reasoning_effort" to "none")),
+            // Gemma 4 兼容接口使用最小推理预算和明确的直接作答提示。
+            ThinkingOff("minimal", "reasoning_effort: minimal + 提示词", mapOf("reasoning_effort" to "minimal"),
+                "CRITICAL: Do not think and do not output any reasoning steps. Directly output the translation result only.\n直接输出翻译结果，禁止输出任何思考过程与推理说明。"),
             // the model may not think at all: nothing extra
             ThinkingOff("none", "不加参数", emptyMap()),
         )
+        /** 已成功的策略继续沿用；旧版失败缓存失效，以便尝试新加入的开关。 */
+        fun current(stored: String?): String? = stored?.takeIf { it == NONE_WORKED || variant(it) != null }
+
         fun variant(name: String?) = THINKING_OFF.firstOrNull { it.name == name }
 
         /** 接受 HTTP/HTTPS 并保留协议，不带认证信息、查询或片段；完整接口路径保留，基础地址默认补 v1。HTTP 会明文传输密钥与内容。 */
-        fun chatUrl(input: String): Pair<String?, String?> {
+        fun chatUrl(input: String): Pair<String?, String?> = httpUrl(input) { path ->
+            if (path.endsWith("/chat/completions")) path else
+                (if (path.endsWith("/v1")) path else "$path/v1") + "/chat/completions"
+        }
+
+        /** 校验公共 HTTP 地址后构造指定协议路径，不改写来源或认证信息。 */
+        fun httpUrl(input: String, endpointPath: (String) -> String): Pair<String?, String?> {
             val s = input.trim()
             if (s.isEmpty()) return "还没填地址" to null
             val u = runCatching { java.net.URI(s) }.getOrNull() ?: return "地址格式不对" to null
@@ -691,11 +716,7 @@ class ByokTranslator(
             if (u.host.isNullOrEmpty()) return "地址里没有域名" to null
             if (u.rawUserInfo != null || u.rawQuery != null || u.rawFragment != null) return "地址里不要带用户名、?参数 或 #" to null
             if (u.port == 0 || u.port > 65535) return "端口号不对" to null
-            var path = (u.rawPath ?: "").trimEnd('/')
-            if (!path.endsWith("/chat/completions")) {
-                if (!path.endsWith("/v1")) path += "/v1"
-                path += "/chat/completions"
-            }
+            val path = endpointPath((u.rawPath ?: "").trimEnd('/'))
             val port = if (u.port > 0) ":${u.port}" else ""
             val out = "$scheme://${u.host.lowercase()}$port$path"
             // 最终地址也必须能被 OkHttp 接受，包括 IPv6 方括号与特殊字符。

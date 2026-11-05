@@ -87,8 +87,7 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         reveal("platform-key-default-qwen:b").assertIsEnabled()
         compose.onNodeWithText("完成").performClick()
         reveal("platform-key-add").performClick()
-        compose.onNodeWithTag("platform-key-add-qwen").performClick()
-        compose.runOnIdle { assertEquals(listOf("qwen"), additions) }
+        compose.runOnIdle { assertEquals(listOf(""), additions) }
     }
 
     /** 空平台列表提供可读反馈，标题仍保留简短的多密钥说明。 */
@@ -117,13 +116,12 @@ class PlatformKeysPresentationDeviceTest(private val tablet: Boolean, private va
         reveal("platform-key-save-qwen:long-17").performClick()
         compose.onNodeWithText("完成").performClick()
         reveal("platform-key-add").performClick()
-        compose.onNodeWithTag("platform-key-add-qwen").performClick()
         reveal("platform-key-deepseek:c").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals("最后一条", keys[17].credentialLabel)
             assertEquals("末条原文", keys[17].key)
             assertEquals(listOf("qwen" to "long-17"), saves)
-            assertEquals(listOf("qwen"), additions)
+            assertEquals(listOf(""), additions)
         }
     }
 

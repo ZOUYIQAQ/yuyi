@@ -26,6 +26,7 @@ class JevConnectionDeviceTest {
     private val token = UUID.randomUUID().toString()
     private val store = ViewModelStore()
     private val factoryCalls = AtomicInteger()
+    private val receivedConnections = mutableListOf<JevConnection>()
     private val receivedKeys = mutableListOf<String>()
     private val receivedProviders = mutableListOf<JevProvider>()
     private val source = object : ReleaseUpdateSource {
@@ -50,8 +51,8 @@ class JevConnectionDeviceTest {
     /** 构造真实控制器，仅将 Jev 请求替换成可控 Judge。 */
     @Before fun prepare() = main {
         fake = FakeJudge()
-        controller = AppController(application, source, { 0L }) { provider, key, _, _ ->
-            synchronized(receivedKeys) { receivedProviders += provider; receivedKeys += key }
+        controller = AppController(application, source, { 0L }) { connection, _, _ ->
+            synchronized(receivedKeys) { receivedConnections += connection; receivedProviders += connection.provider; receivedKeys += connection.key.orEmpty() }
             factoryCalls.incrementAndGet()
             fake
         }
@@ -63,6 +64,88 @@ class JevConnectionDeviceTest {
     @After fun finish() {
         fake.release.countDown()
         main { store.clear() }
+    }
+
+    /** 未保存连接不能发送请求；保存后的协议、地址和模型随同一个快照送入测试。 */
+    @Test fun customProbeUsesSavedConnectionAndAllowsAnonymousAccess() {
+        main {
+            selectProvider(JevProvider.CUSTOM)
+            actions.onTestJevConnection()
+            assertEquals(0, factoryCalls.get())
+            assertTrue(message()!!.text.contains("地址与模型"))
+            actions.onSaveJevCustom(JevCustom(JevProtocol.DECISIONS, "https://jev.example", "custom-jev"))
+            actions.onTestJevConnection()
+        }
+        waitFor { !controller.state.value.settings.advanced.jevTesting }
+        main {
+            assertEquals(1, factoryCalls.get())
+            val c = receivedConnections.single()
+            assertEquals("https://jev.example/alpha/decisions", c.url)
+            assertEquals("custom-jev", c.model)
+            assertEquals("", c.key)
+            assertFalse(message()!!.isError)
+        }
+    }
+
+    /** 自定义服务选择中央命名密钥，切来源不借用旧密钥；旧快照保持原值。 */
+    @Test fun customCredentialsShareTheCentralStoreAndNeverCrossOrigins() = main {
+        val prefs = Prefs(application)
+        val c = JevCustom(JevProtocol.SYSTEMONE, "https://first.example/v1", "jev-a")
+        val platform = PlatformCredentials.forUrl(c.url)!!.id
+        val id = UUID.randomUUID().toString()
+        prefs.savePlatformCredential(platform, id, "备用", "  原文密钥 +/=  ")
+        prefs.selectCredential(platform, jevCredentialSlot(JevProvider.CUSTOM), id)
+        actions.onSaveJevCustom(c)
+        selectProvider(JevProvider.CUSTOM)
+        val before = prefs.jevConnection()
+        assertEquals("  原文密钥 +/=  ", before.key)
+        actions.onSaveJevCustom(c.copy(url = "https://second.example", model = "jev-b"))
+        val after = prefs.jevConnection()
+        assertEquals("", after.key)
+        assertEquals("  原文密钥 +/=  ", before.key)
+        assertEquals("jev-a", before.model)
+        assertEquals("jev-b", after.model)
+        assertTrue(prefs.credentialPlatforms.any { it.id == PlatformCredentials.forUrl("https://second.example")!!.id })
+    }
+
+    /** 修改自定义连接会取消测试，旧模型的成功结果不能回填新配置。 */
+    @Test fun editingCustomConnectionInvalidatesLateProbeResults() {
+        fake.hold = true
+        main {
+            actions.onSaveJevCustom(JevCustom(JevProtocol.SYSTEMONE, "https://jev.example", "old"))
+            selectProvider(JevProvider.CUSTOM)
+            actions.onTestJevConnection()
+        }
+        waitFor { fake.calls.get() == 1 }
+        main {
+            actions.onSaveJevCustom(JevCustom(JevProtocol.DECISIONS, "https://jev.example", "new"))
+            assertFalse(controller.state.value.settings.advanced.jevTesting)
+            assertNull(message())
+        }
+        fake.release.countDown()
+        assertTrue(fake.returned.await(3, TimeUnit.SECONDS))
+        main { assertNull(message()); assertEquals("new", Prefs(application).jevConnection().model) }
+    }
+
+    /** 自定义平台的保存与绑定都会发出重建信号，其他平台不造成多余重建。 */
+    @Test fun customCredentialChangesNotifySessionWithoutTouchingOtherPlatforms() = main {
+        val prefs = Prefs(application)
+        prefs.setJevCustom(JevCustom(JevProtocol.SYSTEMONE, "https://jev.example", "jev"))
+        val platform = PlatformCredentials.forUrl("https://jev.example")!!.id
+        val id = UUID.randomUUID().toString()
+        var notifications = 0
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == "jevKey:changed") notifications++ }
+        prefs.listen(listener)
+        try {
+            prefs.savePlatformCredential(platform, id, "测试", "假密钥")
+            assertTrue(notifications > 0)
+            val afterSave = notifications
+            prefs.selectCredential(platform, jevCredentialSlot(JevProvider.CUSTOM), id)
+            assertTrue(notifications > afterSave)
+            val afterSelect = notifications
+            prefs.savePlatformCredential(PlatformCredentials.DEEPSEEK.id, UUID.randomUUID().toString(), "其他", "其他假密钥")
+            assertEquals(afterSelect, notifications)
+        } finally { prefs.unlisten(listener) }
     }
 
     /** 官方服务无已保存平台密钥时拒绝请求，提示实际配置入口。 */

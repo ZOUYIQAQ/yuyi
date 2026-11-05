@@ -7,11 +7,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -48,11 +51,12 @@ internal fun ServiceCredentialPicker(platformId: String, serviceId: String, opti
 /** 密钥原文由控制器持有，显隐和放弃确认只使用不可持久化的局部状态。 */
 @Composable
 internal fun QuickPlatformKeyDialog(state: QuickPlatformKeyUiState, actions: SimulSubActions, enabled: Boolean) {
-    var visible by remember(state.credentialId) { mutableStateOf(false) }
-    var confirmingDiscard by remember(state.credentialId) { mutableStateOf(false) }
-    val initialName = remember(state.credentialId) { state.name }
+    var visible by remember { mutableStateOf(false) }
+    var confirmingDiscard by remember { mutableStateOf(false) }
+    val initialName = remember { state.name }
+    val initialPlatform = remember { state.platformInput }
     val discard = {
-        if (state.key.isNotEmpty() || state.name != initialName) confirmingDiscard = true
+        if (state.key.isNotEmpty() || state.name != initialName || state.platformInput != initialPlatform) confirmingDiscard = true
         else actions.onDismissQuickPlatformKey()
     }
     AlertDialog(onDismissRequest = discard,
@@ -61,13 +65,12 @@ internal fun QuickPlatformKeyDialog(state: QuickPlatformKeyUiState, actions: Sim
             val focus = LocalFocusManager.current
             val keyboard = LocalSoftwareKeyboardController.current
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(state.platformLabel, style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextField(value = state.name, onValueChange = actions.onQuickPlatformKeyNameChange,
-                    label = { Text("密钥名称") }, singleLine = true, enabled = enabled,
+                KeyPlatformField(state, actions.onQuickPlatformKeyPlatformChange, enabled)
+                OutlinedTextField(value = state.name, onValueChange = actions.onQuickPlatformKeyNameChange,
+                    label = { Text("备注") }, singleLine = true, enabled = enabled,
                     modifier = Modifier.fillMaxWidth().testTag("quick-key-name"))
-                TextField(value = state.key, onValueChange = actions.onQuickPlatformKeyValueChange,
-                    label = { Text("API 密钥") }, singleLine = true, enabled = enabled,
+                OutlinedTextField(value = state.key, onValueChange = actions.onQuickPlatformKeyValueChange,
+                    label = { Text("Key") }, singleLine = true, enabled = enabled,
                     visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false,
                         imeAction = ImeAction.Done),
@@ -83,7 +86,7 @@ internal fun QuickPlatformKeyDialog(state: QuickPlatformKeyUiState, actions: Sim
         },
         confirmButton = {
             TextButton(onClick = actions.onSaveQuickPlatformKey,
-                enabled = enabled && state.name.isNotBlank() && state.key.isNotEmpty(),
+                enabled = enabled && state.platformId.isNotBlank() && state.name.isNotBlank() && state.key.isNotEmpty(),
                 modifier = Modifier.heightIn(min = 48.dp).testTag("quick-key-save")) {
                 Text(if (state.serviceId.isNotBlank()) "保存并使用" else "保存")
             }
@@ -92,4 +95,45 @@ internal fun QuickPlatformKeyDialog(state: QuickPlatformKeyUiState, actions: Sim
     if (confirmingDiscard) UnsavedConfigurationDialog(
         onContinueEditing = { confirmingDiscard = false },
         onDiscard = { confirmingDiscard = false; actions.onDismissQuickPlatformKey() })
+}
+
+/** 平台只有一个输入位置，可展开完整目录，也可直接填写自定义服务地址。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun KeyPlatformField(state: QuickPlatformKeyUiState, onChange: (String) -> Unit, enabled: Boolean) {
+    var expanded by remember { mutableStateOf(false) }
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(enabled) { if (!enabled) expanded = false }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    ExposedDropdownMenuBox(expanded = expanded && enabled, onExpandedChange = {
+        if (enabled && state.platformEditable) expanded = it
+    }) {
+        OutlinedTextField(value = state.platformInput, onValueChange = { expanded = false; onChange(it) },
+            label = { Text("平台") }, placeholder = { Text("选择平台或输入服务地址") },
+            readOnly = !state.platformEditable, singleLine = true, enabled = enabled,
+            isError = state.platformEditable && state.platformInput.isNotBlank() && state.platformId.isEmpty(),
+            supportingText = if (state.platformEditable) { { Text("自定义平台：填写完整的服务地址") } } else null,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false, imeAction = ImeAction.Next),
+            trailingIcon = if (state.platformEditable) { {
+                IconButton(onClick = { focus.clearFocus(); keyboard?.hide(); expanded = !expanded }, enabled = enabled,
+                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.SecondaryEditable)
+                        .testTag("quick-key-platform-menu")) {
+                    Icon(Icons.Outlined.ArrowDropDown, "选择平台")
+                }
+            } } else null,
+            modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus).menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable,
+                enabled = enabled && state.platformEditable).testTag("quick-key-platform"))
+        ExposedDropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 320.dp)) {
+            state.platforms.forEach { option ->
+                DropdownMenuItem(text = { Text(option.label) }, onClick = { onChange(option.id); expanded = false },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("quick-key-platform-${option.id}"))
+            }
+            DropdownMenuItem(text = { Text("自定义平台…") }, onClick = {
+                onChange(""); expanded = false; fieldFocus.requestFocus(); keyboard?.show()
+            },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("quick-key-platform-custom"))
+        }
+    }
 }

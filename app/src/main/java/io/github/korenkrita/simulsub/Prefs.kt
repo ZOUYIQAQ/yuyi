@@ -212,6 +212,7 @@ class Prefs(ctx: Context) {
                 PlatformCredentials.OPENROUTER, PlatformCredentials.TYPESAFE) + JevProvider.entries.filter { it.needsKey }.mapNotNull {
                 PlatformCredentials.forUrl(it.url)
             } + listOfNotNull(
+                PlatformCredentials.forUrl(JevCustom.decode(snapshot["jevCustom"] as? String)?.endpoint()?.second.orEmpty()),
                 PlatformCredentials.forUrl(snapshot["onlineEndpoint"] as? String ?: LiveTranslateConfig.DEFAULT_ENDPOINT),
                 PlatformCredentials.forUrl(snapshot["cloudAsrEndpoint"] as? String ?: CloudAsrConfig.DEFAULT_ENDPOINT),
             ) + LlmProfile.all(snapshot["byokProfiles"] as? String).mapNotNull {
@@ -578,16 +579,48 @@ class Prefs(ctx: Context) {
         get() = runCatching { JevProvider.valueOf(sp.getString("jevProvider", null) ?: "") }.getOrDefault(JevProvider.ZEN)
         set(v) = sp.edit().putString("jevProvider", v.name).apply()
 
-    /** 需要密钥的 Jev 端点读取本服务绑定；无密钥 Zen 保留独立旧槽位。 */
+    /** 自定义服务只存连接参数，沿用中央平台凭据。 */
+    val jevCustom: JevCustom? get() = JevCustom.decode(sp.getString("jevCustom", null))
+
+    /** 校验成功后整体保存，不让输入过程中的半个地址成为运行配置。 */
+    fun setJevCustom(value: JevCustom) {
+        require(value.endpoint().first == null && value.model.isNotBlank()) { "请填写有效地址与模型" }
+        sp.edit().putString("jevCustom", value.encode()).apply()
+    }
+
+    /** 同一快照读取平台来源、模型与绑定凭据，避免切换连接时串用密钥。 */
+    fun jevConnection(providerOverride: JevProvider? = null): JevConnection {
+        val values = sp.all
+        val provider = providerOverride ?: runCatching { JevProvider.valueOf(values["jevProvider"] as? String ?: "") }.getOrDefault(JevProvider.ZEN)
+        val custom = if (provider == JevProvider.CUSTOM) JevCustom.decode(values["jevCustom"] as? String) else null
+        val url = if (provider == JevProvider.CUSTOM) custom?.endpoint()?.second.orEmpty() else provider.url
+        val model = if (provider == JevProvider.CUSTOM) custom?.model.orEmpty() else provider.model
+        val platform = PlatformCredentials.forUrl(url)
+        val key = when {
+            provider == JevProvider.ZEN -> ""
+            url.isEmpty() || model.isBlank() || platform == null -> null
+            else -> {
+                val bound = boundKeyOrNull(values, platform.id, jevCredentialSlot(provider))
+                if (!bound.isNullOrEmpty()) bound
+                else if (provider == JevProvider.CUSTOM &&
+                    runCatching { platformKeys.selectedId(values, platform.id, jevCredentialSlot(provider)) == null }.getOrDefault(false)) ""
+                else null
+            }
+        }
+        return JevConnection(provider, url, model, key)
+    }
+
+    /** 官方与自定义 Jev 端点读取中央服务绑定；Zen 保留独立旧槽位。 */
     fun jevKey(p: JevProvider): String? {
-        val platform = if (p.needsKey) PlatformCredentials.forUrl(p.url) else null
+        val platform = if (p.needsKey || p == JevProvider.CUSTOM) PlatformCredentials.forUrl(jevConnection(p).url) else null
         return if (platform != null) boundKeyOrNull(sp.all, platform.id, jevCredentialSlot(p))
             else sp.getString("jevKey:${p.name}", null)?.let { runCatching { KeyBox.open(it) }.getOrNull() }
     }
 
-    /** 官方 Jev 服务原样保存所绑定密钥，Zen 沿用独立加密存储。 */
+    /** 官方及自定义 Jev 原样保存中央绑定密钥，Zen 沿用独立加密存储。 */
     fun setJevKey(p: JevProvider, key: String?) {
-        val platform = if (p.needsKey) PlatformCredentials.forUrl(p.url) else null
+        val platform = if (p.needsKey || p == JevProvider.CUSTOM) PlatformCredentials.forUrl(jevConnection(p).url) else null
+        require(p != JevProvider.CUSTOM || platform != null) { "请先保存自定义辅助服务的连接" }
         if (platform != null) synchronized(sp) {
             val editor = sp.edit()
             platformKeys.putBoundKey(editor, sp.all, platform.id, jevCredentialSlot(p), key.orEmpty())
@@ -789,7 +822,7 @@ class Prefs(ctx: Context) {
      * The [ByokTranslator.THINKING_OFF] variant (by name) that answered without reasoning for this exact service URL and
      * model; null = not found yet. Kept per URL + model, so switching back and forth does not probe again.
      */
-    fun byokVariant(url: String, model: String): String? = sp.getString("byokVariant:$url|$model", null)
+    fun byokVariant(url: String, model: String): String? = ByokTranslator.current(sp.getString("byokVariant:$url|$model", null))
     fun setByokVariant(url: String, model: String, name: String?) =
         sp.edit().apply { if (name == null) remove("byokVariant:$url|$model") else putString("byokVariant:$url|$model", name) }.apply()
     /** 官方平台还需已存密钥；自定义来源保持免密服务的就绪语义。 */
@@ -810,7 +843,8 @@ class Prefs(ctx: Context) {
     fun unlisten(l: android.content.SharedPreferences.OnSharedPreferenceChangeListener) = sp.unregisterOnSharedPreferenceChangeListener(l)
 
     companion object {
-        const val DEFAULT_WIDTH = 0.90f
+        /** 新安装默认随内容自动收放，已有手动宽度继续读取用户保存值。 */
+        const val DEFAULT_WIDTH = 0f
         /** 手动拖动角落缩放时的最小宽度比例，不限制设置中的自动宽度。 */
         const val MIN_WIDTH = 0.40f
     }

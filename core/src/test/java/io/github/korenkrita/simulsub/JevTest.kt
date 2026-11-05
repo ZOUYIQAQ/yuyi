@@ -15,6 +15,81 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class JevTest {
+    /** 自定义服务的模型、协议路径和可选鉴权按配置发送。 */
+    @Test fun customJevSendsConfiguredModelAndOptionalKey() {
+        reply = { 200 to """{"answers":{"x":{"noul":0.75}}}""" }
+        for (protocol in JevProtocol.entries) {
+            val config = JevCustom(protocol, "http://127.0.0.1:$port", "my-jev")
+            val endpoint = config.endpoint().second!!
+            assertTrue(endpoint.endsWith(protocol.path))
+            for (key in listOf("", "sk-local-test")) {
+                val r = Jev(JevProvider.CUSTOM, key, url = endpoint, model = config.model).unfinished("这句话")
+                assertNull(r.error)
+                assertEquals(if (key.isEmpty()) null else "Bearer $key", lastAuth.get())
+                assertEquals("my-jev", (Json.parse(lastBody.get()!!) as Map<*, *>)["model"])
+            }
+        }
+    }
+
+    /** Decisions 用概率字典返回置信度；越界值不能被当成有效判断。 */
+    @Test fun decisionsProbabilitiesSupplyConfidenceWithoutOverridingExplicitValue() {
+        reply = { 200 to """{"answers":{"x":{"choice":"ok","probabilities":{"ok":0.9}}}}""" }
+        val j = Jev(JevProvider.CUSTOM, "", url = "http://127.0.0.1:$port/alpha/decisions", model = "decision")
+        val result = j.mistranslation("原文", "译文")
+        assertNull(result.error); assertEquals(.9, result.confidence!!, .00001)
+        reply = { 200 to """{"answers":{"x":{"choice":"ok","probabilities":{"ok":1.1}}}}""" }
+        assertNotNull(j.mistranslation("原文", "译文").error)
+        reply = { 200 to """{"answers":{"x":{"choice":"ok","confidence":0.8,"probabilities":{"ok":0.9}}}}""" }
+        assertEquals(.8, j.mistranslation("原文", "译文").confidence!!, .00001)
+    }
+
+    /** 同源不同模型限流不能互相阻断。 */
+    @Test fun customModelsHaveIndependentRateLimitState() {
+        reply = { n -> if (n == 1) 429 to "{}" else 200 to """{"answers":{"x":{"noul":0.5}}}""" }
+        val url = "http://127.0.0.1:$port/v1/systemone"
+        val a = Jev(JevProvider.CUSTOM, "", url = url, model = "a")
+        val b = Jev(JevProvider.CUSTOM, "", url = url, model = "b")
+        assertEquals(429, a.unfinished("一").status)
+        assertEquals("paused", a.unfinished("一").error)
+        assertNull(b.unfinished("二").error)
+    }
+
+    /** Gemma 的直接作答提示仅用于翻译，不污染术语生成提示。 */
+    @Test fun minimalThinkingNoteIsNotUsedForTermGeneration() {
+        val minimal = ByokTranslator.variant("minimal")!!
+        val service = ByokService("http://127.0.0.1:$port/v1/chat/completions", "gemma", "")
+        reply = { 200 to plain }
+        ByokTranslator(service, "字幕系统", minimal).translate("当前句")
+        assertTrue(lastBody.get()!!.contains("Directly output the translation result only"))
+        assertTrue(lastBody.get()!!.contains("\"reasoning_effort\":\"minimal\""))
+        reply = { 200 to sse("""{"choices":[{"delta":{"content":"甲→乙"},"finish_reason":"stop"}]}""") }
+        assertEquals(listOf("甲" to "乙"), generateTerms(service, "minimal", {}, "术语", "", emptySet(), 1, Lang.JA, Target.ZH).first)
+        assertFalse(lastBody.get()!!.contains("Directly output the translation result only"))
+        assertTrue(lastBody.get()!!.contains("\"reasoning_effort\":\"minimal\""))
+    }
+
+    /** Gemma 的已闭合思考不可混入字幕，空思考通道不算仍在思考。 */
+    @Test fun gemmaChannelsAreCleanedAndDetected() {
+        reply = { 200 to sse("""{"choices":[{"delta":{"content":"<|channel>thought内部推理<channel|>花朵绽放出来吧"},"finish_reason":"stop"}]}""") }
+        val t = ByokTranslator(ByokService("http://127.0.0.1:$port/v1/chat/completions", "gemma", ""), "字幕", null)
+        val r = t.translate("花が咲くでしょう～")!!
+        assertEquals("花朵绽放出来吧", r.text)
+        assertTrue(r.thinking)
+        reply = { 200 to sse("""{"choices":[{"delta":{"content":"<|channel>thought\n<channel|>花开了"},"finish_reason":"stop"}]}""") }
+        val empty = t.translate("花")!!
+        assertEquals("花开了", empty.text)
+        assertFalse(empty.thinking)
+    }
+
+    /** 未闭合的 Gemma 推理通道即使正常结束也不能显示。 */
+    @Test fun unfinishedGemmaChannelNeverBecomesACaption() {
+        reply = { 200 to sse("""{"choices":[{"delta":{"content":"<|channel>thought不应展示的推理"},"finish_reason":"stop"}]}""") }
+        val r = ByokTranslator(ByokService("http://127.0.0.1:$port/v1/chat/completions", "gemma", ""), "字幕", null).translate("花")!!
+        assertEquals("", r.text)
+        assertFalse(r.usable)
+        assertEquals("unfinished thinking", r.error)
+    }
+
     /** BYOK 真实请求含尾帧用量时回调一次，明确的零不能变成未知。 */
     @Test fun byokReportsEachSentRequest() {
         reply = { 200 to sse("""{"choices":[{"delta":{"content":"译文"},"finish_reason":"stop"}]}""",

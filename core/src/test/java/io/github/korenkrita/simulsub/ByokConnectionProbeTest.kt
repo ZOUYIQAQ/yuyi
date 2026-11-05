@@ -125,7 +125,7 @@ class ByokConnectionProbeTest {
         }
     }
 
-    /** 六种参数的既有顺序保留，参数不兼容时可继续同址探测。 */
+    /** 全部参数的既有顺序保留，参数不兼容时可继续同址探测。 */
     @Test fun parameterRejectionsKeepTheExistingThinkingOrder() {
         val variants = mutableListOf<String>()
         val success = result()
@@ -140,12 +140,12 @@ class ByokConnectionProbeTest {
         assertSame(success, probe.lastResult)
     }
 
-    /** 六种开关都仍思考时连接已成功，返回 NONE_WORKED，不再猜测后缀。 */
+    /** 全部开关都仍思考时连接已成功，返回 NONE_WORKED，不再猜测后缀。 */
     @Test fun exhaustedThinkingVariantsAreAConnectionSuccess() {
         val requests = mutableListOf<String>()
         val thought = result(thinking = true)
         val probe = translator().probeConnection(base) { endpoint, _ -> requests += endpoint; thought }
-        assertEquals(List(6) { primary }, requests)
+        assertEquals(List(ByokTranslator.THINKING_OFF.size) { primary }, requests)
         assertEquals(primary, probe.url)
         assertEquals(ByokTranslator.NONE_WORKED, probe.variantName)
         assertSame(thought, probe.lastResult)
@@ -156,7 +156,7 @@ class ByokConnectionProbeTest {
     @Test fun parameterFailuresAloneDoNotCountAsSuccessOrPathFallback() {
         val requests = mutableListOf<String>()
         val probe = translator().probeConnection(base) { endpoint, _ -> requests += endpoint; result(400) }
-        assertEquals(List(6) { primary }, requests)
+        assertEquals(List(ByokTranslator.THINKING_OFF.size) { primary }, requests)
         assertNull(probe.url)
         assertNull(probe.variantName)
         assertEquals(400, probe.lastResult?.http)
@@ -176,7 +176,7 @@ class ByokConnectionProbeTest {
     }
 
     /** 每址至多六次，最后一个参数才出现 405 时两址总共也不能超过十二次。 */
-    @Test fun atMostTwelveRequestsAreSentAcrossBothCandidates() {
+    @Test fun requestsAreBoundedByVariantsAndCandidates() {
         val requests = mutableListOf<Pair<String, String>>()
         val probe = translator().probeConnection(base) { endpoint, variant ->
             requests += endpoint to variant.name
@@ -188,7 +188,7 @@ class ByokConnectionProbeTest {
         }
         val names = ByokTranslator.THINKING_OFF.map { it.name }
         assertEquals(names.map { primary to it } + names.map { alternate to it }, requests)
-        assertEquals(12, requests.size)
+        assertEquals(ByokTranslator.THINKING_OFF.size * 2, requests.size)
         assertEquals(alternate, probe.url)
         assertEquals("none", probe.variantName)
     }

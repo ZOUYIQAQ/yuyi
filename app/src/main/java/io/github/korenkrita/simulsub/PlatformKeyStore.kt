@@ -28,6 +28,11 @@ internal class PlatformKeyStore(
     private val seal: (String) -> String,
     private val open: (String) -> String,
 ) {
+    /** 自定义辅助服务的中央密钥变化也通知会话，其他平台不会触发重建。 */
+    private fun isJevPlatform(platformId: String): Boolean = platformId == PlatformCredentials.TYPESAFE.id ||
+        platformId == PlatformCredentials.OPENROUTER.id ||
+        PlatformCredentials.forUrl(JevCustom.decode(sp.getString("jevCustom", null))?.endpoint()?.second.orEmpty())?.id == platformId
+
     /** 对任意来源和槽位编码，避免分隔符与偏好键冲突。 */
     private fun component(value: String): String = Base64.encodeToString(value.toByteArray(Charsets.UTF_8),
         Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -118,7 +123,7 @@ internal class PlatformKeyStore(
         if (snapshot[storageKey] == id || (!snapshot.containsKey(storageKey) && id == DEFAULT_ID))
             return@synchronized
         val editor = sp.edit().putString(storageKey, id)
-        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+        if (isJevPlatform(platformId))
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "平台默认凭据切换失败，请重试" }
     }
@@ -171,7 +176,7 @@ internal class PlatformKeyStore(
         if (entries.none { isStored(snapshot, platformId, it.first) } &&
             runCatching { defaultId(snapshot, platformId) }.getOrNull() in listOf("", DEFAULT_ID))
             editor.putString(defaultKey(platformId), credentialId)
-        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+        if (isJevPlatform(platformId))
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "平台凭据保存失败，请重试" }
     }
@@ -209,7 +214,9 @@ internal class PlatformKeyStore(
         require(serviceSlot.startsWith("listening:") || serviceSlot.startsWith("translation:") ||
             serviceSlot.startsWith("jev:")) { "服务槽位无效" }
         if (credentialId != null) checkedId(sp.all, platformId, credentialId)
-        check(sp.edit().putString(bindingKey(platformId, serviceSlot), credentialId.orEmpty()).commit()) {
+        val editor = sp.edit().putString(bindingKey(platformId, serviceSlot), credentialId.orEmpty())
+        if (serviceSlot.startsWith("jev:")) editor.putLong("jevKey:changed", System.nanoTime())
+        check(editor.commit()) {
             "服务凭据选择失败，请重试"
         }
     }
@@ -224,7 +231,7 @@ internal class PlatformKeyStore(
             return@synchronized
         }
         val editor = sp.edit().putString(keyKey(platformId, id), seal(key))
-        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+        if (isJevPlatform(platformId))
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "平台密钥保存失败，请重试" }
     }
@@ -242,7 +249,7 @@ internal class PlatformKeyStore(
             editor.putString(listKey(platformId), array.toString()).putString(defaultKey(platformId), id)
         }
         editor.putString(keyKey(platformId, id), seal(key))
-        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+        if (isJevPlatform(platformId))
             editor.putLong("jevKey:changed", System.nanoTime())
         return editor
     }
@@ -261,7 +268,7 @@ internal class PlatformKeyStore(
             .putStringSet(deletedKey(platformId), deleted(snapshot, platformId) + credentialId)
         if (runCatching { defaultId(snapshot, platformId) }.getOrNull() == credentialId)
             editor.putString(defaultKey(platformId), NO_DEFAULT_ID)
-        if (platformId == PlatformCredentials.TYPESAFE.id || platformId == PlatformCredentials.OPENROUTER.id)
+        if (isJevPlatform(platformId))
             editor.putLong("jevKey:changed", System.nanoTime())
         check(editor.commit()) { "密钥删除失败，请重试" }
     }

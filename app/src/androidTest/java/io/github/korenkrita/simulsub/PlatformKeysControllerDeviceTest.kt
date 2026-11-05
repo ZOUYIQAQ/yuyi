@@ -45,6 +45,64 @@ class PlatformKeysControllerDeviceTest {
     /** 释放控制器的监听和协程，不删除任何数据。 */
     @After fun finish() = onMain { store.clear() }
 
+    /** 中央新增直接打开表单，不要求用户先在另一个弹窗选择平台。 */
+    @Test fun centralAddOpensOneFormWithoutAPlatformSelectionStep() = onMain {
+        actions.onOpenQuickPlatformKey("", "")
+        val draft = controller.state.value.settings.quickPlatformKey
+        assertNotNull("点击新增应直接出现完整表单", draft)
+        assertEquals("", draft!!.serviceId)
+        assertTrue(draft.platformEditable)
+        assertTrue("平台目录应包含全部翻译供应商", draft.platforms.map { it.id }.containsAll(TextServiceProviders.entries.map { it.platformId }))
+        assertEquals("", draft.platformId)
+    }
+
+    /** 切换平台后新增独立凭据，不覆盖原默认项；备注和密钥原文保持不变。 */
+    @Test fun changingPlatformKeepsRawDraftAndNeverOverwritesAnExistingCredential() = onMain {
+        prefs.savePlatformKey("deepseek", "原默认密钥")
+        val provider = TextServiceProviders.entries.first { it.id == "openai" }
+        actions.onOpenQuickPlatformKey("", "")
+        actions.onQuickPlatformKeyNameChange("备用账号")
+        val raw = "  任意格式\n末尾  "
+        actions.onQuickPlatformKeyValueChange(raw)
+        actions.onQuickPlatformKeyPlatformChange(provider.platformId)
+        assertEquals(provider.platformId, controller.state.value.settings.quickPlatformKey!!.platformId)
+        actions.onQuickPlatformKeyPlatformChange("deepseek")
+        actions.onSaveQuickPlatformKey()
+        assertNull(controller.state.value.settings.quickPlatformKey)
+        assertEquals("原默认密钥", prefs.platformKey("deepseek"))
+        val added = prefs.platformCredentials("deepseek").single { it.label == "备用账号" }
+        assertEquals(raw, added.key)
+        assertNotEquals("default", added.id)
+    }
+
+    /** 自定义地址按来源持久化，重开偏好后同源服务可复用，其他来源不串用。 */
+    @Test fun customPlatformPersistsAndIsReusableByItsServiceOriginOnly() = onMain {
+        actions.onOpenQuickPlatformKey("", "")
+        actions.onQuickPlatformKeyPlatformChange("https://custom.example:8443/v1/chat/completions")
+        actions.onQuickPlatformKeyNameChange("自己的接口")
+        val raw = "  自定义密钥 +/=  "
+        actions.onQuickPlatformKeyValueChange(raw)
+        assertEquals("origin:https://custom.example:8443", controller.state.value.settings.quickPlatformKey!!.platformId)
+        actions.onSaveQuickPlatformKey()
+        val reopened = Prefs(application)
+        assertEquals(raw, reopened.keyForService("https://custom.example:8443/other/v1", "translation:test"))
+        assertEquals("", reopened.keyForService("https://other.example:8443/v1", "translation:test"))
+        assertTrue(controller.state.value.settings.platformKeys.any { it.label == "https://custom.example:8443" && it.credentialLabel == "自己的接口" })
+    }
+
+    /** 无效地址不能落盘，修正同一草稿后可继续保存，不限制密钥格式。 */
+    @Test fun invalidPlatformCannotSaveButCanBeCorrectedWithoutLosingTheKey() = onMain {
+        actions.onOpenQuickPlatformKey("", "")
+        actions.onQuickPlatformKeyValueChange("不限制格式")
+        actions.onQuickPlatformKeyPlatformChange("这不是服务地址")
+        actions.onSaveQuickPlatformKey()
+        assertTrue(controller.state.value.settings.quickPlatformKey!!.message!!.isError)
+        actions.onQuickPlatformKeyPlatformChange("https://api.deepseek.com/v1")
+        actions.onSaveQuickPlatformKey()
+        assertNull(controller.state.value.settings.quickPlatformKey)
+        assertEquals("不限制格式", prefs.platformKey("deepseek"))
+    }
+
     /** 删除动作同步存储与就绪状态，空占位隐藏且备用密钥不被借用。 */
     @Test fun deletingDefaultUpdatesReadinessAndHiddenPlaceholder() = onMain {
         actions.onPlatformKeyChange("qwen", "测试默认密钥")

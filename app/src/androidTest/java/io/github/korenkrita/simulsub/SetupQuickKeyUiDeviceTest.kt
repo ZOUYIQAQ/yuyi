@@ -249,7 +249,7 @@ class SetupQuickKeyUiDeviceTest {
     /** 通过正式列表编辑按钮打开父表单，再实际输入 URL 和模型形成未保存草稿。 */
     private fun openApiDraft() {
         click(hasText("翻译服务"))
-        click(hasText("编辑") and hasAnyAncestor(hasTestTag("service-profile-$apiId")))
+        click(hasTestTag("configure-service-$apiId"))
         val url = hasText("服务地址") and hasSetTextAction()
         reveal(url); compose.onNode(url).performTextReplacement("https://api.deepseek.com/v1/课堂草稿?x=+/=")
         val model = hasText("模型 ID") and hasSetTextAction()

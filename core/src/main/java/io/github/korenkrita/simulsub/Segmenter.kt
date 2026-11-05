@@ -52,6 +52,9 @@ class Segmenter(
      * 停顿未达切句阈值便继续说话时，丢弃提前候选；默认等到实际停顿才提问。
      */
     private val askSilenceMs: Int = endSilenceMs,
+    /** 未启用句尾判断时，长语段可在较短停顿处定稿；零表示保留原来的停顿策略。 */
+    private val earlyCutAfterMs: Int = 0,
+    private val earlyCutSilenceMs: Int = endSilenceMs,
 ) {
     private val frameMs = frameSize * 1000 / sampleRate
     private val preRollFrames = preRollMs / frameMs
@@ -185,6 +188,9 @@ class Segmenter(
                 tailEarly = true
                 emit(AsrJob(segmentId, tailRevision, false, concat(speechEnd), frames[speechEnd - 1].endAt, frames[speechEnd - 1].estimated, endOfSpeech = true))
             }
+            // 与上游v1.0.7一致：普通长句在短停顿当场定稿，Jev仍使用自己的判断阈值。
+            waitMs <= 0 && earlyCutAfterMs > 0 && silMs >= earlyCutSilenceMs && durMs - silMs >= earlyCutAfterMs ->
+                finalize(speechEnd, continueSpeech = false)
             durMs >= maxMs && forcedCutStep(durMs) -> Unit
             framesSinceDraft * frameMs >= draftEveryMs && durMs >= minDraftMs && f.speech -> {
                 framesSinceDraft = 0
@@ -267,15 +273,17 @@ class Segmenter(
         frames.clear()
         // A cut that leaves nothing behind ends the utterance: the next one starts with its first speech frame, and only
         // then fixes its settings (a change made in the silence after a forced cut applies to it).
-        if (continueSpeech && tail.isNotEmpty()) {
+        if (continueSpeech && tail.any { it.speech }) {
             segmentId++; beginUtterance()
             revision = 0
             frames.addAll(tail)
             framesSinceDraft = 0
-            silentFrames = 0
+            silentFrames = tail.takeLastWhile { !it.speech }.size
         } else {
             inSpeech = false
             preRoll.clear()
+            // 纯静音不另起识别任务，但保留为下一句的前置音频。
+            if (continueSpeech) preRoll.addAll(tail.takeLast(preRollFrames))
         }
     }
 

@@ -83,6 +83,7 @@ class CaptionService : Service() {
     private val lastUpdateMs = HashMap<Pair<Long, Int>, Long>()
     @Volatile private var backlog = 0
     @Volatile private var overloaded = false
+    @Volatile private var failed = false
     /**
      * The Jev client of the setup published last; its pause shows without a new request, and a 429 of its service
      * installed by any client (also one of an earlier session, or after the last result) refreshes. Main thread only.
@@ -445,10 +446,10 @@ class CaptionService : Service() {
                 // one Jev client for both features; no key = both paused until one is entered
                 // pauses count deep sleep: one kept across sessions ends at the time the service named
                 val judge = s.jevKey?.let {
-                    Jev(s.provider, it, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime,
-                        onUsage = { usage -> costs.recordObserved(costSessionId, CostCategory.JEV, s.provider.url, s.provider.model, usage) })
+                    Jev(s.provider, it, url = s.jev.url, model = s.jev.model, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime,
+                        onUsage = { usage -> costs.recordObserved(costSessionId, CostCategory.JEV, s.jev.url, s.jev.model, usage) })
                 }
-                if (wantJev && judge == null) notices += "⚠ 在线 Decisions 模型辅助已暂停：还没填 ${s.provider.label} 的 key"
+                if (wantJev && judge == null) notices += "⚠ 在线辅助已暂停：请检查 ${s.provider.label} 的连接与密钥配置"
                 return Built(Setup(mt, s.scene, s.source, s.target, judge, s.dedupe, s.contextN, version),
                     notices.joinToString("  ·  "), used, ev)
             }
@@ -478,7 +479,7 @@ class CaptionService : Service() {
             inUse = built.byok
             jevEndsOn = jevEnds; jevCheckOn = jevCheck
             // the services really in use (BYOK: the one its probe accepted, not a newly saved one still probed)
-            var mtId = built.byok; var jevId = firstSnap.jevKey?.let { firstSnap.provider.name + "\n" + it }
+            var mtId = built.byok; var jevId = firstSnap.jevKey?.let { firstSnap.jev.url + "\n" + firstSnap.jev.model + "\n" + it }
             first.judge.let { j -> main.post { activeJudge = j; refresh() } }
             // the settings in use are not the ones session_start logged: say so, like a change while running
             logUsed(built, firstSnap, change = firstSnap !== s0)
@@ -491,9 +492,8 @@ class CaptionService : Service() {
                     setStatus("⚠ 手机忙不过来，先停止听新的声音，正在处理已经听到的句子…")
                 },
                 onFailure = { e ->
-                    Log.e(TAG, "pipeline worker failed", e)
-                    setStatus("出错：${e.message}")
-                    main.post { stopSelf() }
+                    Log.e(TAG, "听写翻译工作线程失败", e)
+                    failLocalSession(e)
                 },
                 scene = first.scene,
                 source = first.source,
@@ -535,7 +535,7 @@ class CaptionService : Service() {
                     // change or the session end either comes before (this setup is dropped) or after (it rebuilds again)
                     // another translator or Jev service: its light starts unknown (grey), never the old one's. The
                     // switch is queued on the main thread before the new setup can produce any result
-                    val m = b.byok; val j = s.jevKey?.let { s.provider.name + "\n" + it }
+                    val m = b.byok; val j = s.jevKey?.let { s.jev.url + "\n" + s.jev.model + "\n" + it }
                     val mtNew = m != mtId; val jevNew = j != jevId
                     val judge = b.setup.judge
                     val activate = Runnable {
@@ -566,11 +566,12 @@ class CaptionService : Service() {
             exec.execute(rebuild) // a change made since the first snapshot only bumped the version
             try {
                 capture(p, pl, vad, sl)
+                if (failed && !stopping) keepOverlay = true
                 if (overloaded && !stopping) {
                     // Drain is bounded; afterwards it waits for in-progress native calls to return (cancelled, but
                     // not interruptible), so the count is final and nothing is delivered later.
                     val left = pl.drainFinals(DRAIN_TIMEOUT_MS)
-                    if (!stopping) setStatus(if (left == 0) "⚠ 手机处理跟不上，已停止采集；已收到的句子都已翻译。点字幕再点 ✕ 结束。"
+                    if (!stopping && !failed) setStatus(if (left == 0) "⚠ 手机处理跟不上，已停止采集；已收到的句子都已翻译。点字幕再点 ✕ 结束。"
                                              else "⚠ 手机处理跟不上，已停止采集；还有 $left 句未翻译被放弃。点字幕再点 ✕ 结束。")
                     keepOverlay = true // models are released below; the captions stay until the user stops
                 }
@@ -587,8 +588,8 @@ class CaptionService : Service() {
                 pl.awaitStopped() // ASR/MT workers are out of native code after this
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "session failed", e)
-            setStatus("出错：${e.message}")
+            Log.e(TAG, "本地同传会话失败", e)
+            if (!stopping) { failLocalSession(e); keepOverlay = true }
         } finally {
             // the pipeline workers have exited (or never started), so this is the last event
             log?.let { it.write(mapOf("ev" to "session_end", "overloaded" to overloaded)); it.close() } // failure → onFail
@@ -598,14 +599,25 @@ class CaptionService : Service() {
                 try { vad?.release() } finally { lease.close() }
             }
             Log.i(TAG, "session released")
-            if (keepOverlay) while (!stopping) Thread.sleep(100) // only the overlay is alive now
-            if (!stopping) main.post { stopSelf() }
+            finishLocalSession(keepOverlay)
         }
+    }
+
+    /** 先中断采集再保留明确错误；停止过程中的迟到失败不覆盖用户已结束的状态。 */
+    private fun failLocalSession(error: Throwable) {
+        failed = true
+        if (!stopping) setStatus("出错：${error.message ?: error.javaClass.simpleName}。点字幕再点 ✕ 结束后重试。")
+    }
+
+    /** 原生资源释放后即可结束会话线程；保留悬浮窗无需空转等待，用户仍能主动关闭服务。 */
+    private fun finishLocalSession(keepOverlay: Boolean) {
+        if (!keepOverlay && !stopping) main.post { if (!stopping) stopSelf() }
     }
 
     /** Blocking capture loop on the session thread; returns when stopping or on a read error. */
     @SuppressLint("MissingPermission") // checked in MainActivity
     private fun capture(p: MediaProjection, pl: Pipeline, vad: SileroProb, log: SessionLog?) {
+        if (stopping || overloaded || failed) return
         val cfg = AudioPlaybackCaptureConfiguration.Builder(p)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -624,7 +636,7 @@ class CaptionService : Service() {
             .build()
         try {
             check(rec.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord 初始化失败" }
-            if (stopping) return
+            if (stopping || overloaded || failed) return
             rec.startRecording()
             check(rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "无法开始录音（可能被其他 App 占用）" }
             setStatus("")
@@ -635,22 +647,18 @@ class CaptionService : Service() {
                 maxUtteranceMs = if (jevActive) JEV_MAX_UTTERANCE_MS else PLAIN_MAX_UTTERANCE_MS,
                 hintWaitMs = if (jevActive) JEV_WAIT_MS else 0, holdHint = pl::holdHint,
                 judged = pl::judged, plainMaxUtteranceMs = PLAIN_MAX_UTTERANCE_MS,
-                askSilenceMs = JEV_ASK_SILENCE_MS)
+                askSilenceMs = JEV_ASK_SILENCE_MS,
+                earlyCutAfterMs = EARLY_CUT_AFTER_MS, earlyCutSilenceMs = EARLY_CUT_SILENCE_MS)
             val frame = FloatArray(seg.frameSize)
             val ts = AudioTimestamp()
             var framesRead = 0L
             var statSq = 0.0; var statN = 0; var statMaxP = 0f
             // Non-blocking reads: stopping is only a flag, so onDestroy never touches AudioRecord and the
             // session thread is the only one that calls stop()/release().
-            while (!stopping && !overloaded) {
-                var off = 0
-                while (off < frame.size && !stopping) {
-                    val n = rec.read(frame, off, frame.size - off, AudioRecord.READ_NON_BLOCKING)
-                    check(n >= 0) { "读取音频失败 ($n)" }
-                    if (n == 0) Thread.sleep(10)
-                    off += n
-                }
-                if (stopping || overloaded) break
+            while (!stopping && !overloaded && !failed) {
+                if (!readCapturedFrame(frame, { stopping || overloaded || failed },
+                    { buffer, offset, count -> rec.read(buffer, offset, count, AudioRecord.READ_NON_BLOCKING) },
+                    { Thread.sleep(10) })) break
                 framesRead += frame.size
                 // Capture time of this frame's last sample, from the HAL timestamp when available,
                 // so time spent waiting in the AudioRecord buffer counts as latency.
@@ -671,10 +679,12 @@ class CaptionService : Service() {
                     statSq = 0.0; statN = 0; statMaxP = 0f
                 }
             }
-            seg.flush()
+            if (!stopping && !overloaded && !failed) seg.flush()
         } finally {
             runCatching { rec.stop() }
-            rec.release()
+            try { rec.release() } finally {
+                log?.write(mapOf("ev" to "capture_end", "stopped" to stopping, "overloaded" to overloaded, "failed" to failed))
+            }
         }
     }
 
@@ -994,12 +1004,13 @@ class CaptionService : Service() {
         val contextN = if (prefs.contextOn) prefs.contextSentences else 0
         // the BYOK fields from one read, so the address of one save never goes out with the key of another
         val byok = prefs.byokForSession(fallback)
-        val provider = prefs.jevProvider
-        /** null: no Jev wanted, or its key is missing; "" for a provider without a key */
-        val jevKey = if (!wantJev) null else if (provider.needsKey) prefs.jevKey(provider)?.takeIf { it.isNotEmpty() } else ""
+        val jev = prefs.jevConnection()
+        val provider = jev.provider
+        /** 同一快照的连接与凭据一起生效，免密自定义服务仍可启用。 */
+        val jevKey = if (wantJev) jev.key else null
 
         fun log() = mapOf("scene" to scene.label, "source_lang" to (source?.code ?: "auto"), "target_lang" to target.stored,
-            "jev" to jevKey?.let { provider.name }, "jev_model" to jevKey?.let { provider.model },
+            "jev" to jevKey?.let { provider.name }, "jev_model" to jevKey?.let { jev.model }, "jev_url" to jevKey?.let { jev.url },
             "dedupe_join" to dedupe, "context_sentences" to contextN,
             "mt_model" to byok?.model, "mt_url" to byok?.url)
     }
@@ -1014,7 +1025,7 @@ class CaptionService : Service() {
          * Settings a running session takes from the next sentence. BYOK changes as one: "保存" writes its fields and
          * then bumps byokSaved, so a half-saved address or model never becomes a setup. jevKey:* is matched apart.
          */
-        private val setupKeys = setOf("scene", "scenes", "contextOn", "contextSentences", "dedupeJoin", "jevProvider",
+        private val setupKeys = setOf("scene", "scenes", "contextOn", "contextSentences", "dedupeJoin", "jevProvider", "jevCustom",
             "sourceLang", "targetLang")
         const val EXTRA_CODE = "code"
 
@@ -1029,6 +1040,9 @@ class CaptionService : Service() {
         private const val JEV_ASK_SILENCE_MS = 224
         private const val JEV_MAX_UTTERANCE_MS = 5_000
         private const val PLAIN_MAX_UTTERANCE_MS = 7_000
+        /** 上游v1.0.7验证的普通长句阈值；Jev启用时仍由自身句尾判断控制。 */
+        private const val EARLY_CUT_AFTER_MS = 3_000
+        private const val EARLY_CUT_SILENCE_MS = 192
         /** 短语累计400毫秒语音即可分句，避免应答语因旧阈值1200毫秒而额外等待。 */
         internal const val MIN_FINAL_MS = 400
         /** captions never take more than this part of the usable height, so the toolbar always fits */

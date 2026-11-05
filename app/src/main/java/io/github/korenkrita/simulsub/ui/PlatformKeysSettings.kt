@@ -48,7 +48,6 @@ internal fun PlatformKeysSettings(platforms: List<PlatformKeyUiState>, sessionBu
     val split = (groups.size + 1) / 2
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
-    var adding by rememberSaveable { mutableStateOf(false) }
     var discard by remember { mutableStateOf(false) }
     val selected = platforms.firstOrNull { "${it.id}:${it.credentialId}" == editing }
     val removal = platforms.firstOrNull { "${it.id}:${it.credentialId}" == deleting }
@@ -58,7 +57,7 @@ internal fun PlatformKeysSettings(platforms: List<PlatformKeyUiState>, sessionBu
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("同一平台可保存多把密钥", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                FilledTonalButton(onClick = { adding = true }, enabled = editable,
+                FilledTonalButton(onClick = { actions.onOpenQuickPlatformKey("", "") }, enabled = editable,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("platform-key-add")) {
                     Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -87,18 +86,6 @@ internal fun PlatformKeysSettings(platforms: List<PlatformKeyUiState>, sessionBu
             }
         }
     })
-    if (adding) AlertDialog(onDismissRequest = { adding = false }, title = { Text("添加平台密钥") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                platforms.distinctBy { it.id }.forEach { platform ->
-                    TextButton(onClick = {
-                        adding = false
-                        actions.onOpenQuickPlatformKey(platform.id, "")
-                    }, enabled = editable, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        .testTag("platform-key-add-${platform.id}")) { Text(platform.label) }
-                }
-            }
-        }, confirmButton = { TextButton(onClick = { adding = false }) { Text("取消") } })
     if (selected != null) {
         val dismiss = { if (selected.hasUnsavedChanges) discard = true else editing = null }
         AlertDialog(onDismissRequest = dismiss, title = { Text(selected.label, style = MaterialTheme.typography.titleLarge) },

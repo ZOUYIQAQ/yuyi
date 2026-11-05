@@ -48,7 +48,7 @@ class JevConnectionUiDeviceTest {
     /** 官方供应商展示中央密钥管理入口，Jev 区域不另设密钥输入框。 */
     @Test fun officialProviderOpensCentralPlatformKeys() {
         val state = AdvancedUiState(jevProviderId = JevProvider.OFFICIAL.name,
-            jevNeedsKey = true, jevHasSavedKey = false)
+            jevNeedsKey = true, jevHasSavedKey = false, jevEndpoint = JevProvider.OFFICIAL.url)
         var opened = 0
         val actions = SimulSubActions(onOpenPlatformKeys = { opened++ })
         compose.setContent {

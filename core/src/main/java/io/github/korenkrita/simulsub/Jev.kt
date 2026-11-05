@@ -20,12 +20,13 @@ import org.json.JSONTokener
 // TypeSafe Jev (System One decision model) client and the two questions the pipeline asks it.
 // Pure Kotlin + OkHttp so the Mac harness (tools/mac-e2e) runs the same code.
 
-/** [needsKey] false: no Authorization header is sent (Zen rejects a wrong key with 401 but answers without one). */
+/** needsKey 表示必须鉴权；Zen 不发送密钥，自定义服务仅在填写密钥时发送。 */
 enum class JevProvider(val label: String, val url: String, val model: String, val needsKey: Boolean = true, val note: String) {
     // free and keyless, but undocumented: it may get rate limits or a login at any time (tested 2026-10-10)
     ZEN("OpenCode Zen", "https://opencode.ai/zen/v1/systemone", "jev-1.13-free", needsKey = false, note = "免费，不用 key"),
     OFFICIAL("TypeSafe 官方", "https://api.typesafe.ai/v1/systemone", "jev-latest", note = "需要 key"),
     OPENROUTER("OpenRouter", "https://openrouter.ai/api/v1/systemone", "~typesafe/jev-latest", note = "需要 key"),
+    CUSTOM("自定义", "", "", needsKey = false, note = "使用自己的决策服务"),
 }
 
 /**
@@ -37,7 +38,7 @@ class JevCall(val request: String, val status: Int, val response: String?, val m
               val limit: JevLimit? = null, val gen: Int = -1) {
     val noul: Double? get() = (answer?.get("noul") as? Number)?.toDouble()
     val choice: String? get() = answer?.get("choice") as? String
-    val confidence: Double? get() = (answer?.get("confidence") as? Number)?.toDouble()
+    val confidence: Double? get() = ((answer?.get("confidence") ?: (answer?.get("probabilities") as? Map<*, *>)?.get(choice)) as? Number)?.toDouble()
 }
 
 /**
@@ -96,12 +97,13 @@ class Jev(
     private val wall: () -> Long = System::currentTimeMillis,
     dns: okhttp3.Dns = okhttp3.Dns.SYSTEM,
     private val onUsage: (MeteredUsage) -> Unit = {},
+    private val model: String = provider.model,
 ) : Judge {
     private val calls = Calls(deadlineMs, dns)
     private val unfinishedQ = unfinishedQuestion(source)
     private val mistranslationQ = mistranslationQuestion(source, target)
     /** the pause is per service and credentials, so a rebuilt setup (new client) does not end it */
-    private val svc = SERVICES.computeIfAbsent("$url\n$apiKey") { Service() }
+    private val svc = SERVICES.computeIfAbsent("$url\n$model\n$apiKey") { Service() }
 
     override fun unfinished(text: String) = ask(mapOf("current" to text), unfinishedQ)
     override fun mistranslation(ja: String, zh: String) = ask(mapOf("ja" to ja, "zh" to zh), mistranslationQ)
@@ -119,11 +121,12 @@ class Jev(
     override fun limitedAfter(gen: Int): Boolean = synchronized(svc) { gen >= 0 && svc.gen > gen }
 
     private fun ask(state: Map<String, String>, question: Map<String, Any>): JevCall {
-        val body = Json.encode(mapOf("model" to provider.model, "state" to state, "questions" to mapOf("x" to question)))
+        val body = Json.encode(mapOf("model" to model, "state" to state, "questions" to mapOf("x" to question)))
         // an illegal header value would make the HTTP library put the key into its exception message
-        if (provider.needsKey && !validKey(apiKey)) return JevCall(body, 0, null, 0, "bad key", null)
+        val sendsKey = provider.needsKey || (provider == JevProvider.CUSTOM && apiKey.isNotEmpty())
+        if (sendsKey && !validKey(apiKey)) return JevCall(body, 0, null, 0, "bad key", null)
         paused()?.let { return JevCall(body, 0, null, 0, "paused", null, it) }
-        val auth = if (provider.needsKey) mapOf("Authorization" to "Bearer $apiKey") else emptyMap()
+        val auth = if (sendsKey) mapOf("Authorization" to "Bearer $apiKey") else emptyMap()
         // let out only when not paused, checked again right before the request is written (after OkHttp's queue and
         // the connection); the generation it went out with tells a later 429 apart
         val sentGen = java.util.concurrent.atomic.AtomicInteger(-1)
@@ -194,7 +197,7 @@ class Jev(
             when (question["type"]) {
                 "noul" -> (a["noul"] as? Number)?.toDouble()?.let { it in 0.0..1.0 } == true
                 "choice" -> (a["choice"] as? String) in ((question["criteria"] as? Map<*, *>)?.keys ?: emptySet<Any>()) &&
-                    (a["confidence"] as? Number)?.toDouble()?.let { it in 0.0..1.0 } == true
+                    ((a["confidence"] ?: (a["probabilities"] as? Map<*, *>)?.get(a["choice"])) as? Number)?.toDouble()?.let { it in 0.0..1.0 } == true
                 else -> true
             }
         }

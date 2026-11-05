@@ -138,6 +138,9 @@ class CaptionAutoWidthDeviceTest {
     /** 真浮窗随长短句改变触摸矩形和宽度，底部定稿末行基线逐帧保持不变。 */
     @Test fun actualOverlayChangesWidthWithoutMovingFinalBaseline() {
         val frames = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        val widths = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        val growth = mutableListOf<Int>()
+        val heights = java.util.concurrent.CopyOnWriteArrayList<Int>()
         lateinit var view: CaptionOverlayView
         var host: CaptionWindowHost? = null
         var collect = false
@@ -153,11 +156,16 @@ class CaptionAutoWidthDeviceTest {
                 view.applyStyle(18f, 0.8f)
                 view.setCardWidth(0)
                 view.setWindowHeightLimit(area.height())
+                view.setMaxContentHeight((area.height() * CaptionService.MAX_CAPTION_FRAC).toInt(), 0)
                 view.setLines(listOf(CaptionOverlayView.Line("花朵绽放出来吧", null, true, 1)), null)
                 host = CaptionWindowHost(compose.activity, compose.activity.getSystemService(WindowManager::class.java), view,
                     CaptionBaselineAnchor()) { _, _, width, _ -> assertEquals(view.width, width) }
                 view.viewTreeObserver.addOnDrawListener {
-                    if (collect) frames += view.top + view.finalLineBaselineInWindowPx()
+                    if (collect) {
+                        frames += view.top + view.finalLineBaselineInWindowPx()
+                        widths += view.width
+                        heights += view.height
+                    }
                 }
                 requireNotNull(host).place((area.width() - view.contentWidthPx(area.width())) / 2, area.height() - 100, 0, area.width(), area.height())
                 requireNotNull(host).show()
@@ -167,6 +175,8 @@ class CaptionAutoWidthDeviceTest {
                 shortWidth = view.width
                 originalCenter = view.left + view.width / 2
                 frames += view.top + view.finalLineBaselineInWindowPx()
+                widths += view.width
+                heights += view.height
                 collect = true
                 view.setLines(listOf(CaptionOverlayView.Line("花朵绽放出来吧，这是一段需要占满可用宽度并且换行的字幕".repeat(3), null, true, 2)), null)
             }
@@ -175,6 +185,10 @@ class CaptionAutoWidthDeviceTest {
                 assertTrue("真实浮窗应扩展", view.width > shortWidth)
                 assertTrue("不能超出观看区域", view.left >= 0 && view.right <= area.width())
                 assertEquals("字幕横向中心不因自动宽度漂移", originalCenter.toFloat(), (view.left + view.width / 2).toFloat(), 1f)
+                growth += widths
+                assertTrue("宽度展开同时增加换行时，高度也需要过渡：$heights",
+                    heights.filter { it > heights.first() && it < view.height }.distinct().size >= 3)
+                widths.clear(); widths += view.width
                 view.setLines(listOf(CaptionOverlayView.Line("花开", null, true, 3)), null)
             }
             Thread.sleep(500)
@@ -182,6 +196,13 @@ class CaptionAutoWidthDeviceTest {
                 assertTrue("真实浮窗应重新收窄", view.width < shortWidth)
                 assertTrue("应采集到实际变化的绘制帧", frames.size >= 3)
                 assertTrue("自动宽度换行不能改变定稿基线：$frames", frames.max() - frames.min() <= 1)
+                assertTrue("展开必须画出多个中间宽度：$growth", growth.filter { it > shortWidth && it < growth.last() }.distinct().size >= 3)
+                assertTrue("展开不能反向抽动：$growth", growth.zipWithNext().all { (a, b) -> b >= a - 1 })
+                assertTrue("收窄必须画出多个中间宽度：$widths", widths.filter { it > view.width && it < widths.first() }.distinct().size >= 3)
+                assertTrue("收窄不能反向抽动：$widths", widths.zipWithNext().all { (a, b) -> b <= a + 1 })
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply {
+                    putString("stream", "宽度展开轨迹：$growth\n宽度收窄轨迹：$widths\n定稿基线轨迹：$frames\n")
+                })
                 // 真实拖动后只改横向位置，后续内容仍围绕放下位置伸缩。
                 requireNotNull(host).moveTo(0, view.top)
                 view.setLines(listOf(CaptionOverlayView.Line("拖动后依然正常自动展开", null, true, 4)), null)
