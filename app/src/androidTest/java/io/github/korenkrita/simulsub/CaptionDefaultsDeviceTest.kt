@@ -20,6 +20,26 @@ import java.util.UUID
 class CaptionDefaultsDeviceTest {
     @get:Rule val compose=createComposeRule()
 
+    /** 新安装默认自动宽度，升级保留用户显式设置，不通过迁移覆盖已有选择。 */
+    @Test fun freshWidthIsAutomaticAndExistingWidthChoicesStayUntouched() {
+        assertEquals(0f, SubtitleStyleUiState().widthFraction, 0f)
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        for (width in listOf(null, 0f, 0.4f, 0.9f, 1f)) {
+            val token = UUID.randomUUID().toString()
+            val isolated = object : ContextWrapper(base) {
+                /** 所有默认值验证使用独立偏好，不读取或更改用户字幕配置。 */
+                override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                    base.getSharedPreferences("宽度默认-$token-$name", mode)
+            }
+            val stored = isolated.getSharedPreferences("jpsub", 0)
+            if (width != null) assertTrue(stored.edit().putFloat("widthFrac", width).commit())
+            repeat(2) {
+                assertEquals(width ?: 0f, Prefs(isolated).widthFrac, 0f)
+                assertEquals(width, stored.all["widthFrac"])
+            }
+        }
+    }
+
     /** 新安装默认自动高度且继续预留草稿空间，不写入高度或旧迁移标记。 */
     @Test fun freshInstallDefaultsToAutoHeightWithoutWritingCaptionChoices() {
         assertEquals(0f, SubtitleStyleUiState().heightFraction, 0f)

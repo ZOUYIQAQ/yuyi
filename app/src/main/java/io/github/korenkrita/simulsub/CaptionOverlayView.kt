@@ -50,6 +50,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** resize marks, one per corner: top-left, top-right, bottom-right, bottom-left */
     private val corners = List(4) { android.widget.ImageView(ctx) }
     private val unlockBtn = ImageButton(ctx)
+    /** 工具栏文字尺寸的版本供独立窗口复用测量；显隐和角标重绘不增加版本。 */
+    internal var toolbarContentVersion = 0
+        private set
     private val toolbar = object : LinearLayout(ctx) {
         /** 独立工具栏不经过字幕根视图，按住时暂停隐藏，松开后重新计时。 */
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -61,6 +64,28 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         }
     }
     private var externalToolbar = false
+    private var requestedCardWidth = LayoutParams.MATCH_PARENT
+    private var targetAutoWidth = -1
+    private var movingWidth: Float? = null
+    private var widthFrom = 0f
+    private var widthElapsed = 0L
+    private var widthFrameTime = 0L
+    private var lastDrawnWidth = 0
+    private var widthStepPosted = false
+    private val widthEasing = android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+    /** 只有上一尺寸真正绘制后才推进宽度，窗口忙碌时也不会吞掉中间帧。 */
+    private val widthStep = Runnable {
+        widthStepPosted = false
+        if (movingWidth != null) {
+            val now = android.os.SystemClock.uptimeMillis()
+            widthElapsed = if (!android.animation.ValueAnimator.areAnimatorsEnabled()) 280L else
+                (widthElapsed + (now - widthFrameTime).coerceIn(16L, 64L)).coerceAtMost(280L)
+            widthFrameTime = now
+            movingWidth = if (widthElapsed >= 280L) null else
+                widthFrom + (targetAutoWidth - widthFrom) * widthEasing.getInterpolation(widthElapsed / 280f)
+            requestLayout(); invalidate()
+        }
+    }
     private val bg = GradientDrawable().apply { cornerRadius = dp(12f) }
 
     var textSp = 13f; private set
@@ -89,7 +114,8 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
     /** 同步工具栏与草稿伸展预算；仅定稿模式不占用草稿空间。 */
     fun setFinalOnly(v: Boolean) {
         setDraftSlotEnabled(!v)
-        modeBtn.text = if (v) "说完再出" else "边听边出"
+        val label = if (v) "说完再出" else "边听边出"
+        if (modeBtn.text.toString() != label) { modeBtn.text = label; toolbarContentVersion++ }
         modeBtn.contentDescription = if (v) "现在每句说完才显示，点一下改为边听边出" else "现在边听边出，点一下改为每句说完再显示"
     }
     /** 原文 / 用时 tapped: the host flips the pref; [setShown] shows the new state. */
@@ -226,16 +252,25 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 统一绘制连续圆角背景；正文由视口高度过渡，草稿只改变背景下沿。 */
     override fun dispatchDraw(canvas: Canvas) {
+        if (canvas.isHardwareAccelerated || !isHardwareAccelerated) {
+            lastDrawnWidth = width
+            if (movingWidth != null && !widthStepPosted) {
+                widthStepPosted = true
+                postOnAnimation(widthStep)
+            }
+        }
         val extension = if (draftSlotEnabled) (draftSlot.bottom - card.bottom).coerceAtLeast(0) else 0
         val bottom = card.bottom + (extension * draftBackgroundFraction).toInt()
-        bg.setBounds(card.left, card.top, card.right, bottom)
+        bg.setBounds(if (requestedCardWidth == 0) 0 else card.left, card.top,
+            if (requestedCardWidth == 0) width else card.right, bottom)
         bg.draw(canvas)
         super.dispatchDraw(canvas)
     }
 
     /** 伸展中的背景没有覆盖到的草稿先裁切，文字始终位于黑框内，工具栏保持独立。 */
     override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
-        if (child !== draftSlot) return super.drawChild(canvas, child, drawingTime)
+        if (child !== draftSlot && (child !== card || requestedCardWidth != 0))
+            return super.drawChild(canvas, child, drawingTime)
         val save = canvas.save()
         canvas.clipRect(bg.bounds)
         val drawn = super.drawChild(canvas, child, drawingTime)
@@ -245,6 +280,9 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
 
     /** 离开页面或停止服务立即停止背景回调，重新附着时显示已选择的最终状态。 */
     override fun onDetachedFromWindow() {
+        stopWidthTransition()
+        lastDrawnWidth = 0
+        targetAutoWidth = -1
         draftBackgroundAnimator?.cancel(); draftBackgroundAnimator = null
         draftBackgroundFraction = if (draftBackgroundTarget) 1f else 0f
         super.onDetachedFromWindow()
@@ -281,7 +319,8 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         // every state has a word (a light is never told by its colour alone); grey says "未开启" for a switched-off
         // service; the full reason of a fault is in the warning line
         val word = if (l == Light.GREY && why == "未开启") why else l.word
-        t.text = "$name $word"
+        val label = "$name $word"
+        if (t.text.toString() != label) { t.text = label; toolbarContentVersion++ }
         t.contentDescription = "$name $word${why?.takeIf { it != word }?.let { "，$it" } ?: ""}"
     }
     /** The toolbar's service row: the translator and Jev, each with a light and, when not fine, why. */
@@ -300,12 +339,74 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         return toolbar
     }
 
-    /** 同步黑框和草稿槽的像素宽度，工具栏独立控制自身宽度。 */
+    /** 零宽度表示随内容伸缩；固定宽度仍同步黑框和草稿槽，工具栏不参与。 */
     fun setCardWidth(px: Int) {
+        if (px != 0) stopWidthTransition()
+        requestedCardWidth = px
+        applyCardWidth(if (px == 0) LayoutParams.MATCH_PARENT else px)
+        requestLayout()
+    }
+
+    /** 两个连续背景区域共用实际像素宽度，不改变自动模式选择。 */
+    private fun applyCardWidth(px: Int) {
         val lp = card.layoutParams
         if (lp.width != px) { lp.width = px; card.layoutParams = lp }
         val draftLp = draftSlot.layoutParams
         if (draftLp.width != px) { draftLp.width = px; draftSlot.layoutParams = draftLp }
+    }
+
+    /** 按实际字号和原文Span测量，空字幕保留可拖动宽度，长句最多占满可用区域。 */
+    internal fun contentWidthPx(availableWidth: Int): Int {
+        val column = card.getChildAt(0)
+        val body = text.desiredCaptionWidthPx() + column.paddingLeft + column.paddingRight
+        val diagnostic = if (stats.visibility == VISIBLE)
+            android.text.Layout.getDesiredWidth(stats.text, stats.paint) + column.paddingLeft + column.paddingRight else 0f
+        val draft = if (draftSlotEnabled && draftText.visibility == VISIBLE)
+            draftText.desiredCaptionWidthPx() + draftSlot.paddingLeft + draftSlot.paddingRight else 0f
+        return kotlin.math.ceil(maxOf(body, diagnostic, draft, dp(72f)).toDouble()).toInt()
+            .coerceIn(1, availableWidth.coerceAtLeast(1))
+    }
+
+    /** 完整内容只按目标宽度排版一次；外层视口平滑收放，避免逐帧换行取消滚动并抖动。 */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        text.animateWidthReflow = requestedCardWidth == 0
+        val available = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
+        if (requestedCardWidth >= 0) {
+            val width = if (requestedCardWidth == 0) contentWidthPx(available) else requestedCardWidth.coerceIn(1, available)
+            if (requestedCardWidth == 0 && targetAutoWidth != width) {
+                val from = lastDrawnWidth.coerceAtMost(available).toFloat()
+                stopWidthTransition()
+                targetAutoWidth = width
+                if (isAttachedToWindow && from > 0 && abs(from - width) > 1f &&
+                    android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                    movingWidth = from
+                    widthFrom = from
+                    widthElapsed = 0L
+                    widthFrameTime = android.os.SystemClock.uptimeMillis()
+                }
+            }
+            applyCardWidth(width)
+            super.onMeasure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), heightMeasureSpec)
+            if (requestedCardWidth == 0) setMeasuredDimension(
+                (movingWidth?.let { kotlin.math.round(it).toInt() } ?: width).coerceIn(1, available), measuredHeight)
+        } else super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    /** 文字与草稿共用稳定的目标排版并保持居中，背景和触摸边界跟随实际视口宽度。 */
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (requestedCardWidth == 0) {
+            card.offsetLeftAndRight((width - card.width) / 2 - card.left)
+            draftSlot.offsetLeftAndRight((width - draftSlot.width) / 2 - draftSlot.left)
+        }
+    }
+
+    /** 手动缩放、切回固定宽度或离开窗口时立即释放过渡，不让动画追赶手指。 */
+    private fun stopWidthTransition() {
+        removeCallbacks(widthStep)
+        widthStepPosted = false
+        movingWidth = null
+        targetAutoWidth = -1
     }
     /** 同步黑框与草稿槽的横向偏移，工具栏放在整个字幕块的上方或下方，并按宿主计算的重叠避让。 */
     fun placeCard(cardOffset: Int, toolbarOffset: Int, toolbarAbove: Boolean, overlapPx: Int) {
@@ -419,7 +520,7 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         val markRot = floatArrayOf(225f, 315f, 45f, 135f)
         val markGrav = intArrayOf(Gravity.TOP or Gravity.START, Gravity.TOP or Gravity.END, Gravity.BOTTOM or Gravity.END, Gravity.BOTTOM or Gravity.START)
         corners.forEachIndexed { k, c ->
-            c.visibility = GONE
+            c.visibility = INVISIBLE
             c.setImageResource(R.drawable.ic_chevron_right); c.rotation = markRot[k]; c.alpha = 0.5f
             card.addView(c, FrameLayout.LayoutParams(dp(14f).toInt(), dp(14f).toInt(), markGrav[k]).apply {
                 val m = dp(3f).toInt(); setMargins(m, m, m, m)
@@ -530,37 +631,42 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         val jaPx = (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, textSp * 0.62f, resources.displayMetrics)).toInt()
         for (l in lines) {
             if (draftSlotEnabled && !l.isFinal) continue
+            val shownJa = l.ja?.let(::captionDisplayText).orEmpty()
+            val shownZh = captionDisplayText(l.zh)
+            if (shownJa.isEmpty() && shownZh.isEmpty()) continue
             if (sb.isNotEmpty()) sb.append('\n')
             if (added && l === newTail) enteringOffset = sb.length
-            if (!l.ja.isNullOrEmpty()) {
+            if (shownJa.isNotEmpty()) {
                 val s = sb.length
-                sb.append(l.ja).append('\n')
+                sb.append(shownJa)
+                if (shownZh.isNotEmpty()) sb.append('\n')
                 sb.setSpan(AbsoluteSizeSpan(jaPx), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(ForegroundColorSpan(colors.ja), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             val s = sb.length
-            // the draft line is visibly separate from the finished sentences above: dimmer, smaller, marked "…"
-            if (!l.isFinal) sb.append("… ")
-            sb.append(l.zh)
-            if (!l.isFinal) {
+            sb.append(shownZh)
+            if (!l.isFinal && shownZh.isNotEmpty()) {
                 sb.setSpan(ForegroundColorSpan(colors.draft), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 sb.setSpan(android.text.style.RelativeSizeSpan(0.85f), s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
         text.setCaption(sb, enteringOffset)
         val draft = if (draftSlotEnabled) lines.lastOrNull { !it.isFinal } else null
-        draftSource.text = draft?.ja ?: ""
+        val shownDraftJa = draft?.ja?.let(::captionDisplayText).orEmpty()
+        val shownDraftZh = draft?.zh?.let(::captionDisplayText).orEmpty()
+        draftSource.text = shownDraftJa
         val draftCaption = SpannableStringBuilder()
         if (draft != null) {
-            if (draftOriginalShown && !draft.ja.isNullOrEmpty()) {
-                draftCaption.append(draft.ja.replace('\n', ' ')).append(" · ")
+            if (draftOriginalShown && shownDraftJa.isNotEmpty()) {
+                draftCaption.append(shownDraftJa.replace('\n', ' '))
+                if (shownDraftZh.isNotEmpty()) draftCaption.append(" · ")
                 draftCaption.setSpan(ForegroundColorSpan(colors.ja), 0, draftCaption.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            draftCaption.append("… ").append(draft.zh.replace('\n', ' '))
+            if (shownDraftZh.isNotEmpty()) draftCaption.append(shownDraftZh.replace('\n', ' '))
         }
         draftText.setCaption(draftCaption)
         // 空槽仍参与测量，只隐藏字形；不能用 GONE 折叠整个草稿区。
-        draftText.visibility = if (draft == null) INVISIBLE else VISIBLE
+        draftText.visibility = if (draftCaption.isEmpty()) INVISIBLE else VISIBLE
         updateDraftBackground()
         stats.text = statsLine ?: ""
         stats.visibility = if (statsLine.isNullOrEmpty()) GONE else VISIBLE
@@ -651,10 +757,10 @@ class CaptionOverlayView(ctx: Context, private val interactive: Boolean) : Linea
         showCorners()
     }
     private fun toggleLock() { setLocked(!locked); if (locked) hideToolbar() }
-    /** the resize marks go with the toolbar: shown (and draggable) only while it is open and the card is unlocked */
+    /** 角标只切换绘制，不重测字幕；缩放命中仍由工具栏状态与锁定状态共同控制。 */
     private fun showCorners() {
         val on = interactive && !locked && toolbar.visibility == VISIBLE
-        corners.forEach { it.visibility = if (on) VISIBLE else GONE }
+        corners.forEach { it.visibility = if (on) VISIBLE else INVISIBLE }
     }
 
     private val hideRunnable = Runnable { hideToolbar() }

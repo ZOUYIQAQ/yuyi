@@ -24,7 +24,7 @@ class CaptionDraftSlotDeviceTest {
             view.applyStyle(font, 0.8f)
             view.setReserveDraftSpace(true)
             view.setLines(listOf(CaptionOverlayView.Line("花朵绽放出来吧", null, true),
-                CaptionOverlayView.Line("国あAg🙂", if (original) "花が咲くでしょう～" else null, false)), null)
+                CaptionOverlayView.Line("国あAg🙂", if (original) "仮字幕" else null, false)), null)
             layout(view, px(view, 300))
             val slot = view.getChildAt(1) as LinearLayout
             val draft = slot.getChildAt(1) as TextView
@@ -32,7 +32,8 @@ class CaptionDraftSlotDeviceTest {
             assertTrue("预留高度应小于一行正文：$font", view.draftSlotHeightPx() < body(view).lineHeight)
             assertEquals("原文与译文共用一行小字幕", 1, draft.lineCount)
             assertTrue("不能因缩小区域而裁字", draft.layout.height <= draft.height)
-            assertTrue(draft.text.toString().contains("国あAg🙂"))
+            assertEquals("临时字幕保留小字号但不添加省略号前缀",
+                if (original) "仮字幕 · 国あAg🙂" else "国あAg🙂", draft.text.toString())
             if (font == 18f && !original) {
                 val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
                 try {

@@ -13,4 +13,6 @@ dependencies {
     compileOnly("org.json:json:20240303")
     testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
+    // 真实本地 WebSocket 协议测试，不连接付费云端。
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

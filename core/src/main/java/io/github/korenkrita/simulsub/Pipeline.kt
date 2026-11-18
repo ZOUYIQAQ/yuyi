@@ -452,13 +452,13 @@ class Pipeline(
                 // nothing recognised = nothing to wait for; otherwise ask, replacing an older question not yet sent.
                 // No judge in this segment's setup (key missing for now) or one the service limited: no question,
                 // the segmenter cuts at once as without Jev instead of waiting for an answer that never comes
-                if (ja.isEmpty() || setup.judge == null || setup.judge.paused() != null) hints[job.segmentId to job.revision] = false to -1
+                if (!hasText(ja) || setup.judge == null || setup.judge.paused() != null) hints[job.segmentId to job.revision] = false to -1
                 else pendingJudge.set(Triple(job, ja, setup))
             }
             synchronized(lock) {
                 // A draft that already ran is kept even if a newer draft is queued: on a slow phone every
                 // draft would otherwise be superseded before it reaches MT and nothing would be shown.
-                if (!q.job.isFinal && ja.isEmpty()) return@synchronized
+                if (!q.job.isFinal && !hasText(ja)) return@synchronized
                 // a sentence-end candidate was recognized for Jev; it is only translated if drafts are wanted now
                 if (!q.job.isFinal && !drafts()) return@synchronized
                 // 跳过的草稿不能替换队列或推进比较基线；普通草稿增量不足时省去下一次识别。
@@ -559,9 +559,12 @@ class Pipeline(
         if (rememberedSeg >= seg - 1) { contexts.keys.removeIf { it < seg - 8 }; contexts[seg] = now }
         return now
     }
+    /** 只有标点的识别结果没有可翻译的内容，也不能污染后续上下文。 */
+    private fun hasText(s: String): Boolean = s.codePoints().anyMatch { Character.isLetterOrDigit(it) }
+
     private fun rememberFinal(seg: Long, ja: String) {
         if (seg > rememberedSeg) rememberedSeg = seg
-        if (ja.isBlank()) return
+        if (!hasText(ja)) return
         recentFinals.addLast(ja)
         while (recentFinals.size > MAX_PREVIOUS_SENTENCES) recentFinals.removeFirst() // a later setup may ask for more
     }
@@ -697,10 +700,11 @@ class Pipeline(
             val job = j.q.job
             val start = clock()
             val ctx = previousFor(job.segmentId, j.setup.previousSentences)
-            val r = if (j.ja.isEmpty()) null else translate(job, j.setup, 1, j.ja, emptyList(), ctx)
+            val translatable = hasText(j.ja)
+            val r = if (translatable) translate(job, j.setup, 1, j.ja, emptyList(), ctx) else null
             if (job.isFinal) rememberFinal(job.segmentId, j.ja) // context for the following segments, also when this one fails
             if (!running) return
-            var zh = if (j.ja.isEmpty()) "" else r?.takeIf { it.usable }?.text
+            var zh = if (translatable) r?.takeIf { it.usable }?.text else ""
             if (zh == null) {
                 if (!job.isFinal) continue
                 zh = "[翻译失败] ${j.ja}"
@@ -924,6 +928,28 @@ class CaptionBoard(minFinals: Int = DEFAULT_SENTENCES, maxChars: Int = DEFAULT_C
         }
         if (d != null && (c.segmentId < d.segmentId || (c.segmentId == d.segmentId && c.revision <= d.revision))) return false
         draft = c
+        return true
+    }
+
+    /** 迟到的云端原文只原位补全已有定稿，不重计句数、不改变译文或动画修订，也不复活旧句。 */
+    @Synchronized
+    fun updateOriginal(segmentId: Long, original: String): Boolean {
+        val index = finals.indexOfFirst { it.segmentId == segmentId }
+        if (index < 0 || finals[index].ja == original) return false
+        finals[index] = finals[index].copy(ja = original)
+        return true
+    }
+
+    /** 云端已确认短句的全文校正沿用原位置，空校正撤回该句；已裁剪的旧句不能复活。 */
+    @Synchronized
+    fun updateOnlineFinal(caption: Caption): Boolean {
+        if (!caption.isFinal) return false
+        val index = finals.indexOfFirst { it.segmentId == caption.segmentId }
+        if (index < 0) return false
+        val old = finals[index]
+        if (caption.revision < old.revision || (old.zh == caption.zh && old.ja == caption.ja)) return false
+        if (caption.zh.isEmpty()) finals.removeAt(index) else finals[index] = caption
+        trim()
         return true
     }
 

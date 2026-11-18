@@ -45,9 +45,19 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class CaptionService : Service() {
     private val main = Handler(Looper.getMainLooper())
+    private val renderQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 一帧最多消费一次最新快照，网络突发和后台状态通知不排成长队。 */
+    private val renderFrame = Runnable {
+        renderQueued.set(false)
+        if (!stopping) render()
+    }
     private var projection: MediaProjection? = null
     /** 启动尚未交给会话线程时由服务保管，启动失败在销毁时释放。 */
     private var pendingModelLease: ModelSessionLease? = null
+    /** 听译路径固定于启动时，在线会话不持有或加载本地模型。 */
+    private var sessionMode = ListeningMode.LOCAL
+    private var onlineSession: OnlinePlaybackSession? = null
+    private var cloudAsrSession: CloudAsrPlaybackSession? = null
 
     /**
      * One "session" thread owns every native object (VAD, ASR, MT, AudioRecord) from creation to release:
@@ -55,6 +65,7 @@ class CaptionService : Service() {
      * and unblocks the read, so nothing is ever freed while another thread is still inside it.
      */
     @Volatile private var stopping = false
+    @Volatile private var stoppedAtMs: Long? = null
     /** Guards [pipeline] so onDestroy's stop never races the session thread's release. */
     private val cancelLock = Any()
     private var pipeline: Pipeline? = null
@@ -72,6 +83,7 @@ class CaptionService : Service() {
     private val lastUpdateMs = HashMap<Pair<Long, Int>, Long>()
     @Volatile private var backlog = 0
     @Volatile private var overloaded = false
+    @Volatile private var failed = false
     /**
      * The Jev client of the setup published last; its pause shows without a new request, and a 429 of its service
      * installed by any client (also one of an earlier session, or after the last result) refreshes. Main thread only.
@@ -115,6 +127,8 @@ class CaptionService : Service() {
 
     private var overlay: CaptionOverlayView? = null
     private val prefs by lazy { Prefs(this) }
+    private val costs by lazy { UsageCostRepository.get(this) }
+    private var costSessionId: String? = null
     @Volatile private var status = "正在准备…"
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -125,9 +139,21 @@ class CaptionService : Service() {
 
         startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         // 同一次会话固定使用已完成校验的模型，后台切换不能释放正在推理的对象。
-        val lease = ModelRepository.get(this).acquireSelectedForSession()
+        sessionMode = prefs.listeningMode
+        val onlineConfig = prefs.onlineConfig()
+        if (sessionMode == ListeningMode.ONLINE && !prefs.onlineReady) {
+            sessionState.value = SessionSnapshot(false, "请先保存有效的在线听译配置")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (sessionMode == ListeningMode.CLOUD_ASR && (!prefs.cloudAsrReady || !prefs.byokReady)) {
+            sessionState.value = SessionSnapshot(false, "请先保存在线听写与文字翻译配置")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val lease = if (sessionMode == ListeningMode.LOCAL) ModelRepository.get(this).acquireSelectedForSession() else null
         pendingModelLease = lease
-        if (lease == null) {
+        if (sessionMode == ListeningMode.LOCAL && lease == null) {
             sessionState.value = SessionSnapshot(false, "请先在模型库下载并启用模型")
             stopSelf()
             return START_NOT_STICKY
@@ -144,13 +170,130 @@ class CaptionService : Service() {
         }, main)
         projection = p
         running = true
-        sessionState.value = SessionSnapshot(true, "正在加载识别模型…")
+        sessionState.value = SessionSnapshot(true, if (sessionMode != ListeningMode.LOCAL) "正在连接在线服务…" else "正在加载识别模型…")
         showOverlay()
         // fixed at the start: switching it while models load affects the next session, as the switch says
         val keepLogs = prefs.keepLogs
-        Thread({ session(p, keepLogs, lease) }, "jpsub-session").start()
+        Thread({
+            if (stopping) { lease?.close(); return@Thread }
+            var ledgerSession: String? = null
+            try {
+                ledgerSession = costs.beginSession(when (sessionMode) {
+                    ListeningMode.LOCAL -> "本地听写与文字翻译"
+                    ListeningMode.CLOUD_ASR -> "在线听写与文字翻译"
+                    ListeningMode.ONLINE -> "千问语音直译"
+                })
+                costSessionId = ledgerSession
+                when (sessionMode) {
+                    ListeningMode.ONLINE -> runOnlineSession(p, keepLogs, onlineConfig)
+                    ListeningMode.CLOUD_ASR -> runCloudAsrSession(p, keepLogs)
+                    ListeningMode.LOCAL -> session(p, keepLogs, requireNotNull(lease))
+                }
+            } catch (error: Exception) {
+                lease?.close()
+                Log.e(TAG, "无法启动听译会话", error)
+                if (!stopping) { setStatus("⚠ 无法启动同传，请重试"); main.post { stopSelf() } }
+            } finally { ledgerSession?.let { costs.endSession(it, stoppedAtMs ?: System.currentTimeMillis()) } }
+        }, "jpsub-session").start()
         pendingModelLease = null
         return START_NOT_STICKY
+    }
+
+    /** 在线直接接收听译字幕，仍使用原字幕板、样式、日志开关和防抖窗口。 */
+    private fun runOnlineSession(p: MediaProjection, keepLogs: Boolean,
+        config: io.github.korenkrita.simulsub.online.LiveTranslateConfig) {
+        var log: SessionLog? = null
+        var runner: OnlinePlaybackSession? = null
+        try {
+            if (stopping) return
+            if (keepLogs) {
+                val root = requireNotNull(getExternalFilesDir(null))
+                log = SessionLog(SessionLog.dir(root), onFail = { logWarned = true; refresh() })
+                log.write(mapOf("ev" to "session_start", "app" to BuildConfig.VERSION_NAME,
+                    "mt_engine" to "qwen_livetranslate", "source_lang" to (config.sourceLang ?: "auto"),
+                    "target_lang" to config.targetLang))
+            }
+            val activeLog = log
+            runner = OnlinePlaybackSession(config, p, { caption ->
+                if (!stopping) onCaption(caption, activeLog)
+            }, { next -> if (!stopping) setStatus(next) }, costs, costSessionId)
+            synchronized(cancelLock) {
+                if (stopping) { runner.stop(); return }
+                onlineSession = runner
+            }
+            runner.run()
+        } catch (_: Exception) {
+            if (!stopping) setStatus("⚠ 在线听译启动失败，请检查配置后重试")
+        } finally {
+            runner?.stop()
+            synchronized(cancelLock) { onlineSession = null }
+            log?.let { it.write(mapOf("ev" to "session_end")); it.close() }
+            if (!stopping) main.post { stopSelf() }
+        }
+    }
+
+    /** 第三条路径复用文字翻译配置与场景，语音识别交给在线听写，不持有本地模型。 */
+    private fun runCloudAsrSession(p: MediaProjection, keepLogs: Boolean) {
+        var runner: CloudAsrPlaybackSession? = null
+        var log: SessionLog? = null
+        try {
+            if (stopping) return
+            val service = prefs.byokService() ?: return
+            val scene = prefs.scene
+            val source = prefs.sourceLang
+            val target = prefs.targetLang
+            val config = prefs.cloudAsrConfig().copy(
+                context = scene.background.orEmpty().take(400),
+                vocabulary = scene.terms.take(200).associate { it.first to 3 },
+            )
+            val system = byokSystem(scene, source, target)
+            var storedVariant = prefs.byokVariant(service.url, service.model)
+            if (storedVariant == null) {
+                val probe = ByokTranslator(service, system, null, maxTokens = mtMaxTokens(target),
+                    onUsage = { costs.recordTranslation(costSessionId, CostCategory.TEST, service, it) })
+                synchronized(cancelLock) { if (stopping) { probe.cancel(); return }; probing = probe }
+                try {
+                    setStatus("正在验证文字翻译配置…")
+                    val steps = mutableListOf<ByokTranslator.Step>()
+                    val found = probe.probe(steps)
+                    if (stopping) return
+                    storedVariant = found?.name ?: if (probe.exhausted(steps)) ByokTranslator.NONE_WORKED else null
+                    if (storedVariant == null) {
+                        setStatus("⚠ 文字翻译服务不可用，请在设置中测试后重试")
+                        return
+                    }
+                    prefs.setByokVariant(service.url, service.model, storedVariant)
+                } finally {
+                    synchronized(cancelLock) { if (probing === probe) probing = null }
+                    probe.cancel()
+                }
+            }
+            if (stopping) return
+            if (keepLogs) {
+                log = SessionLog(SessionLog.dir(requireNotNull(getExternalFilesDir(null))),
+                    onFail = { logWarned = true; refresh() })
+                log.write(mapOf("ev" to "session_start", "app" to BuildConfig.VERSION_NAME,
+                    "asr_engine" to config.model, "mt_engine" to service.model,
+                    "listening_mode" to "cloud_asr", "source_lang" to (source?.code ?: "auto"),
+                    "target_lang" to target.stored))
+            }
+            val activeLog = log
+            runner = CloudAsrPlaybackSession(config, p, service, scene, source, target,
+                ByokTranslator.variant(storedVariant), if (prefs.contextOn) prefs.contextSentences else 0,
+                { if (!stopping) onCaption(it, activeLog) }, { if (!stopping) setStatus(it) }, costs, costSessionId)
+            synchronized(cancelLock) {
+                if (stopping) { runner.stop(); return }
+                cloudAsrSession = runner
+            }
+            runner.run()
+        } catch (_: Exception) {
+            if (!stopping) setStatus("⚠ 在线听写启动失败，请检查听写和翻译配置后重试")
+        } finally {
+            runner?.stop()
+            synchronized(cancelLock) { cloudAsrSession = null }
+            log?.let { it.write(mapOf("ev" to "session_end")); it.close() }
+            if (!stopping) main.post { stopSelf() }
+        }
     }
 
     /** 持有模型租约到原生对象完全释放，停止页面状态不能提前允许删除。 */
@@ -176,6 +319,7 @@ class CaptionService : Service() {
             // 模型由用户安装后下载，整个会话从同一个完整目录读取。
             val model = lease.paths
             vad = SileroProb(model.directory)
+            // 多语识别保持自动检测，原声选项继续用于翻译上下文，运行中可从下一句调整。
             asr = SherpaAsr(model, ASR_THREADS)
             val t1 = monoMs()
             // warm-up so the first real sentence does not pay page-in / first-run costs (nothing is sent anywhere)
@@ -209,7 +353,8 @@ class CaptionService : Service() {
             fun runProbe(t: ByokService, token: Long, system: String, target: Target): Boolean {
                 val asking = "第一次用这个模型，正在试怎样关闭思考…"
                 val before = status
-                val probe = ByokTranslator(t, system, null, maxTokens = mtMaxTokens(target))
+                val probe = ByokTranslator(t, system, null, maxTokens = mtMaxTokens(target),
+                    onUsage = { costs.recordTranslation(costSessionId, CostCategory.TEST, t, it) })
                 synchronized(cancelLock) {
                     // registered under the lock a newer save or the session end cancels under: neither slips in between
                     if (stopping || !order.current(token)) return false
@@ -260,7 +405,8 @@ class CaptionService : Service() {
                 }
                 // the log names the service really used (never the key): the one saved last may still be in its probe
                 fun use(k: ByokService, variant: ByokTranslator.ThinkingOff?) = Triple(
-                    ByokTranslator(k, system, variant, maxTokens = mtMaxTokens(s.target)), k,
+                    ByokTranslator(k, system, variant, maxTokens = mtMaxTokens(s.target),
+                        onUsage = { costs.recordTranslation(costSessionId, CostCategory.TRANSLATION, k, it) }), k,
                     mapOf("variant" to variant?.name, "system" to system, "mt_url" to k.url, "mt_model" to k.model) + k.log())
                 var (ready, variant) = known(t)
                 if (!ready) {
@@ -300,9 +446,10 @@ class CaptionService : Service() {
                 // one Jev client for both features; no key = both paused until one is entered
                 // pauses count deep sleep: one kept across sessions ends at the time the service named
                 val judge = s.jevKey?.let {
-                    Jev(s.provider, it, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime)
+                    Jev(s.provider, it, url = s.jev.url, model = s.jev.model, source = s.source, target = s.target, clock = android.os.SystemClock::elapsedRealtime,
+                        onUsage = { usage -> costs.recordObserved(costSessionId, CostCategory.JEV, s.jev.url, s.jev.model, usage) })
                 }
-                if (wantJev && judge == null) notices += "⚠ 在线 Decisions 模型辅助已暂停：还没填 ${s.provider.label} 的 key"
+                if (wantJev && judge == null) notices += "⚠ 在线辅助已暂停：请检查 ${s.provider.label} 的连接与密钥配置"
                 return Built(Setup(mt, s.scene, s.source, s.target, judge, s.dedupe, s.contextN, version),
                     notices.joinToString("  ·  "), used, ev)
             }
@@ -332,7 +479,7 @@ class CaptionService : Service() {
             inUse = built.byok
             jevEndsOn = jevEnds; jevCheckOn = jevCheck
             // the services really in use (BYOK: the one its probe accepted, not a newly saved one still probed)
-            var mtId = built.byok; var jevId = firstSnap.jevKey?.let { firstSnap.provider.name + "\n" + it }
+            var mtId = built.byok; var jevId = firstSnap.jevKey?.let { firstSnap.jev.url + "\n" + firstSnap.jev.model + "\n" + it }
             first.judge.let { j -> main.post { activeJudge = j; refresh() } }
             // the settings in use are not the ones session_start logged: say so, like a change while running
             logUsed(built, firstSnap, change = firstSnap !== s0)
@@ -345,9 +492,8 @@ class CaptionService : Service() {
                     setStatus("⚠ 手机忙不过来，先停止听新的声音，正在处理已经听到的句子…")
                 },
                 onFailure = { e ->
-                    Log.e(TAG, "pipeline worker failed", e)
-                    setStatus("出错：${e.message}")
-                    main.post { stopSelf() }
+                    Log.e(TAG, "听写翻译工作线程失败", e)
+                    failLocalSession(e)
                 },
                 scene = first.scene,
                 source = first.source,
@@ -389,7 +535,7 @@ class CaptionService : Service() {
                     // change or the session end either comes before (this setup is dropped) or after (it rebuilds again)
                     // another translator or Jev service: its light starts unknown (grey), never the old one's. The
                     // switch is queued on the main thread before the new setup can produce any result
-                    val m = b.byok; val j = s.jevKey?.let { s.provider.name + "\n" + it }
+                    val m = b.byok; val j = s.jevKey?.let { s.jev.url + "\n" + s.jev.model + "\n" + it }
                     val mtNew = m != mtId; val jevNew = j != jevId
                     val judge = b.setup.judge
                     val activate = Runnable {
@@ -420,11 +566,12 @@ class CaptionService : Service() {
             exec.execute(rebuild) // a change made since the first snapshot only bumped the version
             try {
                 capture(p, pl, vad, sl)
+                if (failed && !stopping) keepOverlay = true
                 if (overloaded && !stopping) {
                     // Drain is bounded; afterwards it waits for in-progress native calls to return (cancelled, but
                     // not interruptible), so the count is final and nothing is delivered later.
                     val left = pl.drainFinals(DRAIN_TIMEOUT_MS)
-                    if (!stopping) setStatus(if (left == 0) "⚠ 手机处理跟不上，已停止采集；已收到的句子都已翻译。点字幕再点 ✕ 结束。"
+                    if (!stopping && !failed) setStatus(if (left == 0) "⚠ 手机处理跟不上，已停止采集；已收到的句子都已翻译。点字幕再点 ✕ 结束。"
                                              else "⚠ 手机处理跟不上，已停止采集；还有 $left 句未翻译被放弃。点字幕再点 ✕ 结束。")
                     keepOverlay = true // models are released below; the captions stay until the user stops
                 }
@@ -441,8 +588,8 @@ class CaptionService : Service() {
                 pl.awaitStopped() // ASR/MT workers are out of native code after this
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "session failed", e)
-            setStatus("出错：${e.message}")
+            Log.e(TAG, "本地同传会话失败", e)
+            if (!stopping) { failLocalSession(e); keepOverlay = true }
         } finally {
             // the pipeline workers have exited (or never started), so this is the last event
             log?.let { it.write(mapOf("ev" to "session_end", "overloaded" to overloaded)); it.close() } // failure → onFail
@@ -452,14 +599,25 @@ class CaptionService : Service() {
                 try { vad?.release() } finally { lease.close() }
             }
             Log.i(TAG, "session released")
-            if (keepOverlay) while (!stopping) Thread.sleep(100) // only the overlay is alive now
-            if (!stopping) main.post { stopSelf() }
+            finishLocalSession(keepOverlay)
         }
+    }
+
+    /** 先中断采集再保留明确错误；停止过程中的迟到失败不覆盖用户已结束的状态。 */
+    private fun failLocalSession(error: Throwable) {
+        failed = true
+        if (!stopping) setStatus("出错：${error.message ?: error.javaClass.simpleName}。点字幕再点 ✕ 结束后重试。")
+    }
+
+    /** 原生资源释放后即可结束会话线程；保留悬浮窗无需空转等待，用户仍能主动关闭服务。 */
+    private fun finishLocalSession(keepOverlay: Boolean) {
+        if (!keepOverlay && !stopping) main.post { if (!stopping) stopSelf() }
     }
 
     /** Blocking capture loop on the session thread; returns when stopping or on a read error. */
     @SuppressLint("MissingPermission") // checked in MainActivity
     private fun capture(p: MediaProjection, pl: Pipeline, vad: SileroProb, log: SessionLog?) {
+        if (stopping || overloaded || failed) return
         val cfg = AudioPlaybackCaptureConfiguration.Builder(p)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -478,7 +636,7 @@ class CaptionService : Service() {
             .build()
         try {
             check(rec.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord 初始化失败" }
-            if (stopping) return
+            if (stopping || overloaded || failed) return
             rec.startRecording()
             check(rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "无法开始录音（可能被其他 App 占用）" }
             setStatus("")
@@ -489,22 +647,18 @@ class CaptionService : Service() {
                 maxUtteranceMs = if (jevActive) JEV_MAX_UTTERANCE_MS else PLAIN_MAX_UTTERANCE_MS,
                 hintWaitMs = if (jevActive) JEV_WAIT_MS else 0, holdHint = pl::holdHint,
                 judged = pl::judged, plainMaxUtteranceMs = PLAIN_MAX_UTTERANCE_MS,
-                askSilenceMs = JEV_ASK_SILENCE_MS)
+                askSilenceMs = JEV_ASK_SILENCE_MS,
+                earlyCutAfterMs = EARLY_CUT_AFTER_MS, earlyCutSilenceMs = EARLY_CUT_SILENCE_MS)
             val frame = FloatArray(seg.frameSize)
             val ts = AudioTimestamp()
             var framesRead = 0L
             var statSq = 0.0; var statN = 0; var statMaxP = 0f
             // Non-blocking reads: stopping is only a flag, so onDestroy never touches AudioRecord and the
             // session thread is the only one that calls stop()/release().
-            while (!stopping && !overloaded) {
-                var off = 0
-                while (off < frame.size && !stopping) {
-                    val n = rec.read(frame, off, frame.size - off, AudioRecord.READ_NON_BLOCKING)
-                    check(n >= 0) { "读取音频失败 ($n)" }
-                    if (n == 0) Thread.sleep(10)
-                    off += n
-                }
-                if (stopping || overloaded) break
+            while (!stopping && !overloaded && !failed) {
+                if (!readCapturedFrame(frame, { stopping || overloaded || failed },
+                    { buffer, offset, count -> rec.read(buffer, offset, count, AudioRecord.READ_NON_BLOCKING) },
+                    { Thread.sleep(10) })) break
                 framesRead += frame.size
                 // Capture time of this frame's last sample, from the HAL timestamp when available,
                 // so time spent waiting in the AudioRecord buffer counts as latency.
@@ -525,14 +679,17 @@ class CaptionService : Service() {
                     statSq = 0.0; statN = 0; statMaxP = 0f
                 }
             }
-            seg.flush()
+            if (!stopping && !overloaded && !failed) seg.flush()
         } finally {
             runCatching { rec.stop() }
-            rec.release()
+            try { rec.release() } finally {
+                log?.write(mapOf("ev" to "capture_end", "stopped" to stopping, "overloaded" to overloaded, "failed" to failed))
+            }
         }
     }
 
     private fun onCaption(c: Caption, log: SessionLog?) {
+        if (stopping) return
         val t = c.timing
         // timings only: the text of what was said stays out of logcat (it goes to the session log when that is on)
         Log.i(TAG, "seg=${c.segmentId}.${c.revision}${if (c.isFinal) "F" else "d"} audio=${t.audioMs} wait=${t.segmentWaitMs} " +
@@ -541,7 +698,7 @@ class CaptionService : Service() {
             "final" to c.isFinal, "ja" to c.ja,
             "zh" to c.zh, "audio_ms" to t.audioMs, "wait_ms" to t.segmentWaitMs, "asr_q_ms" to t.asrQueueMs, "asr_ms" to t.asrMs,
             "mt_q_ms" to t.mtQueueMs, "mt_ms" to t.mtMs, "check_ms" to t.checkMs, "done_ms" to t.mtDoneMs, "hal" to !c.timeEstimated))
-        if (board.accept(c)) refresh()
+        if (board.accept(c) || (sessionMode != ListeningMode.LOCAL && board.updateOnlineFinal(c))) refresh()
     }
 
     /** 更新服务提示并同步到应用界面和悬浮字幕。 */
@@ -549,12 +706,17 @@ class CaptionService : Service() {
     /** A warning that stays for the whole session (the status line is cleared once capture starts). */
     @Volatile private var notice = ""
 
-    /** 将字幕状态发布到界面，悬浮窗不存在时仍保留错误提示。 */
-    private fun refresh() = main.post {
+    /** 合并同一帧内的绘制请求；字幕板仍逐条接收内容，不能以丢句来减少绘制次数。 */
+    private fun refresh() {
+        if (!stopping && renderQueued.compareAndSet(false, true)) main.postDelayed(renderFrame, 16)
+    }
+
+    /** 将最新字幕状态发布到界面，悬浮窗不存在时仍保留错误提示。 */
+    private fun render() {
         // 仅定稿模式先排除草稿再限句，隐藏的草稿不能挤占定稿额度。
         val shown = board.snapshot(includeDraft = !prefs.finalOnly)
         sessionState.value = SessionSnapshot(running, status, shown)
-        val v = overlay ?: return@post
+        val v = overlay ?: return
         val showJa = prefs.showJa
         val lines = shown.map { CaptionOverlayView.Line(it.zh, if (showJa) it.ja else null, it.isFinal, it.segmentId) }
         // status messages (loading, errors, overload) always show; timings only when enabled in settings
@@ -567,7 +729,7 @@ class CaptionService : Service() {
                 append("${if (isNotEmpty()) "  ·  " else ""}$it")
             }
             // an operational status (stopped, error) must never be pushed out of the capped area by timings
-            if (prefs.showStats && status.isEmpty()) shown.lastOrNull()?.let { c ->
+            if (prefs.showStats && sessionMode == ListeningMode.LOCAL && status.isEmpty()) shown.lastOrNull()?.let { c ->
                 val t = c.timing
                 if (isNotEmpty()) append("  ·  ")
                 append("识别 ${t.asrMs}ms · 翻译 ${t.mtMs}ms")
@@ -603,6 +765,7 @@ class CaptionService : Service() {
         if (lastUpdateMs.size > 64) lastUpdateMs.keys.removeAll { k -> shown.none { it.segmentId to it.revision == k } }
     }
 
+    /** 建立生产悬浮窗；拖动和点击复用几何，尺寸配置变化才重新测量。 */
     private fun showOverlay() {
         val wm = getSystemService(WindowManager::class.java)
         val dm = resources.displayMetrics
@@ -610,49 +773,55 @@ class CaptionService : Service() {
         v.setColors(CaptionOverlayView.palette(prefs.palette))
         v.setMaxCaptionLines(0)
         v.applyStyle(prefs.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), prefs.bgAlpha)
-        // usable area: current window bounds (follows rotation) minus status / navigation bars. Only its size is
-        // used: the overlay's x/y are already relative to that area (its parent frame excludes the bars).
-        fun area(): android.graphics.Rect {
+        /** 系统窗口区域只在建窗、配置或系统栏变化时读取，不能阻塞每次触控。 */
+        fun readArea(): android.graphics.Rect {
             if (android.os.Build.VERSION.SDK_INT < 30) return android.graphics.Rect(0, 0, dm.widthPixels, dm.heightPixels)
             return captionWindowArea(wm.currentWindowMetrics)
         }
+        var bounds = readArea()
+        /** 坐标和尺寸共用同一份区域快照，避免同一回调多次往返系统窗口服务。 */
+        fun area(): android.graphics.Rect = bounds
         var cardW = (area().width() * prefs.widthFrac).toInt()
         var toolbarShown = false
-        val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow())
+        val toolbarWindow = CaptionToolbarWindow(wm, v.takeToolbarForWindow()) { v.toolbarContentVersion }
         overlayToolbarWindow = toolbarWindow
-        var cardX = prefs.overlayX.takeIf { it >= 0 } ?: ((area().width() - cardW) / 2)
+        var cardX = prefs.overlayX
         var cardY = prefs.overlayY.takeIf { it >= 0 } ?: (area().height() * 2 / 3)
         var shownX = cardX; var shownY = cardY
+        var captionH = 0 // 缩放手势期间使用像素高度，并暂时退出自动宽度。
         val baselineAnchor = CaptionBaselineAnchor(prefs.overlayBaselineForArea(area().width(), area().height()))
         val host = CaptionWindowHost(this, wm, v, baselineAnchor) { x, y, width, height ->
-            shownX = x; shownY = y
-            val bounds = area()
-            toolbarWindow.update(toolbarShown, x, y, width, height, bounds.width(), bounds.height())
+            shownX = x; shownY = y; cardW = width
+            if (toolbarShown) toolbarWindow.update(true, x, y, width, height, bounds.width(), bounds.height())
         }
         overlayWindowHost = host
+        /** 尺寸或显示配置改变时才建立排版预算，字幕块高度复用一次卡片测量。 */
         fun layout() {
             val a = area(); val sw = a.width(); val sh = a.height()
-            cardW = cardW.coerceIn((sw * Prefs.MIN_WIDTH).toInt(), sw)
-            v.setCardWidth(cardW)
+            val autoWidth = prefs.widthFrac <= 0f && captionH == 0
+            cardW = if (autoWidth) v.contentWidthPx(sw) else cardW.coerceIn(1, sw)
+            v.setCardWidth(if (autoWidth) 0 else cardW)
             v.setWindowHeightLimit(sh)
             // captions ≤ 40 %, status ≤ 20 % of the usable height: card + toolbar always fit on screen
             v.setMaxContentHeight((a.height() * MAX_CAPTION_FRAC).toInt(), (a.height() * 0.2f).toInt())
             // measured now at this width (a resize just changed width or caption height; the last layout is stale)
             val cardH = v.measureCardHeight(cardW).coerceAtLeast(1)
-            val blockH = v.measureCaptionBlockHeight(cardW).coerceAtLeast(cardH)
+            val blockH = cardH + v.draftSlotHeightPx()
             // cardX / cardY stay what the user chose; only the shown position is clamped (a rotation or a taller card
             // must not overwrite the placement, so rotating back puts the card where it was)
+            if (cardX < 0) cardX = (sw - cardW) / 2
             shownX = cardX.coerceIn(0, sw - cardW)
             val baselineOffset = v.finalLineBaselinePx()
             shownY = baselineAnchor.position(cardY, baselineOffset, sh, blockH)
             v.placeCard(0, 0, false, 0)
-            host.place(cardX, cardY, cardW, sw, sh)
+            host.place(cardX, cardY, if (autoWidth) 0 else cardW, sw, sh)
         }
         // rotation / resize: the caption height may not change, so re-fit explicitly from the saved width fraction
         // caption height from the saved fraction (0 = fit the text); kept within the 40 % cap by the view
+        /** 配置变化时恢复用户选择的高度，普通位置拖动不改变排版预算。 */
         fun applyHeight() = v.setCaptionHeight((area().height() * prefs.heightFrac).toInt())
-        var captionH = 0 // px while a resize drag runs
         onDisplayChanged = {
+            bounds = readArea()
             baselineAnchor.reset()
             cardW = (area().width() * prefs.widthFrac).toInt()
             applyHeight(); layout()
@@ -662,7 +831,7 @@ class CaptionService : Service() {
         v.onMove = { dx, dy ->
             cardX = shownX + dx; cardY = shownY + dy
             baselineAnchor.reset()
-            layout()
+            host.moveTo(cardX, cardY)
         }
         // a corner drag moves that corner; the opposite edges stay where they are. The whole card rectangle is
         // derived from the fixed edges: the caption height is frozen at what is shown, and a width change that
@@ -690,15 +859,20 @@ class CaptionService : Service() {
         }
         v.onMoveEnd = {
             cardX = shownX; cardY = shownY
-            prefs.overlayX = cardX; prefs.overlayY = cardY; prefs.widthFrac = cardW.toFloat() / area().width()
+            prefs.overlayX = cardX; prefs.overlayY = cardY
             baselineAnchor.baseline?.let { prefs.saveOverlayBaseline(it, area().width(), area().height()) }
-            if (captionH > 0) { prefs.heightFrac = captionH.toFloat() / area().height(); captionH = 0 }
+            // 仅缩放保存尺寸，避免纯拖动因浮点宽度回算触发一次意外重测。
+            if (captionH > 0) {
+                prefs.widthFrac = cardW.toFloat() / area().width()
+                prefs.heightFrac = captionH.toFloat() / area().height()
+                captionH = 0
+            }
         }
         v.onStyleChanged = { prefs.setStyle(v.textSp, v.bgAlpha) }
         v.onToolbarShown = {
             toolbarShown = it
-            val bounds = area()
-            toolbarWindow.update(it, shownX, shownY, cardW, v.measureCaptionBlockHeight(cardW), bounds.width(), bounds.height())
+            // 已排版的字幕块就是触摸窗的真实矩形，点击不能同步重测字幕。
+            toolbarWindow.update(it, shownX, shownY, cardW, v.height, bounds.width(), bounds.height())
         }
         v.onStop = { stopSelf() }
         v.setFinalOnly(prefs.finalOnly)
@@ -717,7 +891,7 @@ class CaptionService : Service() {
                 }
                 "textSp", "bgAlpha" -> if (prefs.textSp != v.textSp || prefs.bgAlpha != v.bgAlpha)
                     v.applyStyle(prefs.textSp.coerceIn(CaptionOverlayView.MIN_SP, CaptionOverlayView.MAX_SP), prefs.bgAlpha)
-                "widthFrac" -> (area().width() * prefs.widthFrac).toInt().let { if (it != cardW) { cardW = it; layout() } }
+                "widthFrac" -> { cardW = (area().width() * prefs.widthFrac).toInt(); layout() }
                 "heightFrac" -> if (captionH == 0) { applyHeight(); layout() }
                 "showJa", "showStats" -> { v.setShown(prefs.showJa, prefs.showStats); refresh() }
                 "maxCaptionLines" -> { v.setMaxCaptionLines(0); layout() }
@@ -740,6 +914,22 @@ class CaptionService : Service() {
         refresh()
         layout()
         host.show()
+        toolbarWindow.prepare(bounds.width(), bounds.height())
+        // 文字或工具栏内容改变后在绘制前准备，点击热路径只复用缓存。
+        host.viewTreeObserver.addOnPreDrawListener {
+            toolbarWindow.prepare(bounds.width(), bounds.height())
+            if (toolbarShown) toolbarWindow.update(true, shownX, shownY, cardW, v.height, bounds.width(), bounds.height())
+            true
+        }
+        // 系统栏可见性变化不一定触发配置回调，单独刷新区域以保留沉浸模式贴底行为。
+        var appliedInsets: android.view.WindowInsets? = null
+        host.setOnApplyWindowInsetsListener { _, insets ->
+            if (appliedInsets != insets) {
+                appliedInsets = insets
+                if (readArea() != bounds) onDisplayChanged?.invoke()
+            }
+            insets
+        }
     }
 
     private var onDisplayChanged: (() -> Unit)? = null
@@ -757,18 +947,22 @@ class CaptionService : Service() {
     override fun onDestroy() {
         // Never block the main thread and never free native objects here: the session thread
         // notices `stopping`, finishes, waits for the pipeline workers and releases everything itself.
+        stoppedAtMs = System.currentTimeMillis()
         stopping = true
+        // 会话线程的 finally 持久化结束状态，主线程不能等待账本锁和磁盘事务。
+        main.removeCallbacks(renderFrame)
+        renderQueued.set(false)
         main.removeCallbacks(pauseOver)
         activeJudge = null // stops watching its service
         runCatching { unregisterReceiver(screenOn) }
         running = false
-        val finalStatus = sessionState.value.status.takeIf { it.startsWith("请先") || it.startsWith("出错") || it.startsWith("⚠") } ?: "同传已停止"
+        val finalStatus = stoppedCaptionStatus(status, sessionState.value.status)
         sessionState.value = sessionState.value.copy(running = false, status = finalStatus)
         pendingModelLease?.close()
         pendingModelLease = null
         // Only flags and request cancels (the session thread detaches the pipeline under the same lock before
         // freeing). The session thread notices `stopping` within ~10 ms (non-blocking reads).
-        synchronized(cancelLock) { probing?.cancel(); pipeline?.stop() }
+        synchronized(cancelLock) { probing?.cancel(); pipeline?.stop(); onlineSession?.stop(); cloudAsrSession?.stop() }
         projection?.stop()
         projection = null
         prefListener?.let { prefs.unlisten(it) }; prefListener = null
@@ -810,12 +1004,13 @@ class CaptionService : Service() {
         val contextN = if (prefs.contextOn) prefs.contextSentences else 0
         // the BYOK fields from one read, so the address of one save never goes out with the key of another
         val byok = prefs.byokForSession(fallback)
-        val provider = prefs.jevProvider
-        /** null: no Jev wanted, or its key is missing; "" for a provider without a key */
-        val jevKey = if (!wantJev) null else if (provider.needsKey) prefs.jevKey(provider) else ""
+        val jev = prefs.jevConnection()
+        val provider = jev.provider
+        /** 同一快照的连接与凭据一起生效，免密自定义服务仍可启用。 */
+        val jevKey = if (wantJev) jev.key else null
 
         fun log() = mapOf("scene" to scene.label, "source_lang" to (source?.code ?: "auto"), "target_lang" to target.stored,
-            "jev" to jevKey?.let { provider.name }, "jev_model" to jevKey?.let { provider.model },
+            "jev" to jevKey?.let { provider.name }, "jev_model" to jevKey?.let { jev.model }, "jev_url" to jevKey?.let { jev.url },
             "dedupe_join" to dedupe, "context_sentences" to contextN,
             "mt_model" to byok?.model, "mt_url" to byok?.url)
     }
@@ -830,7 +1025,7 @@ class CaptionService : Service() {
          * Settings a running session takes from the next sentence. BYOK changes as one: "保存" writes its fields and
          * then bumps byokSaved, so a half-saved address or model never becomes a setup. jevKey:* is matched apart.
          */
-        private val setupKeys = setOf("scene", "scenes", "contextOn", "contextSentences", "dedupeJoin", "jevProvider",
+        private val setupKeys = setOf("scene", "scenes", "contextOn", "contextSentences", "dedupeJoin", "jevProvider", "jevCustom",
             "sourceLang", "targetLang")
         const val EXTRA_CODE = "code"
 
@@ -845,6 +1040,9 @@ class CaptionService : Service() {
         private const val JEV_ASK_SILENCE_MS = 224
         private const val JEV_MAX_UTTERANCE_MS = 5_000
         private const val PLAIN_MAX_UTTERANCE_MS = 7_000
+        /** 上游v1.0.7验证的普通长句阈值；Jev启用时仍由自身句尾判断控制。 */
+        private const val EARLY_CUT_AFTER_MS = 3_000
+        private const val EARLY_CUT_SILENCE_MS = 192
         /** 短语累计400毫秒语音即可分句，避免应答语因旧阈值1200毫秒而额外等待。 */
         internal const val MIN_FINAL_MS = 400
         /** captions never take more than this part of the usable height, so the toolbar always fits */
@@ -867,3 +1065,8 @@ class CaptionService : Service() {
         }
     }
 }
+
+/** 停止前尚未绘制的错误也必须保留，不能被合帧取消替换成普通停止提示。 */
+internal fun stoppedCaptionStatus(latest: String, published: String): String =
+    listOf(latest, published).firstOrNull { it.startsWith("请先") || it.startsWith("出错") || it.startsWith("⚠") }
+        ?: "同传已停止"

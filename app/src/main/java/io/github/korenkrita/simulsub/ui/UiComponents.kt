@@ -17,6 +17,16 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.*
@@ -31,6 +41,31 @@ internal class PageScrollStates(val single: LazyListState, val first: LazyListSt
 
 /** 将路由保存的位置传给实际列表；独立预览未提供时由列表自行管理。 */
 internal val LocalPageScrollStates = staticCompositionLocalOf<PageScrollStates?> { null }
+
+/** 根路由持有的容器只保存滚动元数据；嵌套页面即使屏蔽表单注册表也能找到自己的位置。 */
+internal val LocalRouteScrollStateHolder = staticCompositionLocalOf<SaveableStateHolder?> { null }
+
+/** 每条稳定路由独立注册三种布局的位置，正文仍由原提供器隔离业务草稿。 */
+@Composable
+internal fun RouteScrollStateProvider(routeKey: String, content: @Composable () -> Unit) {
+    val holder = LocalRouteScrollStateHolder.current ?: rememberSaveableStateHolder()
+    holder.SaveableStateProvider(routeKey) { PageScrollStateProvider(content) }
+}
+
+/** 退出动画保留该路由最后的内存快照，避免新表单结构重测旧列表并覆盖已保存的位置。 */
+@Composable
+internal fun <T> rememberRouteSnapshot(active: Boolean, value: T): T {
+    var snapshot by remember { mutableStateOf(value) }
+    if (active) snapshot = value
+    return snapshot
+}
+
+/** 编辑前进和返回采用短距离水平移动及淡入淡出，页高保持稳定，滚动不参与动画。 */
+internal fun <T> AnimatedContentTransitionScope<T>.routeTransition(forward: Boolean): ContentTransform {
+    val direction = if (forward) 1 else -1
+    return (slideInHorizontally(tween(220)) { it / 12 * direction } + fadeIn(tween(180))) togetherWith
+        (slideOutHorizontally(tween(180)) { -it / 16 * direction } + fadeOut(tween(120)))
+}
 
 /** 仅把列表内置 Saver 注册到外层页面容器，禁止子控件把密钥或业务草稿纳入保存状态。 */
 @Composable
@@ -141,11 +176,12 @@ internal fun ToggleSetting(title: String, detail: String, checked: Boolean, enab
     }
 }
 
-/** 保留圆角选择入口，使用官方锚定下拉菜单；列表随可用空间滚动，选中后直接收起。 */
+/** 默认保留圆角选择入口，嵌入模式使用透明平整行；共用官方菜单、禁用与返回逻辑。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OptionPicker(title: String, selectedId: String, options: List<UiOption>, enabled: Boolean = true,
-                          optionContent: (@Composable (UiOption) -> Unit)? = null, onSelect: (String) -> Unit) {
+                          optionContent: (@Composable (UiOption) -> Unit)? = null,
+                          embedded: Boolean = false, supportingText: String? = null, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val available = enabled && options.isNotEmpty()
     LaunchedEffect(available) { if (!available) expanded = false }
@@ -158,7 +194,8 @@ internal fun OptionPicker(title: String, selectedId: String, options: List<UiOpt
         modifier = Modifier.fillMaxWidth(),
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium,
+            color = if (embedded) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = if (embedded) androidx.compose.ui.graphics.RectangleShape else MaterialTheme.shapes.medium,
             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = available)
                 .fillMaxWidth().heightIn(min = 72.dp)
                 .semantics {
@@ -170,6 +207,9 @@ internal fun OptionPicker(title: String, selectedId: String, options: List<UiOpt
                 modifier = Modifier.semantics { if (!available) disabled() },
                 headlineContent = { Text(selected?.label ?: selectedId.ifEmpty { "暂无选项" }, style = MaterialTheme.typography.bodyLarge) },
                 overlineContent = { Text(title, style = MaterialTheme.typography.labelMedium) },
+                supportingContent = if (!supportingText.isNullOrBlank()) {
+                    { Text(supportingText, style = MaterialTheme.typography.bodySmall) }
+                } else null,
                 trailingContent = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && available) },
                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             )

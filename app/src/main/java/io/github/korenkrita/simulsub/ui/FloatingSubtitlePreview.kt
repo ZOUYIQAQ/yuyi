@@ -183,6 +183,7 @@ internal class SubtitlePreviewStage(context: Context) : FrameLayout(context) {
         captionView.setShown(style.showOriginal, style.showStats)
         captionView.setColors(CaptionOverlayView.palette(style.paletteId))
         captionView.applyStyle(style.textSp, style.backgroundAlpha)
+        captionView.setCardWidth(if (style.widthFraction <= 0f) 0 else (watchingWidthPx * style.widthFraction.coerceAtMost(1f)).roundToInt().coerceAtLeast(1))
         captionView.setWindowHeightLimit(watchingHeightPx)
         captionView.setMaxCaptionLines(0)
         // 与 CaptionService.layout 共用正文比例，耗时区同样最多占可用高度的两成。
@@ -195,8 +196,9 @@ internal class SubtitlePreviewStage(context: Context) : FrameLayout(context) {
     /** 子视图按虚拟观看宽度真实折行，禁止用预览缩略图的宽度替代实际排版宽度。 */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(View.MeasureSpec.getSize(widthMeasureSpec), View.MeasureSpec.getSize(heightMeasureSpec))
-        val captionWidth = (watchingWidthPx * style.widthFraction.coerceIn(0.1f, 1f)).roundToInt().coerceAtLeast(1)
-        captionView.measure(View.MeasureSpec.makeMeasureSpec(captionWidth, View.MeasureSpec.EXACTLY),
+        val auto = style.widthFraction <= 0f
+        val captionWidth = if (auto) watchingWidthPx else (watchingWidthPx * style.widthFraction.coerceAtMost(1f)).roundToInt().coerceAtLeast(1)
+        captionView.measure(View.MeasureSpec.makeMeasureSpec(captionWidth, if (auto) View.MeasureSpec.AT_MOST else View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(watchingHeightPx, View.MeasureSpec.AT_MOST))
     }
 

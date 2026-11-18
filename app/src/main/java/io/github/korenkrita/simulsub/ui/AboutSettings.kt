@@ -45,7 +45,7 @@ internal fun AboutSettings(state: SettingsUiState, actions: SimulSubActions, wid
             Text("MIT License", style = MaterialTheme.typography.titleMedium)
             SupportingText("Copyright (c) 2026 KorenKrita")
             OutlinedButton(onClick = { showLicense = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("查看完整许可") }
-            SupportingText("语音模型与其他依赖遵循各自许可，模型许可可在模型库查看。")
+            SupportingText("语音模型与其他依赖遵循各自许可，模型许可可在听写服务中查看。")
         } }
     })
     if (showLicense) AlertDialog(onDismissRequest = { showLicense = false }, title = { Text("MIT License") },

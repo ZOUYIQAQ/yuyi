@@ -42,7 +42,7 @@ class CaptionLineLimitDeviceTest {
             CaptionOverlayView.Line("最新草稿", null, false),
         ), null)
         measure(view)
-        assertEquals("\n第三行\n… 最新草稿", caption(view).text.toString())
+        assertEquals("\n第三行\n最新草稿", caption(view).text.toString())
         assertFits(view, 3)
     }
 

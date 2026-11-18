@@ -161,6 +161,12 @@ class ApiProfileProbeDeviceTest {
         actions.onApiDraftChange(profileB)
         actions.onSaveApi()
         assertEquals("翻译配置已保存", controller.state.value.settings.api.message?.text)
+        // 连接表单不再写密钥；为B显式绑定命名凭据，验证切换时不借用A的平台默认项。
+        val platform = requireNotNull(PlatformCredentials.forUrl(profileB.url)).id
+        val credentialId = UUID.randomUUID().toString()
+        prefs.savePlatformCredential(platform, credentialId, "配置B测试凭据", profileB.key.orEmpty())
+        prefs.selectCredential(platform, "translation:${profileB.profileId}", credentialId)
+        actions.onDiscardApiDraft()
         assertSelected(profileB)
         actions.onSelectApiProfile(profileA.profileId)
         assertSelected(profileA)

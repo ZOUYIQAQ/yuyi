@@ -2,6 +2,8 @@
 
 本 Fork **仅支持 Android 手机和平板**，不再构建或发布 Windows、macOS 等其他平台客户端。桌面系统仅作为 Android 开发主机使用。
 
+每次功能改进或 Bug 修复都需更新版本，具体遵循[版本规则](VERSIONING.md)；面向使用者的变化记录在[更新记录](../CHANGELOG.md)。
+
 ## 当前构建范围
 
 `settings.gradle.kts` 只包含 `:core` 与 `:app`：前者为纯 Kotlin 分句、翻译和会话流水线，后者为 Android Compose UI、控制器、采集服务、模型库与浮窗。桌面客户端、macOS/Windows采集与打包工具、桌面测试和Windows工作流已移除。`gradlew.bat`保留供Windows开发机编译Android使用。
@@ -30,7 +32,12 @@ source tools/android-env.sh
 | 产物 | 路径 |
 |---|---|
 | Debug APK | `app/build/outputs/apk/debug/app-debug.apk` |
+| 优化预览 APK | `app/build/outputs/apk/preview/app-preview.apk` |
 | Release APK | `app/build/outputs/apk/release/app-release.apk` |
+
+日常模拟器操作使用 `bash tools/run-android-preview.sh`，也可在末尾指定现有模拟器编号。脚本只选择一台已启动的模拟器，不创建新设备；构建 Preview 后覆盖安装并打开首页。Preview 沿用开发签名，使用与 Release 一致的代码和资源压缩，关闭调试；Debug 保留给断点和设备测试。向用户分发的安装包继续使用独立正式签名的 Release。
+
+启动速度比较须使用相同优化条件。Debug 的冷启动和拖动性能不能代表正式包，也不应与旧版 Release 直接比较。测试后恢复 Preview，再交给用户实际操作。
 
 ## 模型与许可打包
 
@@ -51,8 +58,14 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk
 `.github/workflows/android.yml` 执行核心测试、Android 本地单元测试、lint、Debug 打包和 APK 模型排除检查。设备 UI 回归需另外准备 Android 设备；当前 ABI 为 arm64，不能将仅有 x86 原生库的模拟环境当作模型运行验收。
 
 ```bash
-./gradlew :app:connectedDebugAndroidTest
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb -s emulator-5580 install -r -t app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5580 install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s emulator-5580 shell am instrument -w io.github.zouyiqaq.yuyi.test/androidx.test.runner.AndroidJUnitRunner
+bash tools/run-android-preview.sh emulator-5580
 ```
+
+示例编号需替换为当前唯一测试模拟器。已有数据的开发设备采用覆盖安装和显式 instrumentation；`connectedAndroidTest` 会在收尾卸载测试目标，不用于保留模型、凭据及记录的日常预览设备。
 
 编译、单元测试、UI 示例和真实采集分别提供不同证据。真实浮窗、模型完整下载与启用、旋转/分屏、采集授权与拒绝路径、日志活动保护、付费翻译服务可用性需在相应设备和账户上验证。验收状态以 [ANDROID_QA.md](ANDROID_QA.md) 为准；本文命令不表示本轮已全部执行。
 

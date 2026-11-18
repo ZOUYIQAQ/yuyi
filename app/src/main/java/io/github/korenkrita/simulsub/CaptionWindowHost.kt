@@ -20,6 +20,8 @@ internal class CaptionWindowHost(
     private var requestedX = 0
     private var requestedY = 0
     private var cardWidth = 1
+    private var automaticWidth = false
+    private var centerX: Float? = null
     private var areaWidth = 1
     private var areaHeight = 1
     private var shown = false
@@ -54,16 +56,27 @@ internal class CaptionWindowHost(
 
     /** 仅显式移动、旋转或尺寸配置改变请求位置；逐帧高度变化仍在固定显示表面内完成。 */
     fun place(x: Int, y: Int, width: Int, screenWidth: Int, screenHeight: Int) {
+        if (width == 0 && (!automaticWidth || centerX == null || areaWidth != screenWidth)) {
+            centerX = x + caption.contentWidthPx(screenWidth) / 2f
+        }
+        automaticWidth = width == 0
         requestedX = x; requestedY = y; cardWidth = width
         areaWidth = screenWidth; areaHeight = screenHeight
         val child = caption.layoutParams
-        if (child.width != width) { child.width = width; caption.layoutParams = child }
+        val childWidth = if (automaticWidth) LayoutParams.WRAP_CONTENT else width
+        if (child.width != childWidth) { child.width = childWidth; caption.layoutParams = child }
         if (displayParams.width != screenWidth || displayParams.height != screenHeight) {
             displayParams.width = screenWidth; displayParams.height = screenHeight
             if (shown) wm.updateViewLayout(this, displayParams)
         }
         alignCaption()
-        requestLayout()
+    }
+
+    /** 纯拖动复用本帧已排版尺寸，只平移字幕与触摸矩形，不请求测量或布局。 */
+    fun moveTo(x: Int, y: Int) {
+        requestedX = x; requestedY = y
+        if (automaticWidth) centerX = x + caption.width / 2f
+        alignCaption()
     }
 
     /** 第一次附着时同时创建显示和触摸窗口，触摸窗透明因此尺寸变化不影响画面。 */
@@ -87,15 +100,18 @@ internal class CaptionWindowHost(
     /** 同一固定表面内的位移和文字使用同一张缓冲区，触摸窗口只跟随卡片矩形。 */
     private fun alignCaption() {
         if (!caption.isLaidOut) return
+        val width = if (automaticWidth) caption.width.coerceIn(1, areaWidth) else cardWidth
         val baseline = caption.finalLineBaselineInWindowPx()
-        val x = requestedX.coerceIn(0, (areaWidth - cardWidth).coerceAtLeast(0))
+        val wantedX = if (automaticWidth) kotlin.math.round((centerX ?: (areaWidth / 2f)) - width / 2f).toInt() else requestedX
+        val x = wantedX.coerceIn(0, (areaWidth - width).coerceAtLeast(0))
         val y = anchor.position(requestedY, baseline, areaHeight, caption.height)
         caption.offsetLeftAndRight(x - caption.left)
         caption.offsetTopAndBottom(y - caption.top)
-        val changed = touchParams.x != x || touchParams.y != y || touchParams.width != cardWidth || touchParams.height != caption.height
-        touchParams.x = x; touchParams.y = y; touchParams.width = cardWidth; touchParams.height = caption.height.coerceAtLeast(1)
+        val height = caption.height.coerceAtLeast(1)
+        val changed = touchParams.x != x || touchParams.y != y || touchParams.width != width || touchParams.height != height
+        touchParams.x = x; touchParams.y = y; touchParams.width = width; touchParams.height = height
         if (shown && changed) wm.updateViewLayout(touch, touchParams)
-        if (changed) onPlaced(x, y, cardWidth, caption.height)
+        if (changed) onPlaced(x, y, width, caption.height)
     }
 
     /** 停止服务时移除两个窗口，动画和位图由字幕视图的释放流程结束。 */

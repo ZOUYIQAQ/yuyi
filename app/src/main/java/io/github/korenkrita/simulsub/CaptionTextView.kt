@@ -18,6 +18,8 @@ import kotlin.math.roundToInt
 internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean = false) : AppCompatTextView(ctx) {
     var captionLineLimit = 0
     var animationHeightLimit = Int.MAX_VALUE
+    /** 自动宽度使用稳定的目标排版，首次换行后的高度可以继续平滑衔接。 */
+    var animateWidthReflow = false
     private var fullCaption: CharSequence = ""
     private var shortened = false
     private var spanStyleDirty = false
@@ -54,6 +56,9 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
 
     /** 换色或混合字号变化后重建富文本，不把相同文字误当新句重播。 */
     fun refreshSpanStyle() { spanStyleDirty = true }
+
+    /** 用完整富文本计算自然行宽，避免上次裁剪或换行结果反过来限制自动宽度。 */
+    internal fun desiredCaptionWidthPx(): Float = android.text.Layout.getDesiredWidth(fullCaption, paint)
 
     /** 手指直接缩放时跟随手势，不让补间动画追赶手指；下一次普通配置变化仍可过渡。 */
     fun followResizeGesture() { finishTransitions(); snapHeightChange = true }
@@ -101,7 +106,9 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
         val target = measuredHeight.coerceAtMost(animationHeightLimit)
         val widthChanged = measuredWidthKey != measuredWidth
         measuredWidthKey = measuredWidth
-        if (widthChanged) finishTransitions()
+        if (widthChanged) {
+            if (animateWidthReflow) stopScroll() else finishTransitions()
+        }
         if (naturalHeight != target) {
             // 预算收紧必须立即服从新上限，不能让收缩动画暂时越界。
             val bound = minOf(animationHeightLimit, if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED)
@@ -110,7 +117,7 @@ internal class CaptionTextView(ctx: Context, private val animateChanges: Boolean
             val from = (lastDrawnHeight.takeIf { it > 0 } ?: height).toFloat().coerceAtMost(bound.toFloat())
             naturalHeight = target
             removeCallbacks(heightStep); heightStepPosted = false
-            if (!snapHeightChange && !widthChanged && canAnimate() && from > 0 && abs(from - target) > 1f) {
+            if (!snapHeightChange && (!widthChanged || animateWidthReflow) && canAnimate() && from > 0 && abs(from - target) > 1f) {
                 movingHeight = from
                 heightFrom = from
                 heightElapsed = 0L
